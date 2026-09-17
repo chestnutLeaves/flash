@@ -1,18 +1,28 @@
 {% extends "base.html" %}
-{% block title %}{{ deck_name }} — Flash{% endblock %}
+{% block title %}{{ deck_name }} - Flash{% endblock %}
 {% block content %}
 <div class="page-head">
   <h1>{{ deck_name }}</h1>
   <div class="row">
     <a class="fl-btn fl-btn-secondary" href="/decks/{{ deck_id }}/settings">Settings</a>
+    {% if ai_enabled %}<a class="fl-btn fl-btn-secondary" href="/decks/{{ deck_id }}/generate">Generate cards</a>{% endif %}
+    {% if archived %}
+    <form method="post" action="/decks/{{ deck_id }}/unarchive" style="display:inline">
+      <input type="hidden" name="back" value="deck">
+      <button class="fl-btn fl-btn-primary" type="submit">Unarchive</button>
+    </form>
+    {% else %}
     <a class="fl-btn fl-btn-primary" href="/study?deck={{ deck_id }}">Study this deck</a>
+    {% endif %}
   </div>
 </div>
+{% if archived %}
+<p class="fl-hint" role="status">This deck is archived. Its cards stay, but they are not in the study queue.</p>
+{% endif %}
 
 <div id="deck-main" style="display:contents">
 <section>
 <h2>Add a card</h2>
-{{ usage_banner|safe }}
 {% if let Some(msg) = editor_error %}
 <div class="fl-card fl-card-pad" style="border-color:var(--bad)" role="alert">
   <strong>{{ msg }}</strong>

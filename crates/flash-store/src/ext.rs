@@ -1,7 +1,7 @@
 //! The seam a downstream crate extends the store through. The open
 //! store owns accounts, decks, cards, reviews, media and tokens; an
-//! extension owns its own tables on the same connection — created by its
-//! own migrations — and is consulted where a core deletion would
+//! extension owns its own tables on the same connection (created by its
+//! own migrations) and is consulted where a core deletion would
 //! otherwise leave its rows dangling.
 //!
 //! Hooks receive the core's own transaction (a `&Transaction` derefs to

@@ -1,0 +1,49 @@
+{# The voice study preferences: one set of fields shared by the sheet on
+   the study page and the card on the settings page. The form around it
+   posts to /settings/voice with voice_id, speech_rate, voice_apply and
+   sound_cues. The voices are a list grouped by language: a radio picks
+   one, the button on its row plays its sample (speech.js), which the
+   warm-up has usually made already. #}
+<div class="voice-prefs">
+  {% if voice_on %}
+  <fieldset class="voice-fieldset">
+    <legend class="fl-label">Voice</legend>
+    <div class="voice-list" id="voice-pick">
+      {% for g in voice_groups %}
+      <div class="voice-group" role="group" aria-label="{{ g.label }}">
+        <div class="voice-group-label" aria-hidden="true">{{ g.label }}</div>
+        {% for v in g.voices %}
+        <div class="voice-row">
+          <label class="fl-check voice-row-pick"><input type="radio" name="voice_id" value="{{ v.id }}"{% if voice_id == v.id %} checked{% endif %}> {{ v.name }}</label>
+          <button type="button" class="fl-btn fl-btn-sm fl-btn-ghost fl-iconbtn voice-listen"
+                  data-voice-sample="{{ v.id }}" data-voice-name="{{ v.name }}"{% if let Some(url) = v.sample_url %} data-sample-url="{{ url }}"{% endif %}
+                  aria-label="Play {{ v.name }}" title="Play {{ v.name }}">
+            <svg class="voice-icon-play" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 4.7 6.6 8.3H4a1 1 0 0 0-1 1v5.4a1 1 0 0 0 1 1h2.6L11 19.3a.7.7 0 0 0 1-.6V5.3a.7.7 0 0 0-1-.6Z"/><path d="M16 9a4 4 0 0 1 0 6"/><path d="M19 6a8 8 0 0 1 0 12"/></svg>
+            <svg class="voice-icon-stop" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+          </button>
+        </div>
+        {% endfor %}
+      </div>
+      {% endfor %}
+    </div>
+  </fieldset>
+  {% else %}
+  <input type="hidden" name="voice_id" value="{{ voice_id }}">
+  <p class="fl-hint">Natural voice isn't set up on this server, so your cards are read by the browser's own voice.</p>
+  {% endif %}
+  <fieldset class="voice-fieldset">
+    <legend class="fl-label">Speed</legend>
+    <div class="voice-radios">
+      <label class="fl-check"><input type="radio" name="speech_rate" value="0.8"{% if speech_rate == "0.8" %} checked{% endif %}> Slower</label>
+      <label class="fl-check"><input type="radio" name="speech_rate" value="1.0"{% if speech_rate == "1.0" %} checked{% endif %}> Normal</label>
+      <label class="fl-check"><input type="radio" name="speech_rate" value="1.15"{% if speech_rate == "1.15" %} checked{% endif %}> Quicker</label>
+      <label class="fl-check"><input type="radio" name="speech_rate" value="1.3"{% if speech_rate == "1.3" %} checked{% endif %}> Fast</label>
+    </div>
+  </fieldset>
+  <fieldset class="voice-fieldset">
+    <legend class="fl-label">Grades</legend>
+    <label class="fl-check"><input type="radio" name="voice_apply" value="auto"{% if voice_apply == "auto" %} checked{% endif %}> Apply after a moment; say undo to change one</label>
+    <label class="fl-check"><input type="radio" name="voice_apply" value="confirm"{% if voice_apply == "confirm" %} checked{% endif %}> Ask before applying</label>
+  </fieldset>
+  <label class="fl-check"><input type="checkbox" name="sound_cues" value="1"{% if voice_cues %} checked{% endif %}> Sound cues: a tick when the microphone opens, a tone when a grade lands</label>
+</div>

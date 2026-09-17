@@ -1,7 +1,7 @@
 //! Account security shared by the settings page and the API: passwords,
 //! login-method removal, and self-serve deletion. The rules live here
-//! once — never leave an account without a way in, never delete the
-//! last admin — and the extension's `AccountHooks` add theirs.
+//! once (never leave an account without a way in, never delete the
+//! last admin) and the extension's `AccountHooks` add theirs.
 
 use flash_core::UserId;
 use flash_store::{DeletedAccount, Store};

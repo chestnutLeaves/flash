@@ -1,6 +1,6 @@
 //! Password reset by mailed link. `request` is uniform (unknown address,
 //! cooldown, and cap all look like a sent mail); `confirm` burns the
-//! token, stores the new hash, and signs out every session and device —
+//! token, stores the new hash, and signs out every session and device:
 //! the reset's premise is a possibly-stolen password.
 
 use flash_core::UserId;
@@ -9,6 +9,7 @@ use flash_store::Store;
 use crate::auth::{hash_token, new_token};
 use crate::email::{self, Mailer};
 use crate::service::Result;
+use crate::state::Site;
 
 pub const TTL_MS: i64 = 60 * 60 * 1000;
 pub const COOLDOWN_MS: i64 = 60_000;
@@ -20,7 +21,7 @@ const DAY_MS: i64 = 24 * 60 * 60 * 1000;
 pub fn request(
     store: &Store,
     mailer: &dyn Mailer,
-    base_url: &str,
+    site: &Site,
     email: &str,
     now_ms: i64,
 ) -> Result<()> {
@@ -37,7 +38,7 @@ pub fn request(
     }
     let token = new_token();
     store.create_password_reset(&hash_token(&token), login.user, now_ms, now_ms + TTL_MS)?;
-    let mut mail = email::password_reset_email(base_url, &token);
+    let mut mail = email::password_reset_email(site, &token);
     mail.to = email;
     if let Err(e) = mailer.send(&mail) {
         tracing::error!("reset mail: {e}");

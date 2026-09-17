@@ -1,7 +1,8 @@
-//! Export: the user's cards (and their media) as an Anki .apkg, or CSV. Never gated — "your
-//! cards are always yours" is a product invariant. Scheduling state is
-//! deliberately not exported, symmetric with the import philosophy (FSRS
-//! state has no faithful SM-2 mapping); cards arrive elsewhere as new.
+//! Export: the user's cards (and their media) as an Anki .apkg, or CSV.
+//! Never gated: "your cards are always yours" is a product invariant.
+//! Scheduling state is deliberately not exported, symmetric with the
+//! import philosophy (FSRS state has no faithful SM-2 mapping); cards
+//! arrive elsewhere as new.
 
 mod apkg;
 
@@ -73,7 +74,7 @@ pub struct ExportCard {
 }
 
 /// RFC 4180 CSV with the same header the importer accepts, so a Flash
-/// export re-imports into Flash losslessly. Tags are `;`-joined — exactly
+/// export re-imports into Flash losslessly. Tags are `;`-joined, exactly
 /// what the importer splits on.
 pub fn build_csv(cards: &[ExportCard]) -> String {
     let mut out = String::from("front,back,deck,tags\r\n");

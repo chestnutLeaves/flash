@@ -99,7 +99,7 @@ pub fn csv(permit: &HeavyPermit, services: &Services) -> Result<String> {
     ))
 }
 
-/// `flash-2026-08-31.apkg` — the attachment name both surfaces use.
+/// `flash-2026-08-31.apkg`, the attachment name both surfaces use.
 pub fn file_name(ext: &str, now_ms: i64) -> String {
     format!("flash-{}.{ext}", crate::web::format_day(now_ms))
 }

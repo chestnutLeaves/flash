@@ -142,8 +142,14 @@ async fn a_full_session_start_reveal_grade_end() {
     assert!(session["scope_deck"].is_null());
     let first = session["card"]["card_id"].as_i64().unwrap();
     assert_eq!(session["card"]["front"], "Warfarin antidote?");
+    assert_eq!(session["card"]["spoken_front"], "Warfarin antidote?");
     assert_eq!(session["card"]["wants_typing"], false);
     assert_eq!(session["card"]["preload_media"], json!([]));
+    // The answer's words ride with the front, for the recognizer.
+    assert_eq!(
+        session["card"]["answer_hints"],
+        json!(["Vitamin K", "Vitamin", "K"])
+    );
 
     let reveal = send(
         &t.app,
@@ -156,6 +162,8 @@ async fn a_full_session_start_reveal_grade_end() {
     .await;
     assert_eq!(reveal.status, StatusCode::OK);
     assert_eq!(reveal.json()["back"], "Vitamin K");
+    assert_eq!(reveal.json()["spoken_front"], "Warfarin antidote?");
+    assert_eq!(reveal.json()["spoken_back"], "Vitamin K");
     assert!(reveal.json()["typed_diff"].is_null());
 
     let after_first = grade(&t, &bearer, sid, first, 3).await;
@@ -247,6 +255,50 @@ async fn typed_cards_ask_for_input_and_diff_the_answer() {
         spans.iter().any(|s| s["ok"] == false),
         "the extra r is wrong"
     );
+}
+
+/// A cloze card is spoken with its gap hidden on the front and the word
+/// said on the back, whatever the rich sides render.
+#[tokio::test]
+async fn cloze_cards_speak_blank_then_the_word() {
+    let t = AppBuilder::new("api-spoken-cloze").build();
+    let user = member(&t.store, "FlashTester", "flashtester@example.com");
+    let bearer = api_bearer(&t.store, user);
+    let deck = t.services.create_deck(user, "Cloze", "", now_ms()).unwrap();
+    t.services
+        .create_note(
+            user,
+            deck,
+            &NoteInput {
+                note_type: NoteType::Cloze,
+                front_html: "{{c1::Paris}} is the capital of France".into(),
+                back_html: String::new(),
+                tags: vec![],
+            },
+            now_ms(),
+        )
+        .unwrap();
+
+    let session = start(&t, &bearer, json!({ "type": "deck", "id": deck.0 })).await;
+    let sid = session["session_id"].as_i64().unwrap();
+    let card = session["card"]["card_id"].as_i64().unwrap();
+    assert_eq!(
+        session["card"]["spoken_front"],
+        "blank is the capital of France"
+    );
+
+    let reveal = send(
+        &t.app,
+        json_post(
+            &format!("/api/v1/study/sessions/{sid}/reveal"),
+            Some(&bearer),
+            &json!({ "card_id": card }),
+        ),
+    )
+    .await
+    .json();
+    assert_eq!(reveal["spoken_front"], "blank is the capital of France");
+    assert_eq!(reveal["spoken_back"], "Paris is the capital of France");
 }
 
 #[tokio::test]

@@ -12,6 +12,21 @@ const DAY_MS: i64 = 24 * 60 * 60 * 1000;
 /// away at most.
 const UNLINKED_MEDIA_GRACE_MS: i64 = 60 * 60 * 1000;
 
+/// How long a generation source and its cached reading stay after they
+/// were last used (a preflight, a job, a study turn that read the
+/// source). The cards made from them are never touched.
+const AI_SOURCE_TTL_MS: i64 = 30 * DAY_MS;
+
+/// The shorter leash on a source nobody ever generated from: a file
+/// dropped into the composer and then left there.
+const AI_UNATTACHED_SOURCE_TTL_MS: i64 = 2 * DAY_MS;
+
+/// How long a card's voice clip stays reachable for an account after
+/// it was last played; the clip itself goes once nobody's card names
+/// it, after a day's grace for one made a moment ago.
+const VOICE_REF_TTL_MS: i64 = 90 * DAY_MS;
+const VOICE_CLIP_GRACE_MS: i64 = DAY_MS;
+
 /// Daily purges: tokens revoked or expired long ago, spent password
 /// resets, export packages a crash left on disk. Cheap, idempotent, safe
 /// to run any time.
@@ -44,6 +59,48 @@ pub fn housekeeping(
             }
         }
         Err(e) => tracing::warn!("sweep media: {e}"),
+    }
+    // Generation sources nobody has used for a month (two days for one
+    // no job ever read), with their cached readings; the blobs go when
+    // no other row names the hash.
+    match store.sweep_stale_ai_sources(
+        now_ms - AI_SOURCE_TTL_MS,
+        now_ms - AI_UNATTACHED_SOURCE_TTL_MS,
+    ) {
+        Ok(orphans) => {
+            let mut removed = 0u32;
+            for sha in &orphans {
+                match media.delete(sha) {
+                    Ok(()) => removed += 1,
+                    Err(e) => tracing::warn!(sha = ?sha, "stale source blob: {e}"),
+                }
+            }
+            if !orphans.is_empty() {
+                tracing::info!(
+                    sources = orphans.len(),
+                    removed,
+                    "removed stale generation sources"
+                );
+            }
+        }
+        Err(e) => tracing::warn!("sweep generation sources: {e}"),
+    }
+    // Voice clips of cards nobody has studied in months, or that are
+    // gone: the refs go, then the recordings nobody's card names.
+    match store.sweep_voice_clips(now_ms - VOICE_REF_TTL_MS, now_ms - VOICE_CLIP_GRACE_MS) {
+        Ok(orphans) => {
+            let mut removed = 0u32;
+            for key in &orphans {
+                match media.delete(key) {
+                    Ok(()) => removed += 1,
+                    Err(e) => tracing::warn!(key = ?key, "orphan voice clip: {e}"),
+                }
+            }
+            if removed > 0 {
+                tracing::info!("removed {removed} orphaned voice clips");
+            }
+        }
+        Err(e) => tracing::warn!("sweep voice clips: {e}"),
     }
     match store.purge_expired_tokens(now_ms) {
         Ok(n) if n > 0 => tracing::info!("purged {n} expired tokens"),

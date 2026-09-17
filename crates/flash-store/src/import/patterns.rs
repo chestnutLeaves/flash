@@ -1,6 +1,6 @@
-//! Recognizes the dominant card-template JavaScript idiom — a clickable
+//! Recognizes the dominant card-template JavaScript idiom, a clickable
 //! element that reveals a hidden target (AnKing-style hint buttons,
-//! tap-to-reveal sections) — and translates it to a native `<details>`
+//! tap-to-reveal sections), and translates it to a native `<details>`
 //! collapsible at import. Foreign JavaScript is NEVER executed: anything
 //! this module doesn't confidently recognize is left for the sanitizer to
 //! strip exactly as before. Non-goals: timers, typing games, per-card

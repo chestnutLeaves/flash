@@ -1,4 +1,4 @@
-# flash flashcard server — hardened systemd unit. /opt/flash/current is a
+# flash flashcard server, hardened systemd unit. /opt/flash/current is a
 # symlink to the binary in use (the open flash-server, or a hosted build);
 # repointing it is also the rollback.
 # Install: sudo cp flash.service /etc/systemd/system/ && sudo systemctl daemon-reload
@@ -28,7 +28,7 @@ LimitNOFILE=65536
 
 # Sandbox: the process can write /var/lib/flash; ingress stays loopback-only
 # (a reverse proxy or tunnel in front terminates TLS). Outbound HTTPS is
-# allowed for the mail API and an optional media bucket — their anycast IPs
+# allowed for the mail API and an optional media bucket, whose anycast IPs
 # aren't publishable, so IPAddressDeny=any is not an option (raises
 # systemd-analyze security exposure a little). AF_INET6 is allowed because
 # public DNS answers are dual-stack.

@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Generating cards - Flash{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Generating cards</h1>
+</div>
+{# What the model is reading, listed once outside the block the poll
+   replaces, so the list stays put while the progress moves. #}
+{% if !sources.is_empty() || sources_expired > 0 %}
+<ul class="gen-job-sources">
+  {% for source in sources %}
+  <li><strong class="gen-name">{{ source.name }}</strong> <span class="small muted">{{ source.line }}</span></li>
+  {% endfor %}
+  {% if sources_expired > 0 %}
+  <li class="small muted">{{ sources_expired }} expired</li>
+  {% endif %}
+</ul>
+{% endif %}
+{% include "ai_job_progress.html" %}
+{% endblock %}

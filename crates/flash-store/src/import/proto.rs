@@ -1,7 +1,7 @@
 //! Minimal protobuf wire-format reader shared by the .apkg parsers
 //! (media manifests, notetype configs, deck configs). Handles exactly what
 //! untrusted Anki blobs need: varints, length-delimited fields, fixed
-//! sizes, packed floats — degrading to "field absent" on malformed input,
+//! sizes, packed floats. Degrades to "field absent" on malformed input,
 //! never panicking.
 
 pub(crate) fn read_varint(bytes: &[u8], i: &mut usize) -> Option<u64> {

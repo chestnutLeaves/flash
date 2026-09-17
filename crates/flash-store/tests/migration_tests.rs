@@ -53,12 +53,15 @@ fn names(store: &Store, extension: &str) -> Vec<String> {
 fn fresh_database_records_the_core_steps_and_reopens_quietly() {
     let path = temp_db("fresh");
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 15);
+    assert_eq!(store.schema_version().unwrap(), 22);
     let core = names(&store, "core");
-    assert_eq!(core.len(), 15);
+    assert_eq!(core.len(), 22);
     assert_eq!(core[0], "v001_initial");
     assert_eq!(core[13], "v014_reserved");
     assert_eq!(core[14], "v015_review_client");
+    assert_eq!(core[15], "v016_ai_generation");
+    assert_eq!(core[16], "v017_ai_source_sets");
+    assert_eq!(core[17], "v018_ai_turns");
     assert!(!core.iter().any(|n| n == MONOLITH_MARKER));
     let before = store.applied_migrations().unwrap();
     drop(store);
@@ -112,7 +115,24 @@ fn a_schema_14_database_without_a_registry_is_adopted() {
         let conn = Connection::open(&path).unwrap();
         conn.execute_batch(
             "DROP TABLE schema_migrations;
+             DROP INDEX idx_review_import_once;
+             DROP TABLE voice_clip_refs;
+             DROP TABLE voice_clips;
+             ALTER TABLE user_settings DROP COLUMN voice_id;
+             ALTER TABLE user_settings DROP COLUMN speech_rate;
+             ALTER TABLE user_settings DROP COLUMN voice_apply;
+             ALTER TABLE user_settings DROP COLUMN sound_cues;
              ALTER TABLE review_log DROP COLUMN client;
+             ALTER TABLE notes DROP COLUMN ai_job_id;
+             ALTER TABLE decks DROP COLUMN archived_at;
+             DROP TABLE ai_calls;
+             DROP TABLE ai_drafts;
+             DROP TABLE ai_turns;
+             DROP TABLE ai_job_sources;
+             DROP TABLE ai_jobs;
+             DROP TABLE ai_figures;
+             DROP TABLE ai_extractions;
+             DROP TABLE ai_sources;
              PRAGMA user_version = 14;",
         )
         .unwrap();
@@ -136,13 +156,35 @@ fn a_schema_14_database_without_a_registry_is_adopted() {
     let store = Store::open_with(&path, vec![Arc::new(Baseline)]).unwrap();
     let core = names(&store, "core");
     assert!(core.iter().any(|n| n == MONOLITH_MARKER));
-    // The marker, the 14 adopted steps, and v015 applied — once.
-    assert_eq!(core.len(), 16);
+    // The marker, the 14 adopted steps, and v015 through v022, each
+    // applied once.
+    assert_eq!(core.len(), 23);
     assert_eq!(
         core.iter().filter(|n| *n == "v015_review_client").count(),
         1
     );
-    assert_eq!(store.schema_version().unwrap(), 15);
+    assert_eq!(
+        core.iter().filter(|n| *n == "v016_ai_generation").count(),
+        1
+    );
+    assert_eq!(
+        core.iter().filter(|n| *n == "v017_ai_source_sets").count(),
+        1
+    );
+    assert_eq!(core.iter().filter(|n| *n == "v018_ai_turns").count(), 1);
+    assert_eq!(core.iter().filter(|n| *n == "v019_voice").count(), 1);
+    assert_eq!(
+        core.iter().filter(|n| *n == "v020_import_history").count(),
+        1
+    );
+    assert_eq!(
+        core.iter()
+            .filter(|n| *n == "v021_ai_ledger_detail")
+            .count(),
+        1
+    );
+    assert_eq!(core.iter().filter(|n| *n == "v022_deck_archive").count(), 1);
+    assert_eq!(store.schema_version().unwrap(), 22);
     assert_eq!(names(&store, "ext"), ["0001_baseline"]);
     // Adopted, not executed.
     let exists: bool = store

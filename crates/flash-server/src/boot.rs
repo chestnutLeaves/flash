@@ -76,7 +76,7 @@ pub fn bootstrap_invite(services: &Services, base_url: &str) {
                 tracing::error!("bootstrap invite: {e}");
                 return;
             }
-            tracing::info!("no users yet — enroll the first admin within 24h at:");
+            tracing::info!("no users yet. Enroll the first admin within 24h at:");
             tracing::info!("{base_url}/enroll/{token}");
         }
         Ok(_) => {}

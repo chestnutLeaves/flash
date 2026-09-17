@@ -1,5 +1,5 @@
 //! The mobile app's JSON API under /api/v1. Handlers are thin: one
-//! extractor, one Services call inside spawn_blocking, one DTO — the
+//! extractor, one Services call inside spawn_blocking, one DTO, the
 //! same discipline as the web and MCP surfaces, so no business rule
 //! lives here. Mounted outside the same-origin guard (native clients
 //! send no Origin) and authenticated with bearer tokens minted by the
@@ -7,6 +7,7 @@
 //! table the MCP authorization server uses.
 
 pub mod admin;
+pub mod ai;
 pub mod auth;
 pub mod cards;
 pub mod decks;
@@ -17,6 +18,7 @@ pub mod settings;
 pub mod stats;
 pub mod study;
 pub mod today;
+pub mod voice;
 
 use axum::extract::{FromRequest, FromRequestParts, Request, State};
 use axum::http::request::Parts;
@@ -40,8 +42,9 @@ use crate::state::AppState;
 pub const MOBILE_CLIENT_ID: &str = "flash-mobile";
 pub const MOBILE_SCOPE: &str = "mobile";
 /// The oldest app build the API still speaks to; bump on a breaking
-/// change and the app asks for an update.
-pub const MIN_APP_VERSION: &str = "1.0.0";
+/// change and the app asks for an update. 1.0.1: the plan's usage meter
+/// became the generation quota (`/usage` is gone).
+pub const MIN_APP_VERSION: &str = "1.0.1";
 
 pub fn router(state: &AppState) -> Router<AppState> {
     let api_limit = axum::middleware::from_fn_with_state(state.clone(), middleware::api_rate_limit);
@@ -52,11 +55,13 @@ pub fn router(state: &AppState) -> Router<AppState> {
         .merge(decks::router())
         .merge(cards::router())
         .merge(study::router())
+        .merge(voice::router())
         .merge(settings::router())
         .merge(stats::router())
         .merge(import::router())
         .merge(admin::router())
         .merge(media::router())
+        .merge(ai::router())
         .merge(state.ext.api_routes(state))
         .fallback(not_found)
         .layer(api_limit)
@@ -115,7 +120,7 @@ impl ApiError {
         Self::new(StatusCode::UNAUTHORIZED, "unauthorized", "sign in required")
     }
 
-    /// Wrong email/password or a failed identity exchange — deliberately
+    /// Wrong email/password or a failed identity exchange, deliberately
     /// uniform so nothing leaks about which part was wrong.
     pub fn invalid_credentials() -> Self {
         Self::new(
@@ -219,11 +224,24 @@ impl From<ServiceError> for ApiError {
                     .with("current", current)
                     .with("cap", cap)
             }
+            // The policy's own code rides as the envelope's, so the app
+            // branches on `pro_required` or `monthly_limit` directly.
+            ServiceError::AiDenied { code, message } => {
+                ApiError::new(StatusCode::FORBIDDEN, code, message)
+            }
             other => {
                 tracing::error!("api service error: {other:?}");
                 ApiError::internal()
             }
         }
+    }
+}
+
+/// No model on this server: the same answer every AI route gives, in
+/// the envelope, so the app hides the affordance.
+impl From<crate::state::AiOff> for ApiError {
+    fn from(_: crate::state::AiOff) -> Self {
+        ApiError::not_available("card generation")
     }
 }
 
@@ -289,6 +307,16 @@ where
     async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
         match Json::<T>::from_request(req, state).await {
             Ok(Json(value)) => Ok(ApiJson(value)),
+            // A body past its route's limit is not malformed, it is too
+            // big, and the app says so differently (it did not send
+            // anything wrong, it sent too much).
+            Err(rejection) if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE => {
+                Err(ApiError::new(
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    "payload_too_large",
+                    rejection.body_text(),
+                ))
+            }
             Err(rejection) => Err(ApiError::invalid(rejection.body_text())),
         }
     }
@@ -416,8 +444,40 @@ struct Meta {
     version: &'static str,
     min_app_version: &'static str,
     features: crate::ext::JsonFields,
+    /// What card generation accepts here; null when it is off.
+    ai: Option<AiMeta>,
+    /// The natural voice this server reads with; null when it has none.
+    voice: Option<VoiceMeta>,
     #[serde(flatten)]
     extra: crate::ext::JsonFields,
+}
+
+/// What the app needs to play the server's clips: the voice an account
+/// starts with, how long a side may be to get one, the envelope's rate,
+/// and the phrase keys it may ask for.
+#[derive(Serialize)]
+struct VoiceMeta {
+    default_voice: String,
+    max_chars: usize,
+    envelope_hz: u32,
+    phrases: Vec<&'static str>,
+}
+
+/// The inputs this server reads and the caps a source must fit, so the
+/// app can hide a kind and say why a file is too big before uploading.
+/// `caps` is the whole picture (types, limits, sentences); the flat
+/// fields beside it are what older apps read.
+#[derive(Serialize)]
+struct AiMeta {
+    inputs: Vec<&'static str>,
+    max_words: u32,
+    max_images: u32,
+    max_pages: u32,
+    max_media_minutes: u32,
+    caps: crate::ai::caps::Caps,
+    /// What to send the grader for a spoken answer: `transcript` (the
+    /// device's own recognition) or `audio` (the recording itself).
+    voice_input: &'static str,
 }
 
 async fn meta(State(state): State<AppState>) -> Json<Meta> {
@@ -430,14 +490,33 @@ async fn meta(State(state): State<AppState>) -> Json<Meta> {
         ("billing", false),
         ("push", false),
         ("community", false),
+        ("ai", state.ai.is_some()),
+        ("voice", state.tts.is_some()),
     ] {
         features.insert(key.to_string(), on.into());
     }
     features.extend(state.ext.features(&state));
+    let ai = state.ai.as_ref().map(|ai| AiMeta {
+        inputs: ai.inputs.iter().map(|i| i.as_str()).collect(),
+        max_words: crate::bounds::AI_MAX_WORDS,
+        max_images: crate::bounds::AI_MAX_IMAGES,
+        max_pages: crate::bounds::AI_MAX_PAGES,
+        max_media_minutes: crate::bounds::AI_MAX_MEDIA_SECONDS / 60,
+        caps: crate::ai::caps::Caps::of(ai, &[]),
+        voice_input: ai.voice_input.as_str(),
+    });
+    let voice = state.tts.as_ref().map(|tts| VoiceMeta {
+        default_voice: tts.default_voice.clone(),
+        max_chars: crate::tts::MAX_CLIP_CHARS,
+        envelope_hz: crate::tts::ENVELOPE_HZ,
+        phrases: crate::tts::phrase_keys(),
+    });
     Json(Meta {
         version: env!("CARGO_PKG_VERSION"),
         min_app_version: MIN_APP_VERSION,
         features,
+        ai,
+        voice,
         extra: state.ext.meta_extra(&state),
     })
 }

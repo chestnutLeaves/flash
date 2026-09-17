@@ -13,11 +13,14 @@ async fn meta_is_public_and_reports_features() {
     let reply = send(&t.app, json_get("/api/v1/meta", None)).await;
     assert_eq!(reply.status, StatusCode::OK);
     let json = reply.json();
-    assert_eq!(json["min_app_version"], "1.0.0");
+    assert_eq!(json["min_app_version"], "1.0.1");
     assert_eq!(json["features"]["signup"], false);
     assert_eq!(json["features"]["google"], false);
     assert_eq!(json["features"]["billing"], false);
     assert_eq!(json["features"]["passkeys"], true);
+    // No model key in the test config: generation is off, and the key
+    // is still there for an app to read.
+    assert_eq!(json["features"]["ai"], false);
 }
 
 #[tokio::test]

@@ -9,9 +9,12 @@
 use std::io::Write;
 
 use flash_store::import::{
-    parse_apkg, parse_csv, MAX_MESSAGES, MAX_PACKAGE_ENTRIES, MAX_RAW_FIELD_BYTES, MAX_ROWS,
+    parse_apkg, parse_csv, review_history, MAX_HISTORY_ROWS, MAX_MESSAGES, MAX_PACKAGE_ENTRIES,
+    MAX_RAW_FIELD_BYTES, MAX_ROWS,
 };
 use flash_store::{MAX_TAGS_PER_CARD, MAX_TAG_LEN};
+
+const NOW: i64 = 1_700_000_000_000;
 
 const BASIC_MODEL: &str = r#"{"1":{"id":1,"name":"Basic","type":0,"flds":[{"name":"Front","ord":0},{"name":"Back","ord":1}],"tmpls":[{"name":"Card 1","ord":0,"qfmt":"{{Front}}","afmt":"{{FrontSide}}<hr id=answer>{{Back}}"}],"css":""}}"#;
 
@@ -19,6 +22,18 @@ const BASIC_MODEL: &str = r#"{"1":{"id":1,"name":"Basic","type":0,"flds":[{"name
 /// for the exporter: `models` is the col.models JSON, each note is
 /// (id, tags, flds), each card is (id, nid, ord).
 fn apkg(models: &str, notes: &[(i64, String, String)], cards: &[(i64, i64, i64)]) -> Vec<u8> {
+    apkg_with_history(models, notes, cards, 0)
+}
+
+/// Same, plus a review log of `history` Good review-phase entries on the
+/// first card, one per millisecond ending at NOW, generated in SQL so a
+/// million of them cost the test a second rather than a minute.
+fn apkg_with_history(
+    models: &str,
+    notes: &[(i64, String, String)],
+    cards: &[(i64, i64, i64)],
+    history: usize,
+) -> Vec<u8> {
     let dir = std::env::temp_dir().join(format!(
         "flash-caps-{}-{}",
         std::process::id(),
@@ -41,9 +56,21 @@ fn apkg(models: &str, notes: &[(i64, String, String)], cards: &[(i64, i64, i64)]
              CREATE TABLE cards (id INTEGER PRIMARY KEY, nid INTEGER, did INTEGER, ord INTEGER,
                                  mod INTEGER, usn INTEGER, type INTEGER, queue INTEGER, due INTEGER,
                                  ivl INTEGER, factor INTEGER, reps INTEGER, lapses INTEGER,
-                                 left INTEGER, odue INTEGER, odid INTEGER, flags INTEGER, data TEXT);",
+                                 left INTEGER, odue INTEGER, odid INTEGER, flags INTEGER, data TEXT);
+             CREATE TABLE revlog (id INTEGER PRIMARY KEY, cid INTEGER, usn INTEGER, ease INTEGER,
+                                  ivl INTEGER, lastIvl INTEGER, factor INTEGER, time INTEGER,
+                                  type INTEGER);",
         )
         .unwrap();
+        if history > 0 {
+            conn.execute(
+                "INSERT INTO revlog
+                 WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?1)
+                 SELECT ?2 - ?1 + i, ?3, -1, 3, 1, 1, 2500, 1000, 1 FROM n",
+                rusqlite::params![history as i64, NOW, cards[0].0],
+            )
+            .unwrap();
+        }
         let decks = r#"{"1":{"id":1,"name":"Default"}}"#;
         conn.execute(
             "INSERT INTO col VALUES (1,0,0,0,11,0,0,0,'{}',?1,?2,'{}','')",
@@ -93,6 +120,31 @@ fn a_package_past_the_row_cap_is_refused_before_its_rows_exist() {
     let started = std::time::Instant::now();
     let err = parse_apkg(&pkg).unwrap_err();
     assert!(err.public().contains("more than 50000 cards"), "{err}");
+    assert!(started.elapsed().as_secs() < 30, "{:?}", started.elapsed());
+}
+
+/// A review log past the history cap keeps its newest entries: the
+/// preview says so, and the commit read drops exactly the oldest.
+#[test]
+fn a_revlog_past_the_history_cap_keeps_the_newest() {
+    let notes = vec![(1, String::new(), "front\u{1f}back".to_string())];
+    let pkg = apkg_with_history(BASIC_MODEL, &notes, &[(1, 1, 0)], MAX_HISTORY_ROWS + 5);
+    let started = std::time::Instant::now();
+    let parsed = parse_apkg(&pkg).unwrap();
+    assert_eq!(parsed.progress_reviews, MAX_HISTORY_ROWS);
+    assert!(
+        parsed
+            .messages
+            .iter()
+            .any(|m| m.contains("review history is capped")),
+        "{:?}",
+        parsed.messages
+    );
+    let history = review_history(&pkg).unwrap();
+    assert_eq!(history.len(), MAX_HISTORY_ROWS);
+    // Entries run one per millisecond up to NOW; the oldest five are gone.
+    assert_eq!(history[0].at_ms, NOW - MAX_HISTORY_ROWS as i64 + 1);
+    assert_eq!(history.last().unwrap().at_ms, NOW);
     assert!(started.elapsed().as_secs() < 30, "{:?}", started.elapsed());
 }
 

@@ -28,6 +28,7 @@ pub fn router() -> Router<AppState> {
         .route("/settings/profile", axum::routing::patch(profile))
         .route("/settings/grading", put(grading))
         .route("/settings/theme", put(theme))
+        .route("/settings/voice", put(voice))
         .route("/settings/limits", put(limits))
         .route("/settings/study", put(study))
         .route(
@@ -111,6 +112,67 @@ async fn theme(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Any subset of the voice settings: the app saves one control at a
+/// time.
+#[derive(Deserialize)]
+struct VoiceBody {
+    #[serde(default, deserialize_with = "crate::bounds::opt_keyword")]
+    voice_id: Option<String>,
+    speech_rate: Option<f32>,
+    #[serde(default, deserialize_with = "crate::bounds::opt_keyword")]
+    voice_apply: Option<String>,
+    sound_cues: Option<bool>,
+}
+
+async fn voice(
+    State(state): State<AppState>,
+    user: BearerUser,
+    ApiJson(body): ApiJson<VoiceBody>,
+) -> Result<StatusCode, ApiError> {
+    let patch = voice_patch(
+        body.voice_id,
+        body.speech_rate,
+        body.voice_apply,
+        body.sound_cues,
+    )
+    .map_err(ApiError::invalid)?;
+    let tts = state.tts.clone();
+    call(state.services.clone(), move |s| {
+        s.set_voice_settings(user.id, &patch)?;
+        // A new voice starts with a cold cache: the card on screen and
+        // the next few are queued in it now, ahead of anyone asking.
+        if let (Some(tts), Some(_)) = (tts, &patch.voice_id) {
+            crate::tts::prefetch_queue_head(&tts, &s, user.id, now_ms());
+        }
+        Ok::<_, ServiceError>(())
+    })
+    .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// The patch a voice settings form or body describes; the enums are
+/// parsed here so a bad word is a 400 with the sentence.
+pub(crate) fn voice_patch(
+    voice_id: Option<String>,
+    speech_rate: Option<f32>,
+    voice_apply: Option<String>,
+    sound_cues: Option<bool>,
+) -> Result<flash_core::VoiceSettingsPatch, String> {
+    let apply = match voice_apply {
+        None => None,
+        Some(a) => Some(
+            flash_core::VoiceApply::from_str(&a)
+                .ok_or_else(|| format!("unknown grading setting {a:?}"))?,
+        ),
+    };
+    Ok(flash_core::VoiceSettingsPatch {
+        voice_id,
+        speech_rate,
+        apply,
+        sound_cues,
+    })
+}
+
 #[derive(Deserialize)]
 struct LimitsBody {
     new_per_day: u32,
@@ -171,7 +233,7 @@ fn wrong_password() -> ApiError {
 pub fn last_method() -> ApiError {
     ApiError::conflict(
         "last_login_method",
-        "that's the only way to sign in — add another method first",
+        "that's the only way to sign in, so add another method first",
     )
 }
 
@@ -375,7 +437,7 @@ async fn delete_account(
         Err(refusal) => Err(match refusal {
             DeleteRefusal::LastAdmin => ApiError::conflict(
                 "last_admin",
-                "you're the only admin — make someone else admin first",
+                "you're the only admin, so make someone else admin first",
             ),
             DeleteRefusal::Ext { code, message } => ApiError::conflict(code, message),
         }),

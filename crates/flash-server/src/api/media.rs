@@ -1,5 +1,5 @@
 //! Media over the API: the same logic the web uses, reachable with a
-//! bearer and only a bearer — `/api/v1` sits outside the same-origin
+//! bearer and only a bearer. `/api/v1` sits outside the same-origin
 //! guard, so nothing under it may accept a session cookie. Uploads answer
 //! the editor's `{id, kind}` JSON; blobs stream with Range support so
 //! audio and video seek.

@@ -26,7 +26,6 @@ pub fn concrete_path(route: &Route) -> String {
             "token" => "sometoken",
             "slug" => "someslug",
             "file" => "x.png",
-            "variant" => "monthly",
             "decision" => "approve",
             _ => "1",
         });

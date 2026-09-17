@@ -1,0 +1,13 @@
+{# The voice settings sheet on the study page: the same fields as the
+   settings card, saved on every change. Opened by the gear in the dock
+   (static/voice.js), which pauses the session while the sheet is up. #}
+<dialog id="voice-settings-dialog" class="fl-dialog voice-dialog" aria-labelledby="voice-settings-title">
+  <form id="voice-settings-form" method="post" action="/settings/voice" hx-post="/settings/voice" hx-trigger="change delay:250ms, submit" hx-swap="none">
+    <div class="voice-dialog-head">
+      <h2 id="voice-settings-title">Voice</h2>
+      <button type="button" class="fl-btn fl-btn-sm fl-iconbtn fl-btn-ghost" aria-label="Close" data-voice-close><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+    </div>
+    {% include "voice_prefs_fields.html" %}
+    <p id="voice-settings-note" class="fl-hint voice-settings-note" role="status" aria-live="polite" hidden></p>
+  </form>
+</dialog>

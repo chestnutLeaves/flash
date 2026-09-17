@@ -246,7 +246,7 @@ impl Store {
     }
 
     /// All passkeys (for login ceremonies the whole table is the candidate
-    /// set — single-digit users by design).
+    /// set, single-digit users by design).
     pub fn all_passkeys(&self) -> Result<Vec<StoredPasskey>> {
         let conn = self.conn();
         let mut stmt = conn.prepare(

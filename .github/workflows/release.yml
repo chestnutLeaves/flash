@@ -2,6 +2,10 @@
 # to the GitHub release, and the image pushed to GHCR. Runs only in the
 # public repository (the private monorepo carries this file so the
 # mirror stays a plain copy, but never releases from it).
+#
+# A tag is a claim about the tree: `vX.Y.Z` must be the workspace version
+# in Cargo.toml, and CHANGELOG.md must have a section for it, which
+# becomes the release notes. A tag that says otherwise ships nothing.
 name: release
 
 on:
@@ -44,6 +48,25 @@ jobs:
           toolchain: stable
           targets: x86_64-unknown-linux-musl
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: The tag names the workspace version, and the changelog has its notes
+        run: |
+          set -euo pipefail
+          version=${GITHUB_REF_NAME#v}
+          manifest=$(sed -nE 's/^version = "([^"]+)"$/\1/p' Cargo.toml | head -1)
+          if [ "$version" != "$manifest" ]; then
+            echo "::error::tag $GITHUB_REF_NAME but Cargo.toml says $manifest"
+            exit 1
+          fi
+          mkdir -p dist
+          awk -v v="$version" '
+            index($0, "## [" v "]") == 1 { on = 1; next }
+            on && /^## \[/ { exit }
+            on { print }
+          ' CHANGELOG.md > dist/notes.md
+          if ! grep -q '[^[:space:]]' dist/notes.md; then
+            echo "::error::CHANGELOG.md has no section for $version"
+            exit 1
+          fi
       - name: musl toolchain
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends musl-tools
       - name: Build
@@ -52,14 +75,15 @@ jobs:
         run: |
           mkdir -p dist
           tar -C target/x86_64-unknown-linux-musl/release -czf \
-            dist/flash-server-${GITHUB_REF_NAME}-x86_64-unknown-linux-musl.tar.gz flash-server
-          (cd dist && sha256sum *.tar.gz > SHA256SUMS)
+            "dist/flash-server-${GITHUB_REF_NAME}-x86_64-unknown-linux-musl.tar.gz" flash-server
+          (cd dist && sha256sum -- *.tar.gz > SHA256SUMS)
       - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
+          name: Flash ${{ github.ref_name }}
+          body_path: dist/notes.md
           files: |
             dist/*.tar.gz
             dist/SHA256SUMS
-          generate_release_notes: true
 
   image:
     if: ${{ !github.event.repository.private }}

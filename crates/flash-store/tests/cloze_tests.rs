@@ -1,12 +1,13 @@
 //! Full-fidelity import integration: cloze expansion, template rendering,
 //! reversed/suspended cards, rich-HTML sanitization, LaTeX conversion,
 //! deck-options extraction, and the cloze round trip back out through the
-//! exporter — all through the real parse_apkg path.
+//! exporter, all through the real parse_apkg path.
 
 use std::io::{Read, Write};
 
+use flash_core::Rating;
 use flash_store::export::{build_apkg, ExportCard};
-use flash_store::import::parse_apkg;
+use flash_store::import::{parse_apkg, review_history};
 
 const NOW: i64 = 1_700_000_000_000;
 
@@ -98,8 +99,22 @@ fn cloze_note_expands_per_index_with_own_history() {
         add_review(NOW - 5 * day, CARD_ID, 3), // index-1 history
         add_review(NOW - 2 * day, 900_001, 2), // index-2 history
     );
-    let parsed = parse_apkg(&rebuild(base_package(), &sql)).unwrap();
+    let package = rebuild(base_package(), &sql);
+    let parsed = parse_apkg(&package).unwrap();
     assert_eq!(parsed.rows.len(), 2);
+    assert_eq!(parsed.progress_reviews, 2);
+    // Each cloze card is its own Anki card, so each has its own history.
+    let history = review_history(&package).unwrap();
+    assert_eq!(
+        history
+            .iter()
+            .map(|h| (h.at_ms, h.anki_card_id, h.rating))
+            .collect::<Vec<_>>(),
+        vec![
+            (NOW - 5 * day, CARD_ID, Rating::Good),
+            (NOW - 2 * day, 900_001, Rating::Hard),
+        ]
+    );
 
     let c1 = &parsed.rows[0];
     assert_eq!(c1.front, "[...] is the capital of Canada");
@@ -110,7 +125,7 @@ fn cloze_note_expands_per_index_with_own_history() {
         .as_deref()
         .unwrap()
         .starts_with("{{c1::Ottawa}}"));
-    assert_eq!(c1.reviews, vec![(NOW - 5 * day, 3)]);
+    assert_eq!(c1.anki_card_id, Some(CARD_ID));
     assert!(!c1.suspended);
     let html = c1.front_html.as_deref().unwrap();
     assert!(
@@ -128,7 +143,7 @@ fn cloze_note_expands_per_index_with_own_history() {
     assert_eq!(c2.front, "Ottawa is the capital of [country]");
     assert_eq!(c2.back, "Canada\nIt is on the Ottawa River");
     assert_eq!(c2.cloze_index, Some(2));
-    assert_eq!(c2.reviews, vec![(NOW - 2 * day, 2)]);
+    assert_eq!(c2.anki_card_id, Some(900_001));
     assert!(c2.suspended, "index-2 card was suspended in Anki");
 
     assert!(parsed

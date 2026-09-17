@@ -73,11 +73,62 @@ pub const URI: usize = 2_048;
 /// A filename a client attaches to an upload, before the store shortens
 /// it to what it keeps.
 pub const FILENAME: usize = 255;
+/// What speech recognition heard: a spoken answer or a question about
+/// the card. A minute of talking is a few hundred bytes.
+pub const TRANSCRIPT: usize = 2_000;
+/// A spoken answer as a recording, decoded: half a minute of 16 kHz
+/// 16-bit WAV is under a megabyte, and a compressed clip a tenth of that.
+pub const VOICE_AUDIO_BYTES: usize = 1_500_000;
+/// The same recording as the base64 text a request carries.
+pub const VOICE_AUDIO_B64: usize = 2_048_000;
+/// A whole spoken-answer request: the base64 above plus form encoding,
+/// which spells three of the alphabet's characters as three bytes each.
+pub const VOICE_BODY_BYTES: usize = 3 * 1024 * 1024;
+/// A recording's type as the client names it (`audio/webm;codecs=opus`).
+pub const AUDIO_MIME: usize = 64;
+/// The recording types the grader is handed, matched after the type is
+/// lower-cased and its parameters dropped. Independent of the source
+/// kinds card generation takes: an eight-second answer is not a lecture.
+pub const VOICE_AUDIO_MIMES: &[&str] = &[
+    "audio/wav",
+    "audio/webm",
+    "audio/mp4",
+    "audio/ogg",
+    "audio/mpeg",
+    "audio/x-m4a",
+];
+/// The free-text steering a person gives card generation.
+pub const AI_INSTRUCTION: usize = 2_000;
+/// Text pasted as a generation source. Larger than the word cap needs
+/// (a long passage in a wide script), so the cap's own sentence is what
+/// the person reads rather than a byte count.
+pub const AI_TEXT_SOURCE: usize = 200_000;
+/// A video link handed to generation.
+pub const YOUTUBE_URL: usize = 512;
+
+/// What one generation may read. Past these the preflight says no
+/// before any model is called: a book is not a study session, and a
+/// two-hour recording costs more than a month of a free account.
+pub const AI_MAX_WORDS: u32 = 15_000;
+pub const AI_MAX_IMAGES: u32 = 20;
+pub const AI_MAX_PAGES: u32 = 150;
+pub const AI_MAX_MEDIA_SECONDS: u32 = 90 * 60;
+/// What a whole set of sources may weigh together: held in memory
+/// while the model reads it.
+pub const AI_MAX_SET_BYTES: u64 = 200 * 1024 * 1024;
+/// Sources in one generation, and sources a person may have waiting in
+/// the composer before generating from any of them.
+pub const AI_SOURCES_PER_JOB: usize = 40;
+pub const AI_UNATTACHED_SOURCES_PER_USER: u32 = 40;
+/// A comma-joined list of source ids, as a web form carries one.
+pub const SOURCE_ID_LIST: usize = AI_SOURCES_PER_JOB * 21;
 
 /// Per-request count limits.
 pub const TAGS_PER_CARD: usize = flash_store::MAX_TAGS_PER_CARD;
 pub const CARDS_PER_CALL: usize = 500;
 pub const REDIRECT_URIS_PER_CLIENT: usize = 10;
+/// Draft ids named in one keep call; a job holds sixty drafts at most.
+pub const DRAFT_IDS_PER_CALL: usize = 500;
 
 /// Per-account limits on stored state, enforced where the row is
 /// created: decks in the store's `create_deck`, so an import naming a
@@ -170,6 +221,10 @@ text_hook!(reason, "reason", REASON);
 text_hook!(description, "description", DECK_DESCRIPTION);
 text_hook!(captcha_token, "captcha token", CAPTCHA_TOKEN);
 text_hook!(next_path, "next", NEXT_PATH);
+text_hook!(transcript, "transcript", TRANSCRIPT);
+text_hook!(instruction, "instruction", AI_INSTRUCTION);
+text_hook!(audio_mime, "audio type", AUDIO_MIME);
+text_hook!(audio_b64, "audio", VOICE_AUDIO_B64);
 
 opt_text_hook!(opt_deck_name, "deck name", DECK_NAME);
 opt_text_hook!(opt_deck_description, "deck description", DECK_DESCRIPTION);
@@ -192,6 +247,35 @@ opt_text_hook!(opt_signed_token, "token", SIGNED_TOKEN);
 opt_text_hook!(opt_opaque, "token", OPAQUE);
 opt_text_hook!(opt_display_name, "name", DISPLAY_NAME);
 opt_text_hook!(opt_email, "email address", EMAIL);
+opt_text_hook!(opt_instruction, "instruction", AI_INSTRUCTION);
+opt_text_hook!(opt_field_html, "field", FIELD_HTML);
+opt_text_hook!(text_source, "text", AI_TEXT_SOURCE);
+opt_text_hook!(youtube_url, "youtube_url", YOUTUBE_URL);
+opt_text_hook!(opt_transcript, "transcript", TRANSCRIPT);
+opt_text_hook!(opt_audio_mime, "audio type", AUDIO_MIME);
+opt_text_hook!(opt_audio_b64, "audio", VOICE_AUDIO_B64);
+
+/// The source ids a generation reads, at most `AI_SOURCES_PER_JOB`.
+pub fn source_ids<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<i64>, D::Error> {
+    let v = Vec::<i64>::deserialize(d)?;
+    if v.len() > AI_SOURCES_PER_JOB {
+        return Err(too_many("sources", AI_SOURCES_PER_JOB));
+    }
+    Ok(v)
+}
+
+/// The same list as a web form sends it: one comma-joined field.
+pub fn source_id_list<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    text(d, "source_ids", SOURCE_ID_LIST)
+}
+
+/// The draft ids a keep call names: absent means every open draft.
+pub fn opt_draft_ids<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Vec<i64>>, D::Error> {
+    match Option::<Vec<i64>>::deserialize(d)? {
+        Some(v) if v.len() > DRAFT_IDS_PER_CALL => Err(too_many("draft ids", DRAFT_IDS_PER_CALL)),
+        other => Ok(other),
+    }
+}
 
 /// A card's tags: at most `TAGS_PER_CARD`, each at most `TAG` bytes.
 pub fn tags<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {

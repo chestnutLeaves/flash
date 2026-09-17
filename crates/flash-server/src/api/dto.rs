@@ -5,6 +5,7 @@
 use serde::Serialize;
 
 use crate::service::{self, AccountOverview};
+pub use crate::tts::serve::ClipDescriptor;
 
 /// A deck with today's budgeted counts, as the lists show it.
 #[derive(Debug, Serialize)]
@@ -14,6 +15,9 @@ pub struct Deck {
     pub description: String,
     pub due: u32,
     pub new: u32,
+    /// Epoch ms when the deck was archived; null while it is active. An
+    /// archived deck's counts are zero.
+    pub archived_at: Option<i64>,
 }
 
 impl From<flash_store::DeckSummary> for Deck {
@@ -24,6 +28,7 @@ impl From<flash_store::DeckSummary> for Deck {
             description: d.description,
             due: d.due_count,
             new: d.new_count,
+            archived_at: d.archived_at,
         }
     }
 }
@@ -131,22 +136,43 @@ pub struct StudyCard {
     pub card_id: i64,
     pub front: String,
     pub front_html: Option<String>,
+    /// The front as read aloud: a cloze deletion is "blank", a picture
+    /// its alt text.
+    pub spoken_front: String,
+    /// The front in the account's natural voice, when this server has
+    /// one and the clip is made; null reads with the device's voice.
+    pub audio_front: Option<ClipDescriptor>,
     pub wants_typing: bool,
     /// Image ids on this card's hidden back: fetch before the reveal.
     pub preload_media: Vec<i64>,
     /// Image ids on the next card, both sides: fetch at low priority.
     pub prefetch_media: Vec<i64>,
+    /// Words to prime a speech recognizer with while this front is
+    /// shown: the answer's words and their spelled-out forms ("Au" and
+    /// "A U"). Present before the reveal by design; never show them.
+    pub answer_hints: Vec<String>,
+}
+
+/// Where the API serves a card side's clip.
+pub fn card_audio_url(card_id: i64, side: &str) -> String {
+    format!("/api/v1/study/cards/{card_id}/audio?side={side}")
 }
 
 impl From<service::StudyCard> for StudyCard {
     fn from(c: service::StudyCard) -> Self {
         StudyCard {
             card_id: c.card_id.0,
+            audio_front: c
+                .audio_front
+                .as_ref()
+                .map(|clip| ClipDescriptor::new(card_audio_url(c.card_id.0, "front"), clip)),
             front: c.front,
             front_html: c.front_html,
+            spoken_front: c.spoken_front,
             wants_typing: c.wants_typing,
             preload_media: c.preload_media,
             prefetch_media: c.prefetch_media,
+            answer_hints: c.answer_hints,
         }
     }
 }
@@ -170,6 +196,13 @@ impl From<service::DiffSpan> for DiffSpan {
 pub struct Reveal {
     pub back: String,
     pub back_html: Option<String>,
+    /// Both sides as read aloud: the front with its deletion hidden,
+    /// the back with the word.
+    pub spoken_front: String,
+    pub spoken_back: String,
+    /// Both sides in the account's natural voice, when the clips exist.
+    pub audio_front: Option<ClipDescriptor>,
+    pub audio_back: Option<ClipDescriptor>,
     /// Present when the card asked for typing and something was typed.
     pub typed_diff: Option<Vec<DiffSpan>>,
 }
@@ -177,8 +210,18 @@ pub struct Reveal {
 impl From<service::Reveal> for Reveal {
     fn from(r: service::Reveal) -> Self {
         Reveal {
+            audio_front: r
+                .audio_front
+                .as_ref()
+                .map(|clip| ClipDescriptor::new(card_audio_url(r.card_id.0, "front"), clip)),
+            audio_back: r
+                .audio_back
+                .as_ref()
+                .map(|clip| ClipDescriptor::new(card_audio_url(r.card_id.0, "back"), clip)),
             back: r.back,
             back_html: r.back_html,
+            spoken_front: r.spoken_front,
+            spoken_back: r.spoken_back,
             typed_diff: r
                 .typed_diff
                 .map(|spans| spans.into_iter().map(Into::into).collect()),
@@ -278,8 +321,29 @@ pub struct Settings {
     pub desired_retention: f32,
     pub login_methods: SettingsLoginMethods,
     pub card_count: u32,
+    pub voice: VoiceSettingsDto,
     #[serde(flatten)]
     pub extra: crate::ext::JsonFields,
+}
+
+/// How the account studies by voice, on every surface.
+#[derive(Debug, Serialize)]
+pub struct VoiceSettingsDto {
+    pub voice_id: String,
+    pub speech_rate: f32,
+    pub voice_apply: &'static str,
+    pub sound_cues: bool,
+}
+
+impl From<flash_core::VoiceSettings> for VoiceSettingsDto {
+    fn from(v: flash_core::VoiceSettings) -> Self {
+        VoiceSettingsDto {
+            voice_id: v.voice_id,
+            speech_rate: v.speech_rate,
+            voice_apply: v.apply.as_str(),
+            sound_cues: v.sound_cues,
+        }
+    }
 }
 
 impl Settings {
@@ -309,6 +373,7 @@ impl Settings {
             day_cutoff_hour: o.day_cutoff_hour,
             desired_retention: o.desired_retention,
             card_count: o.card_count,
+            voice: o.voice.into(),
             extra: crate::ext::JsonFields::new(),
         }
     }

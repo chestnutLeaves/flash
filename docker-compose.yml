@@ -26,5 +26,28 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  # Natural voice for study, optional:
+  #   docker compose --profile voice up -d
+  # and FLASH_TTS_URL=http://flash-tts:8880 in .env. The image is built
+  # from tools/flash-tts (about 2 GB, weights included) and reaches
+  # nothing but flash; it has no published port and no network access
+  # once built. The single-clip-at-a-time engine wants one core and
+  # under 1 GB of memory; the limits below leave room for the encoder.
+  flash-tts:
+    profiles: ["voice"]
+    build: tools/flash-tts
+    restart: unless-stopped
+    expose:
+      - "8880"
+    mem_limit: 2g
+    cpus: "1.0"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
 volumes:
   flash-data:

@@ -8,8 +8,9 @@
 //! exactly as Anki shows them); notes without readable templates fall
 //! back to first-two-fields. Every card carries a dual representation:
 //! plain text (MCP/voice/CSV) and sanitized semantic HTML (web UI),
-//! plus its own review history, suspension state, and — for cloze — the
-//! original markup for round-trip export.
+//! plus its Anki card id (so the package's review history can follow it
+//! at commit), suspension state, and (for cloze) the original markup for
+//! round-trip export.
 
 use std::collections::{HashMap, HashSet};
 use std::io::Read;
@@ -88,7 +89,15 @@ fn harden_untrusted(conn: &Connection) -> Result<(), ImportError> {
 /// twice over (the buffer and the temp file) without being pushed out.
 const MAX_COLLECTION_BYTES: u64 = 256 * 1024 * 1024;
 
-pub fn parse_apkg(bytes: &[u8]) -> Result<ParsedImport, ImportError> {
+/// The package's collection staged as a hardened read-only connection.
+/// The scratch directory lives exactly as long as the connection: field
+/// order drops `conn` first, then the directory it was opened in.
+struct Collection {
+    conn: Connection,
+    _dir: crate::tmp::TempDir,
+}
+
+fn open_collection(bytes: &[u8]) -> Result<Collection, ImportError> {
     // Prefer the newest collection present. The archive lives only in
     // this block: the manifest read below opens its own, and two central
     // directories side by side would double what a crafted package
@@ -138,11 +147,17 @@ pub fn parse_apkg(bytes: &[u8]) -> Result<ParsedImport, ImportError> {
     let conn = Connection::open_with_flags(&db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
         .map_err(|e| ImportError::new(DAMAGED, format!("open: {e}")))?;
     harden_untrusted(&conn)?;
+    Ok(Collection { conn, _dir: dir })
+}
 
-    let deck_names = load_deck_names(&conn)?;
-    let notetypes = load_notetypes(&conn);
-    let note_cards = load_anki_cards(&conn)?;
-    let card_reviews = load_card_reviews(&conn);
+pub fn parse_apkg(bytes: &[u8]) -> Result<ParsedImport, ImportError> {
+    let collection = open_collection(bytes)?;
+    let conn = &collection.conn;
+
+    let deck_names = load_deck_names(conn)?;
+    let notetypes = load_notetypes(conn);
+    let note_cards = load_anki_cards(conn)?;
+    let history = count_history(conn);
     // filename -> (kind, size) for everything actually in the package.
     let packaged: HashMap<String, (MediaKind, u64)> = read_media_manifest(bytes)
         .unwrap_or_default()
@@ -151,9 +166,16 @@ pub fn parse_apkg(bytes: &[u8]) -> Result<ParsedImport, ImportError> {
         .collect();
 
     let mut out = ParsedImport {
-        settings: load_deck_options(&conn),
+        settings: load_deck_options(conn),
+        progress_reviews: history.min(super::MAX_HISTORY_ROWS),
         ..Default::default()
     };
+    if history > super::MAX_HISTORY_ROWS {
+        out.messages.push(format!(
+            "review history is capped at the most recent {} reviews; older ones stay in Anki",
+            super::MAX_HISTORY_ROWS
+        ));
+    }
 
     let mut cloze_notes = 0u32;
     let mut cloze_cards = 0u32;
@@ -222,11 +244,6 @@ pub fn parse_apkg(bytes: &[u8]) -> Result<ParsedImport, ImportError> {
                 .and_then(|did| deck_names.get(&did))
                 .cloned()
         };
-        let reviews_of = |card: Option<&AnkiCard>| -> Vec<(i64, u8)> {
-            card.and_then(|c| card_reviews.get(&c.id))
-                .cloned()
-                .unwrap_or_default()
-        };
         let suspended_of = |card: Option<&AnkiCard>| card.is_some_and(|c| c.queue == -1);
 
         // ---- cloze notes: one card per index ----
@@ -284,7 +301,7 @@ pub fn parse_apkg(bytes: &[u8]) -> Result<ParsedImport, ImportError> {
                     suspended_cards += 1;
                 }
                 out.push_row(ImportRow {
-                    reviews: reviews_of(anki_card),
+                    anki_card_id: anki_card.map(|c| c.id),
                     media: media.clone(),
                     front,
                     back,
@@ -331,7 +348,7 @@ pub fn parse_apkg(bytes: &[u8]) -> Result<ParsedImport, ImportError> {
                 let mut back_html = html_pipeline(&back_raw, class_colors);
                 // Many answer templates re-show the question (same fields,
                 // different markup, instead of {{FrontSide}}). Flash
-                // already shows the front above the back — strip the echo,
+                // already shows the front above the back. Strip the echo,
                 // text-level so markup differences don't hide it.
                 if !front.is_empty() {
                     if let Some(rest) = richtext::strip_leading_text(&back, &front) {
@@ -367,7 +384,7 @@ pub fn parse_apkg(bytes: &[u8]) -> Result<ParsedImport, ImportError> {
                     suspended_cards += 1;
                 }
                 out.push_row(ImportRow {
-                    reviews: card_reviews.get(&card.id).cloned().unwrap_or_default(),
+                    anki_card_id: Some(card.id),
                     media: media.clone(),
                     front,
                     back,
@@ -407,7 +424,7 @@ pub fn parse_apkg(bytes: &[u8]) -> Result<ParsedImport, ImportError> {
         let front_html = html_pipeline(front_raw, class_colors);
         let back_html = html_pipeline(back_raw, class_colors);
         out.push_row(ImportRow {
-            reviews: reviews_of(ord0),
+            anki_card_id: ord0.map(|c| c.id),
             media: media.clone(),
             front: front.clone(),
             back: back.clone(),
@@ -426,7 +443,7 @@ pub fn parse_apkg(bytes: &[u8]) -> Result<ParsedImport, ImportError> {
                 suspended_cards += 1;
             }
             out.push_row(ImportRow {
-                reviews: card_reviews.get(&rev.id).cloned().unwrap_or_default(),
+                anki_card_id: Some(rev.id),
                 media,
                 front: back,
                 back: front,
@@ -519,55 +536,70 @@ fn load_anki_cards(conn: &Connection) -> Result<HashMap<i64, Vec<AnkiCard>>, Imp
     Ok(out)
 }
 
-/// Keep at most this many of a card's most recent reviews: FSRS state
-/// converges within a handful, and the cap bounds replay CPU and the
-/// pending-import JSON for mega-decks.
-const MAX_REVIEWS_PER_CARD: usize = 10;
+// ---- review history ----
 
-/// Review history per Anki card id, oldest first, as
-/// (reviewed_at_ms, rating 1-4). Best-effort: exports without a revlog
-/// simply yield no history.
-fn load_card_reviews(conn: &Connection) -> HashMap<i64, Vec<(i64, u8)>> {
-    let mut out: HashMap<i64, Vec<(i64, u8)>> = HashMap::new();
-    // revlog id is the review timestamp in ms. Newest first, and only
-    // as many rows as the cards that can import times the tail each
-    // keeps: the recent tail decides state, so what the LIMIT cuts is
-    // history nothing would have used.
+/// Which revlog rows the replay can use, in SQL so the preview's count
+/// and the commit's read are the same set. Learn (0), review (1) and
+/// relearn (2) rows carry the button pressed as `ease`, Anki's four
+/// buttons in every phase; cram (3), manual (4) and rescheduled rows
+/// are not reviews.
+const REPLAYABLE: &str = "type IN (0, 1, 2) AND ease BETWEEN 1 AND 4";
+
+/// How many replayable rows the package's log holds, counted to one past
+/// `MAX_HISTORY_ROWS` so the caller can tell a capped read from a full
+/// one. Best-effort: a package without a revlog has no history.
+fn count_history(conn: &Connection) -> usize {
+    conn.query_row(
+        &format!(
+            "SELECT COUNT(*) FROM (SELECT 1 FROM revlog WHERE {REPLAYABLE} LIMIT {})",
+            super::MAX_HISTORY_ROWS + 1
+        ),
+        [],
+        |r| r.get::<_, i64>(0),
+    )
+    .map(|n| n.max(0) as usize)
+    .unwrap_or(0)
+}
+
+/// The package's replayable reviews, oldest first: the newest
+/// `MAX_HISTORY_ROWS` of them. Read at commit from the kept package, so
+/// a parked preview never carries the history. A package without a
+/// revlog yields none.
+pub fn review_history(bytes: &[u8]) -> Result<Vec<super::HistoryEntry>, ImportError> {
+    let collection = open_collection(bytes)?;
+    let conn = &collection.conn;
+    let mut out: Vec<super::HistoryEntry> = Vec::new();
+    // revlog id is the review timestamp in ms, so newest first is the
+    // order the cap wants: what the LIMIT cuts is the oldest history.
     if let Ok(mut stmt) = conn.prepare(&format!(
-        "SELECT id, cid, ease, type FROM revlog ORDER BY id DESC LIMIT {}",
-        super::MAX_ROWS * MAX_REVIEWS_PER_CARD
+        "SELECT id, cid, ease FROM revlog WHERE {REPLAYABLE} ORDER BY id DESC LIMIT {}",
+        super::MAX_HISTORY_ROWS
     )) {
-        if let Ok(rows) = stmt.query_map([], |r| {
-            Ok((
-                r.get::<_, i64>(0)?,
-                r.get::<_, i64>(1)?,
-                r.get::<_, i64>(2)?,
-                r.get::<_, i64>(3)?,
-            ))
-        }) {
-            for (at_ms, cid, ease, kind) in rows.flatten() {
-                // Review-phase entries use Anki's four buttons directly;
-                // learn/relearn use three (Again/Good/Easy). Cram (3) and
-                // anything unrecognized doesn't reflect real scheduling.
-                let rating: u8 = match (kind, ease) {
-                    (1, 1..=4) => ease as u8,
-                    (0 | 2, 1) => 1,
-                    (0 | 2, 2) => 3,
-                    (0 | 2, 3) => 4,
-                    _ => continue,
-                };
-                let entry = out.entry(cid).or_default();
-                if entry.len() < MAX_REVIEWS_PER_CARD {
-                    entry.push((at_ms, rating));
-                }
+        let rows = stmt
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, i64>(2)?,
+                ))
+            })
+            .map_err(|e| ImportError::new(DAMAGED, format!("revlog: {e}")))?;
+        for row in rows {
+            let (at_ms, anki_card_id, ease) =
+                row.map_err(|e| ImportError::new(DAMAGED, format!("revlog: {e}")))?;
+            // The predicate already keeps ease within the buttons; the
+            // conversion just names the one pressed.
+            if let Some(rating) = flash_core::Rating::from_i64(ease) {
+                out.push(super::HistoryEntry {
+                    at_ms,
+                    anki_card_id,
+                    rating,
+                });
             }
         }
     }
-    // Oldest first, as the replay expects.
-    for entry in out.values_mut() {
-        entry.reverse();
-    }
-    out
+    out.reverse();
+    Ok(out)
 }
 
 // ---- text/html pipelines ----

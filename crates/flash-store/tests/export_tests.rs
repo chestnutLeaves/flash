@@ -2,8 +2,9 @@
 //! through the parsers we already trust, with fronts/backs/tags/decks
 //! intact. This exercises escaping, deck mapping, and schema-11 validity.
 
+use flash_core::Rating;
 use flash_store::export::{build_apkg, build_csv, ExportCard};
-use flash_store::import::{parse_apkg, parse_csv};
+use flash_store::import::{parse_apkg, parse_csv, review_history, HistoryEntry};
 
 const NOW: i64 = 1_700_000_000_000;
 
@@ -173,61 +174,69 @@ fn apkg_revlog_becomes_review_history() {
     let first = NOW + 1;
     let day = 24 * 60 * 60 * 1000;
     let revlog = vec![
-        (NOW - 9 * day, first, 2, 0), // learn ease 2 (Good, 3-button) -> rating 3
-        (NOW - 8 * day, first, 2, 1), // review Hard -> 2
-        (NOW - 2 * day, first, 3, 1), // review Good -> 3
+        (NOW - 9 * day, first, 2, 0), // learn, Hard
+        (NOW - 8 * day, first, 2, 1), // review, Hard
+        (NOW - 2 * day, first, 4, 2), // relearn, Easy
         (NOW - day, first, 4, 3),     // cram: skipped
         (NOW - day + 1, first, 9, 1), // invalid ease: skipped
+        (NOW - day + 2, first, 3, 4), // manual reschedule: skipped
     ];
-    let parsed = parse_apkg(&with_revlog(apkg, &revlog)).unwrap();
+    let package = with_revlog(apkg, &revlog);
+    let parsed = parse_apkg(&package).unwrap();
+    assert_eq!(parsed.progress_reviews, 3);
     let row = parsed
         .rows
         .iter()
         .find(|r| r.front == cards[0].front)
         .unwrap();
+    assert_eq!(row.anki_card_id, Some(first));
+    // Every row knows its Anki card; the history names them.
+    assert!(parsed.rows.iter().all(|r| r.anki_card_id.is_some()));
+    let history = review_history(&package).unwrap();
+    let entry = |at_ms, rating| HistoryEntry {
+        at_ms,
+        anki_card_id: first,
+        rating,
+    };
     assert_eq!(
-        row.reviews,
-        vec![(NOW - 9 * day, 3), (NOW - 8 * day, 2), (NOW - 2 * day, 3)]
+        history,
+        vec![
+            entry(NOW - 9 * day, Rating::Hard),
+            entry(NOW - 8 * day, Rating::Hard),
+            entry(NOW - 2 * day, Rating::Easy),
+        ]
     );
-    // Other cards untouched.
-    assert!(parsed
-        .rows
-        .iter()
-        .filter(|r| r.front != cards[0].front)
-        .all(|r| r.reviews.is_empty()));
 }
 
 #[test]
-fn apkg_revlog_caps_at_most_recent_ten() {
+fn apkg_revlog_keeps_every_review() {
     let cards = sample_cards();
     let apkg = build_apkg(&cards, &flash_store::export::ExportMedia::default(), NOW).unwrap();
     let revlog: Vec<(i64, i64, i64, i64)> = (0..25)
         .map(|i| (NOW - (25 - i) * 60_000, NOW + 1, 3, 1))
         .collect();
-    let parsed = parse_apkg(&with_revlog(apkg, &revlog)).unwrap();
-    let row = parsed
-        .rows
-        .iter()
-        .find(|r| r.front == cards[0].front)
-        .unwrap();
-    assert_eq!(row.reviews.len(), 10);
-    // The kept ten are the most recent, still chronological.
-    assert_eq!(row.reviews[0].0, NOW - 10 * 60_000);
-    assert_eq!(row.reviews[9].0, NOW - 60_000);
+    let package = with_revlog(apkg, &revlog);
+    assert_eq!(parse_apkg(&package).unwrap().progress_reviews, 25);
+    let history = review_history(&package).unwrap();
+    assert_eq!(history.len(), 25);
+    // Oldest first, all of them.
+    assert_eq!(history[0].at_ms, NOW - 25 * 60_000);
+    assert_eq!(history[24].at_ms, NOW - 60_000);
+    assert!(history.windows(2).all(|w| w[0].at_ms < w[1].at_ms));
 }
 
 #[test]
 fn apkg_without_revlog_has_no_reviews() {
-    let parsed = parse_apkg(
-        &build_apkg(
-            &sample_cards(),
-            &flash_store::export::ExportMedia::default(),
-            NOW,
-        )
-        .unwrap(),
+    let package = build_apkg(
+        &sample_cards(),
+        &flash_store::export::ExportMedia::default(),
+        NOW,
     )
     .unwrap();
-    assert!(parsed.rows.iter().all(|r| r.reviews.is_empty()));
+    let parsed = parse_apkg(&package).unwrap();
+    assert_eq!(parsed.progress_reviews, 0);
+    assert!(parsed.rows.iter().all(|r| r.anki_card_id.is_some()));
+    assert!(review_history(&package).unwrap().is_empty());
 }
 
 #[test]

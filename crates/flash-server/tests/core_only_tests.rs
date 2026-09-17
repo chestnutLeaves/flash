@@ -6,8 +6,7 @@ mod common;
 
 use std::sync::Arc;
 
-use axum::body::Body;
-use axum::http::{header, Request, StatusCode};
+use axum::http::StatusCode;
 use common::*;
 use flash_server::ext::CoreOnly;
 
@@ -75,55 +74,19 @@ async fn pages_render_without_the_extension_fragments() {
     assert!(!body.contains("Create share link"));
 }
 
+/// The features the README says the hosted version adds (self-serve
+/// signup, a pricing page, the community library) have no route here.
+/// The extension's own tests probe its whole surface against this
+/// build; this keeps the promise the README makes.
 #[tokio::test]
-async fn hosted_surfaces_are_absent() {
+async fn the_hosted_features_the_readme_names_are_absent() {
     let h = harness();
-    for path in [
-        "/signup",
-        "/pricing",
-        "/claude",
-        "/terms",
-        "/community",
-        "/metrics",
-        "/metrics/board",
-        "/sitemap.xml",
-        "/llms.txt",
-        "/auth/google/start",
-        "/auth/apple/start",
-        "/static/landing.js",
-        "/.well-known/apple-app-site-association",
-    ] {
+    for path in ["/signup", "/pricing", "/community"] {
         let r = send(&h.app, get(path, None)).await;
-        assert_eq!(r.status, StatusCode::NOT_FOUND, "{path}");
-    }
-    for path in [
-        "/billing/webhook",
-        "/billing/apple/notifications",
-        "/billing/google/notifications",
-        "/auth/apple/callback",
-    ] {
-        let r = send(
-            &h.app,
-            Request::post(path)
-                .header(header::ORIGIN, BASE)
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await;
         assert_eq!(r.status, StatusCode::NOT_FOUND, "{path}");
     }
     let user = member(&h.store, "Bob", "bob@example.com");
     let bearer = api_bearer(&h.store, user);
     let r = send(&h.app, json_get("/api/v1/community", Some(&bearer))).await;
-    assert_eq!(r.status, StatusCode::NOT_FOUND);
-    let r = send(
-        &h.app,
-        json_post(
-            "/api/v1/billing/apple/transaction",
-            Some(&bearer),
-            &serde_json::json!({}),
-        ),
-    )
-    .await;
     assert_eq!(r.status, StatusCode::NOT_FOUND);
 }

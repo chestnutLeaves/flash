@@ -10,7 +10,7 @@
 
 use std::collections::HashSet;
 
-/// Largest single media file accepted — AnkiWeb's own per-file limit, so
+/// Largest single media file accepted: AnkiWeb's own per-file limit, so
 /// anything Anki syncs, Flash accepts.
 pub const MAX_FILE_BYTES: u64 = 100 * 1024 * 1024; // 100 MiB
 
@@ -58,42 +58,58 @@ pub struct MediaRef {
     pub kind: MediaKind,
 }
 
-/// Extension -> (kind, mime). SVG is deliberately Unsupported: it can carry
-/// scripts and served inline it would run in our origin. HTML-ish and
-/// unknown extensions are Unsupported too.
+/// Every extension the media module knows, as `(extension, kind,
+/// mime)`. SVG is deliberately absent: it can carry scripts and served
+/// inline it would run in our origin. HTML-ish and unknown extensions
+/// are absent too. Published so a picker can be built from the same
+/// table that classifies what it picks.
+pub const EXTENSIONS: &[(&str, MediaKind, &str)] = &[
+    ("jpg", MediaKind::Image, "image/jpeg"),
+    ("jpeg", MediaKind::Image, "image/jpeg"),
+    ("png", MediaKind::Image, "image/png"),
+    ("gif", MediaKind::Image, "image/gif"),
+    ("webp", MediaKind::Image, "image/webp"),
+    ("avif", MediaKind::Image, "image/avif"),
+    ("bmp", MediaKind::Image, "image/bmp"),
+    ("heic", MediaKind::Image, "image/heic"),
+    ("heif", MediaKind::Image, "image/heif"),
+    ("mp3", MediaKind::Audio, "audio/mpeg"),
+    ("ogg", MediaKind::Audio, "audio/ogg"),
+    ("oga", MediaKind::Audio, "audio/ogg"),
+    ("opus", MediaKind::Audio, "audio/ogg"),
+    ("spx", MediaKind::Audio, "audio/ogg"),
+    ("wav", MediaKind::Audio, "audio/wav"),
+    ("m4a", MediaKind::Audio, "audio/mp4"),
+    ("aac", MediaKind::Audio, "audio/aac"),
+    ("flac", MediaKind::Audio, "audio/flac"),
+    ("3gp", MediaKind::Audio, "audio/3gpp"),
+    ("mp4", MediaKind::Video, "video/mp4"),
+    ("m4v", MediaKind::Video, "video/mp4"),
+    ("webm", MediaKind::Video, "video/webm"),
+    ("mkv", MediaKind::Video, "video/x-matroska"),
+    ("mov", MediaKind::Video, "video/quicktime"),
+    ("ogv", MediaKind::Video, "video/ogg"),
+];
+
+/// Extension -> (kind, mime), from `EXTENSIONS`; anything else is
+/// Unsupported.
 pub fn classify(filename: &str) -> (MediaKind, &'static str) {
     let ext = filename
         .rsplit('.')
         .next()
         .unwrap_or("")
         .to_ascii_lowercase();
-    match ext.as_str() {
-        "jpg" | "jpeg" => (MediaKind::Image, "image/jpeg"),
-        "png" => (MediaKind::Image, "image/png"),
-        "gif" => (MediaKind::Image, "image/gif"),
-        "webp" => (MediaKind::Image, "image/webp"),
-        "avif" => (MediaKind::Image, "image/avif"),
-        "bmp" => (MediaKind::Image, "image/bmp"),
-        "mp3" => (MediaKind::Audio, "audio/mpeg"),
-        "ogg" | "oga" | "opus" | "spx" => (MediaKind::Audio, "audio/ogg"),
-        "wav" => (MediaKind::Audio, "audio/wav"),
-        "m4a" => (MediaKind::Audio, "audio/mp4"),
-        "aac" => (MediaKind::Audio, "audio/aac"),
-        "flac" => (MediaKind::Audio, "audio/flac"),
-        "3gp" => (MediaKind::Audio, "audio/3gpp"),
-        "mp4" | "m4v" => (MediaKind::Video, "video/mp4"),
-        "webm" => (MediaKind::Video, "video/webm"),
-        "mkv" => (MediaKind::Video, "video/x-matroska"),
-        "mov" => (MediaKind::Video, "video/quicktime"),
-        "ogv" => (MediaKind::Video, "video/ogg"),
-        _ => (MediaKind::Unsupported, "application/octet-stream"),
-    }
+    EXTENSIONS
+        .iter()
+        .find(|(e, _, _)| *e == ext)
+        .map(|(_, kind, mime)| (*kind, *mime))
+        .unwrap_or((MediaKind::Unsupported, "application/octet-stream"))
 }
 
 /// Does the file content plausibly match its claimed kind? Magic-byte
 /// check so a .jpg that is really HTML/script never gets stored or served.
 /// Container formats overlap (ogg/mp4/riff hold audio or video); we accept
-/// either side of those pairs — the point is rejecting non-media bytes,
+/// either side of those pairs. The point is rejecting non-media bytes,
 /// not perfect demuxing.
 pub fn content_matches(kind: MediaKind, bytes: &[u8]) -> bool {
     if bytes.len() < 12 {
@@ -127,8 +143,8 @@ pub fn content_matches(kind: MediaKind, bytes: &[u8]) -> bool {
 }
 
 /// Display-safe filename: path bits stripped, control chars and quotes
-/// removed, length capped. Never used as a disk path — blobs live under
-/// their sha256 — this is metadata for the UI and Content-Disposition.
+/// removed, length capped. Never used as a disk path (blobs live under
+/// their sha256). This is metadata for the UI and Content-Disposition.
 pub fn sanitize_filename(name: &str) -> String {
     let leaf = name.rsplit(['/', '\\']).next().unwrap_or(name);
     // Cap by characters, never by bytes: `String::truncate` panics inside
@@ -150,7 +166,7 @@ pub fn sanitize_filename(name: &str) -> String {
 /// Scans one field's raw HTML for media references, Anki-style:
 /// `[sound:file]` tags (audio *and* video files travel in these) and
 /// `src`/`data` attributes on img/audio/video/source/object/embed tags.
-/// External (`http:`, `https:`, `data:`) references are skipped — they are
+/// External (`http:`, `https:`, `data:`) references are skipped. They are
 /// not files in the package. Percent-encoding and basic entities in
 /// attribute values are decoded so names match the media manifest.
 pub fn scan_refs(html: &str) -> Vec<MediaRef> {

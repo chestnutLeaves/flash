@@ -120,6 +120,59 @@ async fn deck_lifecycle_create_detail_rename_limits_delete() {
     .await;
     assert_eq!(boosted.json()["boost_today"], 10);
 
+    // Archive: the deck is still there to read, marked, and out of today;
+    // unarchive clears the mark. Neither takes a body.
+    let archived = send(
+        &t.app,
+        json_post(
+            &format!("/api/v1/decks/{id}/archive"),
+            Some(&bearer),
+            &json!({}),
+        ),
+    )
+    .await;
+    assert_eq!(
+        archived.status,
+        StatusCode::NO_CONTENT,
+        "{}",
+        archived.text()
+    );
+    let list = send(&t.app, json_get("/api/v1/decks", Some(&bearer)))
+        .await
+        .json();
+    assert!(list["items"][0]["archived_at"].is_i64(), "{list}");
+    let today = send(&t.app, json_get("/api/v1/today", Some(&bearer)))
+        .await
+        .json();
+    assert_eq!(today["decks"].as_array().unwrap().len(), 0, "{today}");
+    let d = send(
+        &t.app,
+        json_get(&format!("/api/v1/decks/{id}"), Some(&bearer)),
+    )
+    .await;
+    assert_eq!(d.status, StatusCode::OK);
+    assert!(d.json()["deck"]["archived_at"].is_i64());
+    let restored = send(
+        &t.app,
+        json_post(
+            &format!("/api/v1/decks/{id}/unarchive"),
+            Some(&bearer),
+            &json!({}),
+        ),
+    )
+    .await;
+    assert_eq!(restored.status, StatusCode::NO_CONTENT);
+    let list = send(&t.app, json_get("/api/v1/decks", Some(&bearer)))
+        .await
+        .json();
+    assert!(list["items"][0]["archived_at"].is_null(), "{list}");
+    let missing = send(
+        &t.app,
+        json_post("/api/v1/decks/999999/archive", Some(&bearer), &json!({})),
+    )
+    .await;
+    assert_eq!(missing.status, StatusCode::NOT_FOUND);
+
     let deleted = send(
         &t.app,
         json_delete(&format!("/api/v1/decks/{id}"), Some(&bearer)),
@@ -240,7 +293,7 @@ async fn cards_page_search_quick_add_and_delete() {
         .json();
     assert_eq!(after["total"], 29);
 
-    // Someone else's deck is simply not found — cards, quick-add, detail.
+    // Someone else's deck is simply not found: cards, quick-add, detail.
     let (_, ada) = signed_up(&t, "ada");
     for reply in [
         send(&t.app, json_get(&format!("{base}/cards"), Some(&ada))).await,

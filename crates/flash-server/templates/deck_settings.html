@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}{{ deck_name }} settings — Flash{% endblock %}
+{% block title %}{{ deck_name }} settings - Flash{% endblock %}
 {% block content %}
 <div id="deck-settings" style="display:contents">
 <div class="page-head">
@@ -42,6 +42,18 @@
     {% if limits.boost_today > 0 %}<span class="fl-badge fl-badge-good"><span class="fl-badge-dot"></span>+{{ limits.boost_today }} today</span>{% endif %}
   </form>
 </div>
+
+<form class="fl-card fl-card-pad" id="archive-card" method="post" action="/decks/{{ deck_id }}/{% if archived %}unarchive{% else %}archive{% endif %}" hx-boost="true" hx-push-url="false" hx-select="#deck-settings" hx-target="#deck-settings" hx-swap="outerHTML show:none" style="display:flex;flex-direction:column;gap:12px">
+  {% if archived %}
+  <h3>Archived deck</h3>
+  <p class="fl-hint">This deck is out of the study queue and the due counts. Unarchive it and its cards come back with the review history they had.</p>
+  <div class="row"><button class="fl-btn fl-btn-secondary" type="submit">Unarchive</button>{% if saved == "archive" %}<span class="save-note fl-badge-toast" role="status">Archived</span>{% endif %}</div>
+  {% else %}
+  <h3>Archive deck</h3>
+  <p class="fl-hint">Keeps every card, its media and review history, and takes the deck out of study and out of due counts. You can unarchive it any time.</p>
+  <div class="row"><button class="fl-btn fl-btn-secondary" type="submit">Archive</button>{% if saved == "archive" %}<span class="save-note fl-badge-toast" role="status">Restored</span>{% endif %}</div>
+  {% endif %}
+</form>
 
 {{ sharing_html|safe }}
 

@@ -1,0 +1,25 @@
+{# One pass of the model over a source, as it runs. The block replaces
+   itself every two seconds while the runner still has work; a job that
+   has stopped renders without the trigger, so the polling stops with
+   it. A job that finished never renders here at all: the handler sends
+   the browser to the review instead. #}
+<div id="job" class="gen-job" hx-get="/ai/jobs/{{ job_id }}" hx-swap="outerHTML"
+     {% if polling %}hx-trigger="every 2s"{% endif %}>
+  {% if let Some(message) = error %}
+  <div class="fl-card fl-card-pad gen-failed" role="alert">
+    <h2>That didn't finish</h2>
+    <p>{{ message }}</p>
+    <div class="row">
+      <a class="fl-btn fl-btn-primary" href="{{ retry_href }}">Try again</a>
+      <a class="fl-btn fl-btn-secondary" href="{{ back_href }}">Back to deck</a>
+    </div>
+  </div>
+  {% else %}
+  <div class="fl-card fl-card-pad gen-running">
+    <p class="gen-state">{{ state_label }}</p>
+    <div class="fl-progress"><div style="width:{{ progress }}%"></div></div>
+    <p class="fl-hint">Usually under a minute. You can leave this page, and the cards
+    will be waiting here when it's done.</p>
+  </div>
+  {% endif %}
+</div>

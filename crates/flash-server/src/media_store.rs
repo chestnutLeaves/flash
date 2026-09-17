@@ -6,8 +6,8 @@
 //!
 //! Sync by design: every call happens inside spawn_blocking, like the
 //! mailer and captcha clients. The R2 client speaks plain S3 with a
-//! hand-rolled SigV4 (HMAC-SHA256 over a canonical request) — small enough
-//! to own outright, and it keeps the vendored-OpenSSL/ureq build.
+//! hand-rolled SigV4 (HMAC-SHA256 over a canonical request). It is small
+//! enough to own outright, and it keeps the vendored-OpenSSL/ureq build.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -58,7 +58,7 @@ pub trait MediaStore: Send + Sync {
     /// Idempotent: storing a hash that already exists is a no-op.
     fn put(&self, sha256: &str, mime: &str, bytes: &[u8]) -> Result<(), MediaStoreError>;
     fn get(&self, sha256: &str, range: Option<ByteRange>) -> Result<Blob, MediaStoreError>;
-    /// Missing blobs are not an error — a delete is a statement of intent.
+    /// Missing blobs are not an error: a delete is a statement of intent.
     fn delete(&self, sha256: &str) -> Result<(), MediaStoreError>;
     /// Human-readable backend name for the boot log.
     fn describe(&self) -> String;
@@ -85,8 +85,8 @@ pub trait MediaStore: Send + Sync {
 }
 
 /// Two-character fan-out under the root/bucket: `ab/ab12…`. The hash is
-/// validated (64 hex chars) before it becomes a path or an object key —
-/// nothing user-controlled reaches the filesystem or the wire.
+/// validated (64 hex chars) before it becomes a path or an object key.
+/// Nothing user-controlled reaches the filesystem or the wire.
 pub fn object_key(sha256: &str) -> Result<String, MediaStoreError> {
     if sha256.len() != 64 || !sha256.bytes().all(|b| b.is_ascii_hexdigit()) {
         return Err(MediaStoreError::Other("bad media hash".into()));
@@ -307,7 +307,7 @@ impl R2Store {
 
     /// SigV4 `Authorization` header value for a request whose canonical
     /// headers are exactly `headers` (lowercase names, sorted by the
-    /// caller? — no: sorted here) and whose payload hashes to `payload_hash`.
+    /// caller? No: sorted here) and whose payload hashes to `payload_hash`.
     fn authorization(
         &self,
         method: &str,

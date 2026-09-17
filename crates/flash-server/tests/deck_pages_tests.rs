@@ -146,6 +146,81 @@ async fn deck_delete_button_removes_deck_and_redirects() {
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
+/// Archive from the settings page, see the deck move to its own section
+/// with no study link, unarchive from that section, and see it return.
+#[tokio::test]
+async fn archive_moves_the_deck_out_of_study_until_unarchived() {
+    let h = harness();
+    let deck = seed_cards(&h, 3);
+    let page = |path: String| {
+        Request::get(path)
+            .header(header::COOKIE, h.session_cookie.clone())
+            .body(Body::empty())
+            .unwrap()
+    };
+    let post = |path: String, body: &'static str| {
+        Request::post(path)
+            .header(header::ORIGIN, BASE)
+            .header(header::COOKIE, h.session_cookie.clone())
+            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .body(Body::from(body))
+            .unwrap()
+    };
+    let text = |bytes: Vec<u8>| String::from_utf8(bytes).unwrap();
+
+    let (status, headers, _) = request(&h, post(format!("/decks/{deck}/archive"), "")).await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    assert_eq!(
+        header_of(&headers, "location"),
+        Some(&*format!("/decks/{deck}/settings?saved=archive"))
+    );
+
+    // The list itself hides the deck; the page head offers the archived
+    // view, which lists it with an unarchive link and no study link.
+    let (_, _, body) = request(&h, page("/decks".into())).await;
+    let decks = text(body);
+    assert!(decks.contains("href=\"/decks?archived=1\""), "{decks}");
+    assert!(!decks.contains("Seed"), "{decks}");
+    let (_, _, body) = request(&h, page("/decks?archived=1".into())).await;
+    let decks = text(body);
+    assert!(decks.contains("Hide archived"), "{decks}");
+    assert!(decks.contains("Seed"));
+    assert!(
+        !decks.contains(&format!("/study?deck={deck}")),
+        "no study link"
+    );
+    assert!(decks.contains(&format!("/decks/{deck}/unarchive")));
+    let (_, _, body) = request(&h, page("/".into())).await;
+    assert!(
+        !text(body).contains("Seed"),
+        "the dashboard shows today's decks only"
+    );
+    let (_, _, body) = request(&h, page(format!("/decks/{deck}"))).await;
+    let deck_page = text(body);
+    assert!(!deck_page.contains("Study this deck"));
+    assert!(deck_page.contains(&format!("/decks/{deck}/unarchive")));
+    let (_, _, body) = request(&h, page(format!("/decks/{deck}/settings"))).await;
+    assert!(text(body).contains("Archived deck"));
+
+    // Unarchiving from that view returns to it; with nothing left there,
+    // the head no longer offers it and the deck is back in study.
+    let (status, headers, _) = request(
+        &h,
+        post(format!("/decks/{deck}/unarchive"), "back=archived"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    assert_eq!(header_of(&headers, "location"), Some("/decks?archived=1"));
+    let (_, _, body) = request(&h, page("/decks?archived=1".into())).await;
+    let decks = text(body);
+    assert!(!decks.contains("archived=1\""), "{decks}");
+    assert!(!decks.contains("Hide archived"));
+    assert!(decks.contains(&format!("/study?deck={deck}")));
+
+    let (status, _, _) = request(&h, post("/decks/999999/archive".into(), "")).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
 #[tokio::test]
 async fn deck_settings_page_holds_limits_and_delete() {
     let h = harness();

@@ -1,6 +1,6 @@
 //! Passkey ceremonies over the API: the key travels in the body. A real
 //! authenticator can't run here, so these cover the halves that don't
-//! need one — the challenge shapes, the guards, and the refusals.
+//! need one: the challenge shapes, the guards, and the refusals.
 
 mod common;
 

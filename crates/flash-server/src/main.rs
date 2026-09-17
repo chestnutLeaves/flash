@@ -1,4 +1,4 @@
-//! flash-server: the open, self-hosted Flash binary — web UI, JSON API,
+//! flash-server: the open, self-hosted Flash binary. Web UI, JSON API,
 //! MCP and OAuth surfaces composed over the shared Services layer, with
 //! nothing plugged in. A downstream extension builds its own binary the
 //! same way with its routers merged into each band.
@@ -32,6 +32,16 @@ async fn main() {
         state.media.clone(),
         state.config.data_dir.clone(),
     ));
+    // Card generation jobs, only when a model is configured.
+    if state.ai.is_some() {
+        tokio::spawn(flash_server::ai::runner::run_jobs(state.clone()));
+    }
+    // Voice clips, only when a sidecar is configured: the worker that
+    // makes them, and the warm-up that queues every phrase once.
+    if state.tts.is_some() {
+        tokio::spawn(flash_server::tts::worker::run_worker(state.clone()));
+        tokio::spawn(flash_server::tts::worker::run_warmup(state.clone()));
+    }
 
     let app = flash_server::build_app(state.clone())
         .route("/healthz", get(boot::healthz).with_state(state));

@@ -1,7 +1,10 @@
 //! File imports. Parsers produce ImportRows; committing them goes through
 //! the normal create_cards path so imported cards are indistinguishable
-//! from hand-made ones. Anki scheduling state is deliberately not imported:
-//! FSRS starts fresh and converges from real reviews.
+//! from hand-made ones. Anki's own scheduling numbers are never copied:
+//! when the uploader asks for their progress, the package's review log is
+//! replayed through FSRS at commit, one review_log row per Anki review
+//! and the state each card ends in, so the schedule continues from real
+//! reviews rather than from another scheduler's guess.
 
 pub(crate) mod apkg;
 mod apkg_media;
@@ -14,7 +17,7 @@ mod patterns;
 mod proto;
 mod template;
 
-pub use apkg::parse_apkg;
+pub use apkg::{parse_apkg, review_history};
 pub use apkg_media::{extract_media_file, read_media_manifest, ApkgMediaEntry};
 pub use colorize::{parse_css_class_colors, remap_colors, ClassColorMap};
 pub use csv_file::parse_csv;
@@ -27,6 +30,21 @@ use crate::richtext::SanitizedHtml;
 /// many rows and refuse the file, so a collection of millions of tiny
 /// notes is a sentence rather than a Vec the size of memory.
 pub const MAX_ROWS: usize = 50_000;
+
+/// Most Anki reviews one package may replay: the newest this many. Nine
+/// years at three hundred reviews a day; what the cut drops is the
+/// oldest history, which the scheduler had long since converged past.
+pub const MAX_HISTORY_ROWS: usize = 1_000_000;
+
+/// One Anki review as the replay consumes it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HistoryEntry {
+    /// When it happened, epoch ms (Anki's revlog id).
+    pub at_ms: i64,
+    /// The Anki card it graded; matched to `ImportRow::anki_card_id`.
+    pub anki_card_id: i64,
+    pub rating: flash_core::Rating,
+}
 
 /// Most per-row messages a parse keeps (a file of nothing but bad rows
 /// would otherwise report each one).
@@ -58,7 +76,7 @@ pub const MAX_PACKAGE_ENTRIES: usize = 20_000;
 /// The sentence a file over `MAX_ROWS` gets.
 pub fn too_many_cards() -> ImportError {
     ImportError::user(format!(
-        "that file has more than {MAX_ROWS} cards; imports are capped at {MAX_ROWS} per file — split it in Anki first"
+        "that file has more than {MAX_ROWS} cards; imports are capped at {MAX_ROWS} per file. Split it in Anki first"
     ))
 }
 
@@ -190,12 +208,10 @@ impl std::error::Error for ImportError {}
 /// One card ready to import.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ImportRow {
-    /// Anki review history for this card, oldest first, capped to the most
-    /// recent entries: (reviewed_at_ms, rating 1-4). Empty for CSV imports
-    /// or decks without a revlog. Used (opt-in) to reconstruct scheduling
-    /// state by replaying through FSRS.
+    /// The Anki card this row came from, so commit can attach the
+    /// package's review history to the card it becomes. None for CSV.
     #[serde(default)]
-    pub reviews: Vec<(i64, u8)>,
+    pub anki_card_id: Option<i64>,
     /// Media files this card's fields reference (from the raw Anki HTML,
     /// before tag stripping). Empty for CSV imports.
     #[serde(default)]
@@ -243,6 +259,10 @@ pub struct ParsedImport {
     /// FSRS-relevant deck options found in the package (offered opt-in).
     #[serde(default)]
     pub settings: Option<ImportedSettings>,
+    /// Replayable reviews the package's log holds, at most
+    /// `MAX_HISTORY_ROWS`: what "bring my progress" would replay.
+    #[serde(default)]
+    pub progress_reviews: usize,
 }
 
 impl ParsedImport {

@@ -1,11 +1,9 @@
 {% extends "base.html" %}
-{% block title %}Import — Flash{% endblock %}
+{% block title %}Import - Flash{% endblock %}
 {% block content %}
 <h1>Import</h1>
 <p class="muted">CSV with header <code>front,back,tags,deck</code>, or an Anki <code>.apkg</code> export.
-Cards import as new — unless you bring your Anki study progress with them.</p>
-{{ usage_banner|safe }}
-{{ usage_count|safe }}
+Cards import as new, unless you bring your Anki study progress with them.</p>
 
 <form class="fl-card fl-card-pad" method="post" action="/import/preview" enctype="multipart/form-data" style="display:flex;flex-direction:column;gap:14px" data-fl-drop>
   <div class="fl-field">
@@ -13,7 +11,7 @@ Cards import as new — unless you bring your Anki study progress with them.</p>
     <div class="fl-file" data-fl-file>
       <input type="file" id="import-file" name="file" accept=".csv,.apkg" required>
       <label for="import-file" class="fl-btn fl-btn-secondary">Choose file</label>
-      <span class="fl-file-name small muted" aria-live="polite">No file chosen — or drop one here</span>
+      <span class="fl-file-name small muted" aria-live="polite">No file chosen, or drop one here</span>
     </div>
   </div>
   <div class="fl-field">
@@ -58,15 +56,15 @@ Cards import as new — unless you bring your Anki study progress with them.</p>
         </label>
         <label class="fl-check" style="align-items:baseline">
           <input type="radio" name="colors" value="clean">
-          <span>Clean look &mdash; import without colors.</span>
+          <span>Clean look, import without colors.</span>
         </label>
         {% endif %}
         {% if preview.progress_reviews > 0 %}
         <label class="fl-check" style="align-items:baseline">
           <input type="checkbox" name="progress" value="on" checked>
-          <span>Bring my study progress ({{ preview.progress_reviews }} reviews found) —
-          cards keep their schedule instead of starting as new.
-          <span class="fl-hint">Review-history stats still start fresh in Flash.</span></span>
+          <span>Bring my study progress ({{ preview.progress_reviews }} reviews found):
+          cards keep their schedule instead of starting as new, and every review
+          lands in your stats, streaks included.</span>
         </label>
         {% endif %}
         {% if let Some(desc) = preview.settings_desc %}

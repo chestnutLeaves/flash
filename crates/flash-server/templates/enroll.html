@@ -1,13 +1,13 @@
 {% extends "auth_base.html" %}
-{% block title %}Welcome — Flash{% endblock %}
+{% block title %}Welcome - Flash{% endblock %}
 {% block head %}<meta name="robots" content="noindex">{% endblock %}
 {% block scripts %}<script src="/static/webauthn.js?v=35" defer></script>{% endblock %}
 {% block content %}
 <h1>Welcome, {{ display_name }}</h1>
 {% if email.is_some() %}
-<p class="muted">Email verified. Now set up a passkey to start studying. Face ID, fingerprint, or your device PIN — no password.</p>
+<p class="muted">Email verified. Now set up a passkey to start studying. Face ID, fingerprint, or your device PIN. No password.</p>
 {% else %}
-<p class="muted">Set up a passkey to start studying. Face ID, fingerprint, or your device PIN — no password.</p>
+<p class="muted">Set up a passkey to start studying. Face ID, fingerprint, or your device PIN. No password.</p>
 {% endif %}
 <div class="fl-card fl-card-pad" style="display:flex;flex-direction:column;gap:12px">
   <div>

@@ -87,7 +87,7 @@ fn load_modern(conn: &Connection) -> HashMap<i64, Notetype> {
     map
 }
 
-/// Notetype.Config.css — length-delimited field 3.
+/// Notetype.Config.css: length-delimited field 3.
 pub(crate) fn notetype_css(config: &[u8]) -> String {
     let mut i = 0;
     while i < config.len() {
@@ -110,7 +110,7 @@ pub(crate) fn notetype_css(config: &[u8]) -> String {
     String::new()
 }
 
-/// Notetype.Template.Config — q_format field 1, a_format field 2.
+/// Notetype.Template.Config: q_format field 1, a_format field 2.
 pub(crate) fn template_formats(config: &[u8]) -> TemplatePair {
     let mut out = TemplatePair::default();
     let mut i = 0;

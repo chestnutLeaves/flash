@@ -1,6 +1,6 @@
 {#
   The <head> every signed-out public page shares. Pages pass their own
-  copy as literals — these are authored strings, hence |safe — and add
+  copy as literals (these are authored strings, hence |safe) and add
   page-specific <script>/JSON-LD after the call:
 
     {% import "_public_head.html" as head %}
@@ -28,5 +28,7 @@
 <meta property="og:image" content="{{ site.base_url }}/static/og.png?v=2">
 <meta name="twitter:card" content="summary">
 <link rel="icon" href="/static/favicon.svg?v=39" type="image/svg+xml">
-<link rel="stylesheet" href="/static/app.css?v=50">
+<link rel="icon" href="/static/favicon-192.png?v=1" type="image/png" sizes="192x192">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v=1">
+<link rel="stylesheet" href="/static/app.css?v=52">
 {% endmacro %}

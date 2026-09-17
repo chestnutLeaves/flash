@@ -1,6 +1,6 @@
 //! Media metadata. The blob bytes live on disk (flash-server owns that
 //! IO); this repo owns the per-user rows that make a blob reachable and
-//! the quota arithmetic. Every read is ownership-scoped in SQL — user A
+//! the quota arithmetic. Every read is ownership-scoped in SQL: user A
 //! can never resolve user B's media id.
 
 use flash_core::{CardId, MediaId, UserId};
@@ -37,12 +37,14 @@ fn media_row_from(r: &rusqlite::Row<'_>) -> rusqlite::Result<MediaRow> {
 
 impl Store {
     /// How many rows anywhere still name this blob hash: the core's media
-    /// rows plus whatever each extension pins. Zero means the blob may
-    /// leave storage. Takes the caller's connection so deletions count
-    /// inside their own transaction.
+    /// rows, the generation sources (their blobs share the store), plus
+    /// whatever each extension pins. Zero means the blob may leave
+    /// storage. Takes the caller's connection so deletions count inside
+    /// their own transaction.
     pub(crate) fn blob_refs(&self, conn: &Connection, sha256: &str) -> Result<i64> {
         let mut refs: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM media WHERE sha256 = ?1",
+            "SELECT (SELECT COUNT(*) FROM media WHERE sha256 = ?1)
+                  + (SELECT COUNT(*) FROM ai_sources WHERE sha256 = ?1)",
             [sha256],
             |r| r.get(0),
         )?;
@@ -109,7 +111,7 @@ impl Store {
         Ok(row)
     }
 
-    /// Whether any user already holds a blob with this hash — the upload
+    /// Whether any user already holds a blob with this hash: the upload
     /// can be skipped, the store is content-addressed.
     pub fn blob_known(&self, sha256: &str) -> Result<bool> {
         Ok(self.conn().query_row(
@@ -156,7 +158,7 @@ impl Store {
     }
 
     /// Deletes a user's media row (and its card links), returning how many
-    /// rows across ALL users still reference the same blob hash — 0 means
+    /// rows across ALL users still reference the same blob hash: 0 means
     /// the caller may remove the blob from disk.
     pub fn delete_media(&self, user: UserId, id: MediaId) -> Result<u64> {
         let conn = self.conn();
@@ -176,17 +178,22 @@ impl Store {
             rusqlite::params![id.0, user.raw()],
         )?;
         conn.execute(
+            "DELETE FROM ai_figures WHERE media_id = ?1 AND user_id = ?2",
+            rusqlite::params![id.0, user.raw()],
+        )?;
+        conn.execute(
             "DELETE FROM media WHERE id = ?1 AND user_id = ?2",
             rusqlite::params![id.0, user.raw()],
         )?;
         Ok(self.blob_refs(&conn, &sha)? as u64)
     }
 
-    /// Media rows no card links any more, older than `older_than_ms`, for
-    /// every account: the rows go, and the hashes nobody holds any more
-    /// come back for the caller to remove from storage. Housekeeping
-    /// runs this daily; the age floor keeps an editor upload that is
-    /// about to be linked (a note saved in the next minute) out of it.
+    /// Media rows no card links and no extraction pins as a figure any
+    /// more, older than `older_than_ms`, for every account: the rows go,
+    /// and the hashes nobody holds any more come back for the caller to
+    /// remove from storage. Housekeeping runs this daily; the age floor
+    /// keeps an editor upload that is about to be linked (a note saved
+    /// in the next minute) out of it.
     pub fn sweep_unlinked_media(&self, older_than_ms: i64) -> Result<Vec<String>> {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
@@ -194,7 +201,8 @@ impl Store {
             let mut stmt = tx.prepare(
                 "SELECT m.id, m.user_id, m.sha256 FROM media m
                  WHERE m.created_at < ?1
-                   AND NOT EXISTS (SELECT 1 FROM card_media cm WHERE cm.media_id = m.id)",
+                   AND NOT EXISTS (SELECT 1 FROM card_media cm WHERE cm.media_id = m.id)
+                   AND NOT EXISTS (SELECT 1 FROM ai_figures f WHERE f.media_id = m.id)",
             )?;
             let rows =
                 stmt.query_map([older_than_ms], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
@@ -216,7 +224,7 @@ impl Store {
         Ok(orphans)
     }
 
-    /// Media rows referenced by the user's live (non-deleted) cards — what
+    /// Media rows referenced by the user's live (non-deleted) cards, what
     /// an export has to bundle. Ordered by id so exported filenames are
     /// stable across runs.
     pub fn media_for_export(&self, user: UserId) -> Result<Vec<MediaRow>> {

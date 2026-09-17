@@ -23,6 +23,17 @@ fn card(front: &str, back: &str, tags: &[&str]) -> (flash_core::CardText, Vec<St
     )
 }
 
+/// Every review the log holds for the user, summed over the buckets the
+/// stats page reads.
+fn total_reviews(store: &Store, user: flash_core::UserId) -> u32 {
+    store
+        .review_buckets(user)
+        .unwrap()
+        .iter()
+        .map(|(_, n)| n)
+        .sum()
+}
+
 #[test]
 fn migrations_and_default_settings() {
     let (store, user) = store_with_user();
@@ -195,13 +206,92 @@ fn review_log_is_immutable() {
     assert!(store
         .record_review(user, ids[0], &outcome, NOW + 2, "bogus", None, None)
         .is_err());
-    assert_eq!(store.review_totals(user).unwrap().0, 2);
+    assert_eq!(total_reviews(&store, user), 2);
 
     // Triggers must reject tampering even through raw SQL.
     let err = store.raw_execute_for_tests("UPDATE review_log SET rating = 4");
     assert!(err.unwrap_err().to_string().contains("immutable"));
     let err = store.raw_execute_for_tests("DELETE FROM review_log");
     assert!(err.unwrap_err().to_string().contains("immutable"));
+}
+
+/// Imported history is identified by its timestamps: the same reviews
+/// again add nothing, another user's do, and a card that is not the
+/// user's takes no rows at all.
+#[test]
+fn imported_reviews_dedupe_by_timestamp() {
+    let (store, user) = store_with_user();
+    let other = store.create_user("Other", None, "member", NOW).unwrap();
+    let deck = store.create_deck(user, "D", "", NOW).unwrap();
+    let ids = store
+        .create_cards(user, deck, &[card("f", "b", &[])], None, NOW)
+        .unwrap();
+    let other_deck = store.create_deck(other, "D", "", NOW).unwrap();
+    let other_ids = store
+        .create_cards(other, other_deck, &[card("f", "b", &[])], None, NOW)
+        .unwrap();
+    let scheduler = Scheduler::new(None, 0.9).unwrap();
+    let first = scheduler
+        .review(
+            &CardState::new_card(NOW - 2 * DAY),
+            Rating::Good,
+            NOW - 2 * DAY,
+        )
+        .unwrap();
+    let second = scheduler
+        .review(&first.state, Rating::Good, NOW - DAY)
+        .unwrap();
+    let rows = |card: flash_core::CardId| {
+        vec![
+            flash_store::ImportedReview {
+                card,
+                reviewed_at_ms: NOW - 2 * DAY,
+                outcome: first.clone(),
+            },
+            flash_store::ImportedReview {
+                card,
+                reviewed_at_ms: NOW - DAY,
+                outcome: second.clone(),
+            },
+        ]
+    };
+
+    assert_eq!(store.import_reviews(user, &rows(ids[0])).unwrap(), 2);
+    assert_eq!(store.import_reviews(user, &rows(ids[0])).unwrap(), 0);
+    assert_eq!(total_reviews(&store, user), 2);
+    // Marked as imported, outside any session or client.
+    let provenance: Vec<(String, Option<i64>, Option<String>)> = store
+        .with_conn(|c| {
+            let mut stmt =
+                c.prepare("SELECT source, session_id, client FROM review_log WHERE user_id = ?1")?;
+            let rows = stmt.query_map([user.raw()], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+            Ok(rows.collect::<rusqlite::Result<_>>()?)
+        })
+        .unwrap();
+    assert!(provenance
+        .iter()
+        .all(|(s, session, client)| s == "import" && session.is_none() && client.is_none()));
+
+    // The same timestamps are another user's own reviews.
+    assert_eq!(store.import_reviews(other, &rows(other_ids[0])).unwrap(), 2);
+    // A card that is not the user's is not written, not even once.
+    assert_eq!(store.import_reviews(user, &rows(other_ids[0])).unwrap(), 0);
+    assert_eq!(total_reviews(&store, user), 2);
+    // Flash's own review at an imported timestamp is a different review.
+    store
+        .record_review(user, ids[0], &second, NOW - DAY, "web", None, None)
+        .unwrap();
+    assert_eq!(total_reviews(&store, user), 3);
+
+    // States land only on the user's cards.
+    store
+        .set_card_states(user, &[(ids[0], second.state.clone())])
+        .unwrap();
+    assert_eq!(store.get_card_state(user, ids[0]).unwrap().reps, 2);
+    let err = store
+        .set_card_states(user, &[(other_ids[0], second.state.clone())])
+        .unwrap_err();
+    assert!(matches!(err, StoreError::NotFound(_)), "{err}");
 }
 
 #[test]
@@ -499,6 +589,86 @@ fn queue_scoping_by_deck_and_tag() {
     );
 }
 
+/// Archiving a deck takes its cards out of every scope and its counts to
+/// zero without touching the cards; unarchiving hands everything back.
+#[test]
+fn an_archived_deck_is_out_of_the_queue_and_the_counts() {
+    let (store, user) = store_with_user();
+    // "Anatomy" sorts before "Pharm", so the active-first order shows.
+    let anatomy = store.create_deck(user, "Anatomy", "", NOW).unwrap();
+    let pharm = store.create_deck(user, "Pharm", "", NOW).unwrap();
+    let old = store
+        .create_cards(user, anatomy, &[card("a1", "b", &["exam-2"])], None, NOW)
+        .unwrap();
+    store
+        .create_cards(user, pharm, &[card("p1", "b", &[])], None, NOW)
+        .unwrap();
+    let scheduler = Scheduler::new(None, 0.9).unwrap();
+    let state = store.get_card_state(user, old[0]).unwrap();
+    let outcome = scheduler.review(&state, Rating::Good, NOW).unwrap();
+    store
+        .record_review(user, old[0], &outcome, NOW, "web", None, None)
+        .unwrap();
+    // A month on, the reviewed card is due and the other is still new.
+    let later = NOW + 30 * DAY;
+    let rows = |decks: Vec<flash_store::DeckSummary>| -> Vec<(String, u32, u32, Option<i64>)> {
+        decks
+            .into_iter()
+            .map(|d| (d.name, d.due_count, d.new_count, d.archived_at))
+            .collect()
+    };
+    let active = vec![
+        ("Anatomy".to_string(), 1, 0, None),
+        ("Pharm".to_string(), 0, 1, None),
+    ];
+    assert_eq!(rows(store.list_decks(user, later).unwrap()), active);
+    assert_eq!(
+        store
+            .queue_entries(user, &StudyScope::All, later)
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(store.due_between(user, NOW, later + DAY).unwrap().len(), 1);
+
+    store.set_deck_archived(user, anatomy, Some(later)).unwrap();
+    let in_scope = |scope: StudyScope| store.queue_entries(user, &scope, later).unwrap().len();
+    assert_eq!(in_scope(StudyScope::All), 1, "only Pharm's new card");
+    assert_eq!(in_scope(StudyScope::Deck(anatomy)), 0, "not even by name");
+    assert_eq!(in_scope(StudyScope::Tag("exam-2".into())), 0, "nor by tag");
+    assert_eq!(
+        rows(store.list_decks(user, later).unwrap()),
+        vec![
+            ("Pharm".to_string(), 0, 1, None),
+            ("Anatomy".to_string(), 0, 0, Some(later)),
+        ],
+        "archived last, counts zero"
+    );
+    assert!(store
+        .due_between(user, NOW, later + DAY)
+        .unwrap()
+        .is_empty());
+    // The cards are untouched: still owned, still counted, history kept.
+    assert_eq!(store.card_totals(user).unwrap().0, 2);
+    assert_eq!(store.get_card_state(user, old[0]).unwrap().reps, 1);
+    assert_eq!(total_reviews(&store, user), 1);
+
+    // Archiving twice is nothing; unarchiving restores every number.
+    store.set_deck_archived(user, anatomy, Some(later)).unwrap();
+    store.set_deck_archived(user, anatomy, None).unwrap();
+    assert_eq!(rows(store.list_decks(user, later).unwrap()), active);
+    assert_eq!(in_scope(StudyScope::All), 2);
+    assert_eq!(store.due_between(user, NOW, later + DAY).unwrap().len(), 1);
+
+    // Someone else's deck is not found, not silently archived.
+    let other = store.create_user("O", None, "member", NOW).unwrap();
+    assert!(matches!(
+        store.set_deck_archived(other, anatomy, Some(later)),
+        Err(StoreError::NotFound(_))
+    ));
+    assert_eq!(store.list_decks(user, later).unwrap()[0].archived_at, None);
+}
+
 #[test]
 fn sessions_and_stats() {
     let (store, user) = store_with_user();
@@ -739,7 +909,7 @@ fn admin_user_listing_aggregates_activity() {
 #[test]
 fn review_and_card_totals() {
     let (store, user) = store_with_user();
-    assert_eq!(store.review_totals(user).unwrap(), (0, None));
+    assert!(store.review_buckets(user).unwrap().is_empty());
     assert_eq!(store.card_totals(user).unwrap(), (0, 0));
 
     let deck = store.create_deck(user, "D", "", NOW).unwrap();
@@ -769,7 +939,17 @@ fn review_and_card_totals() {
         .record_review(user, ids[0], &outcome, NOW + 1000, "web", None, None)
         .unwrap();
 
-    assert_eq!(store.review_totals(user).unwrap(), (2, Some(NOW)));
+    // A second apart is one quarter-hour bucket; the next quarter hour
+    // is its own, and buckets come back oldest first.
+    let bucket = NOW / 900_000 * 900_000;
+    assert_eq!(store.review_buckets(user).unwrap(), vec![(bucket, 2)]);
+    store
+        .record_review(user, ids[0], &outcome, bucket + 900_000, "web", None, None)
+        .unwrap();
+    assert_eq!(
+        store.review_buckets(user).unwrap(),
+        vec![(bucket, 2), (bucket + 900_000, 1)]
+    );
 
     // Force one card mature: review phase with 21d+ stability.
     store

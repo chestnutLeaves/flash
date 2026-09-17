@@ -2,7 +2,7 @@
 //! nesting-aware (`{{c2::A {{c3::B}}}}` is legal Anki). One Flash card is
 //! generated per distinct index; rendering happens on the Seg tree so a
 //! blanked span hides its whole content while other indices resolve to
-//! their answers. Operates on raw field HTML — brace matching is
+//! their answers. Operates on raw field HTML: brace matching is
 //! HTML-agnostic and stripping/sanitizing happens downstream.
 
 use std::collections::BTreeSet;
@@ -70,7 +70,7 @@ impl ClozeNote {
     }
 
     /// The completed sentence: every index resolved, with index-`target`
-    /// answers wrapped in a highlight span — what the reveal shows.
+    /// answers wrapped in a highlight span, what the reveal shows.
     pub fn filled(&self, target: u32) -> String {
         render_filled(&self.segs, target)
     }
@@ -85,7 +85,7 @@ fn render_filled(segs: &[Seg], target: u32) -> String {
                 let inner = render_segs(answer, None, false);
                 if *index == target {
                     // An inline span cannot legally contain line breaks or
-                    // block elements — the HTML parser would split the
+                    // block elements: the HTML parser would split the
                     // highlight apart. Multi-line answers get a block
                     // highlight instead.
                     let lower = inner.to_ascii_lowercase();

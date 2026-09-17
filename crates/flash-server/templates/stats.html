@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Stats — Flash{% endblock %}
+{% block title %}Stats - Flash{% endblock %}
 {% block content %}
 <h1>Stats</h1>
 <div class="stat-grid">
@@ -12,7 +12,16 @@
 </div>
 
 <section>
-<h2>Past year</h2>
+<div class="hm-head">
+  <h2>{% if let Some(y) = heat_year %}{{ y }}{% else %}Past year{% endif %}</h2>
+  {% if !year_links.is_empty() %}
+  <nav class="fl-seg hm-years" aria-label="Heatmap year">
+    {%- for l in year_links -%}
+    <a class="fl-btn fl-btn-sm" href="{{ l.href }}"{% if l.current %} aria-current="true"{% endif %}>{{ l.label }}</a>
+    {%- endfor -%}
+  </nav>
+  {% endif %}
+</div>
 <div class="fl-card" style="padding:20px">
   <div class="hm-scroll">
     <div class="hm-months">

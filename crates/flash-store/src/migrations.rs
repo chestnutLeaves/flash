@@ -1,7 +1,7 @@
 //! Schema history. The core's steps are keyed on PRAGMA user_version and
 //! run once, in order, each in a transaction; an extension's steps are
 //! keyed by name in `schema_migrations`, which every open creates. Never
-//! edit a shipped step — append.
+//! edit a shipped step. Append.
 //!
 //! A database from before the registry existed (the single-binary era,
 //! schema 14) is recognised by its version and an empty registry: its
@@ -82,6 +82,34 @@ const CORE: &[Migration] = &[
     Migration {
         name: "v015_review_client",
         sql: V015_REVIEW_CLIENT,
+    },
+    Migration {
+        name: "v016_ai_generation",
+        sql: V016_AI_GENERATION,
+    },
+    Migration {
+        name: "v017_ai_source_sets",
+        sql: V017_AI_SOURCE_SETS,
+    },
+    Migration {
+        name: "v018_ai_turns",
+        sql: V018_AI_TURNS,
+    },
+    Migration {
+        name: "v019_voice",
+        sql: V019_VOICE,
+    },
+    Migration {
+        name: "v020_import_history",
+        sql: V020_IMPORT_HISTORY,
+    },
+    Migration {
+        name: "v021_ai_ledger_detail",
+        sql: V021_AI_LEDGER_DETAIL,
+    },
+    Migration {
+        name: "v022_deck_archive",
+        sql: V022_DECK_ARCHIVE,
     },
 ];
 
@@ -352,7 +380,7 @@ CREATE TABLE study_sessions (
 "#;
 
 /// Password auth (optional alongside passkeys). password_hash is a PHC
-/// string (Argon2id) — a verifier, not a recoverable secret. The pw_failed
+/// string (Argon2id), a verifier, not a recoverable secret. The pw_failed
 /// pair implements a small DB-backed lockout window. Invites learn when
 /// they were minted. (Columns a downstream extension added in this slot
 /// live in that extension's own baseline migration.)
@@ -450,8 +478,8 @@ BEGIN SELECT RAISE(ABORT, 'review_log is immutable'); END;
 "#;
 
 /// Notes: the editable unit behind sibling cards (Anki's model). A note
-/// holds the editor source — Front/Back, or cloze Text/Extra with the raw
-/// `{{cN::...}}` markup — and fans out into cards by `ord` (reversed: 0
+/// holds the editor source (Front/Back, or cloze Text/Extra with the raw
+/// `{{cN::...}}` markup) and fans out into cards by `ord` (reversed: 0
 /// and 1; cloze: index - 1). Editing a note regenerates its cards in
 /// place, so review state survives. Cards created before this migration
 /// (and by MCP or the quick-add form) have no note; they behave as
@@ -537,3 +565,370 @@ const V014_RESERVED: &str = "-- reserved for a downstream extension";
 /// NULL for the web. Adding a column does not fire review_log's
 /// immutability triggers.
 const V015_REVIEW_CLIENT: &str = "ALTER TABLE review_log ADD COLUMN client TEXT;";
+
+/// Card generation from a user's own material. A *source* is what the
+/// user handed over (its blob lives in the media store under its
+/// sha256, like card media; the row carries the facts the preflight
+/// shows). An *extraction* is the model's reading of a source, cached
+/// per user by content hash, model and prompt version so re-runs over
+/// the same file cost nothing; the figure crops it produced are ordinary
+/// media rows, pinned by `ai_figures` so the unlinked-media sweep leaves
+/// them alone until a card keeps them or the extraction goes. A *job* is
+/// one run of the pipeline: a small state machine the runner advances
+/// and the clients poll. Its `source_id` and `extraction_id` carry no
+/// foreign key on purpose: sources and extractions are housekept after
+/// a month unused, and a job whose source has gone still renders, as
+/// "source expired". *Drafts* are the generated cards awaiting keep or
+/// discard (invisible to study, MCP and export) and remember the note
+/// a keep created. *Calls* are the ledger every model call writes, ok or
+/// not; a quota is derived from it rather than kept in a counter. A
+/// note remembers the job that generated it, so voice study can ground
+/// a question in the extraction the card came from.
+const V016_AI_GENERATION: &str = r#"
+CREATE TABLE ai_sources (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  kind TEXT NOT NULL CHECK (kind IN ('text','pdf','image','youtube','video','audio')),
+  sha256 TEXT NOT NULL,
+  mime TEXT NOT NULL DEFAULT '',
+  size INTEGER NOT NULL DEFAULT 0,
+  filename TEXT NOT NULL DEFAULT '',
+  url TEXT,
+  text TEXT,
+  pages INTEGER,
+  duration_s INTEGER,
+  est_words INTEGER,
+  image_count INTEGER,
+  created_at INTEGER NOT NULL,
+  last_used_at INTEGER NOT NULL
+) STRICT;
+CREATE INDEX idx_ai_sources_user ON ai_sources(user_id);
+CREATE INDEX idx_ai_sources_sha ON ai_sources(sha256);
+CREATE INDEX idx_ai_sources_last_used ON ai_sources(last_used_at);
+
+CREATE TABLE ai_extractions (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  source_id INTEGER NOT NULL REFERENCES ai_sources(id),
+  sha256 TEXT NOT NULL,
+  model TEXT NOT NULL,
+  prompt_version INTEGER NOT NULL,
+  text TEXT NOT NULL,
+  figures TEXT NOT NULL DEFAULT '[]',
+  est_words INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  last_used_at INTEGER NOT NULL,
+  UNIQUE (user_id, sha256, model, prompt_version)
+) STRICT;
+CREATE INDEX idx_ai_extractions_source ON ai_extractions(source_id);
+
+CREATE TABLE ai_figures (
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  extraction_id INTEGER NOT NULL REFERENCES ai_extractions(id),
+  media_id INTEGER NOT NULL REFERENCES media(id),
+  PRIMARY KEY (extraction_id, media_id)
+) WITHOUT ROWID;
+CREATE INDEX idx_ai_figures_media ON ai_figures(media_id);
+
+CREATE TABLE ai_jobs (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  source_id INTEGER NOT NULL,
+  deck_id INTEGER REFERENCES decks(id),
+  extraction_id INTEGER,
+  op TEXT NOT NULL CHECK (op IN ('generate','revise','more')),
+  parent_job_id INTEGER REFERENCES ai_jobs(id),
+  instruction TEXT NOT NULL DEFAULT '',
+  state TEXT NOT NULL DEFAULT 'queued'
+    CHECK (state IN ('queued','extracting','generating','done','failed')),
+  progress INTEGER NOT NULL DEFAULT 0,
+  error TEXT,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  finished_at INTEGER
+) STRICT;
+CREATE INDEX idx_ai_jobs_user ON ai_jobs(user_id, created_at);
+CREATE INDEX idx_ai_jobs_state ON ai_jobs(state, created_at);
+
+CREATE TABLE ai_drafts (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  job_id INTEGER NOT NULL REFERENCES ai_jobs(id),
+  ord INTEGER NOT NULL,
+  note_type TEXT NOT NULL CHECK (note_type IN ('basic','basic_reversed','basic_typed','cloze')),
+  front_html TEXT NOT NULL,
+  back_html TEXT NOT NULL DEFAULT '',
+  tags TEXT NOT NULL DEFAULT '[]',
+  figure_media_ids TEXT NOT NULL DEFAULT '[]',
+  status TEXT NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending','edited','kept','discarded')),
+  note_id INTEGER REFERENCES notes(id),
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  UNIQUE (job_id, ord)
+) STRICT;
+
+CREATE TABLE ai_calls (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  job_id INTEGER REFERENCES ai_jobs(id),
+  step TEXT NOT NULL CHECK (step IN ('extract','generate','revise','more','grade','clarify')),
+  model TEXT NOT NULL,
+  input_kind TEXT NOT NULL CHECK (input_kind IN ('text','pdf','image','youtube','video','audio')),
+  input_tokens INTEGER NOT NULL DEFAULT 0,
+  output_tokens INTEGER NOT NULL DEFAULT 0,
+  media_seconds INTEGER NOT NULL DEFAULT 0,
+  ms INTEGER NOT NULL DEFAULT 0,
+  ok INTEGER NOT NULL DEFAULT 1,
+  error TEXT,
+  started_at INTEGER NOT NULL
+) STRICT;
+CREATE INDEX idx_ai_calls_user_time ON ai_calls(user_id, started_at);
+
+ALTER TABLE notes ADD COLUMN ai_job_id INTEGER REFERENCES ai_jobs(id);
+"#;
+
+/// A job reads a *set* of sources, in order: a PDF, some photos and a
+/// recording in one request. `ai_job_sources` is the set; the job's
+/// own `source_id` stays as the first member for readers written before
+/// sets existed, and every job that exists is given a one-member set.
+/// The junction carries no foreign key to `ai_sources` for the same
+/// reason the job's column never did: a member may be housekept away,
+/// and the job still renders as expired. A source made from a
+/// converted document keeps the type it was uploaded as in
+/// `origin_mime`, so the person sees "slides.pptx" and not a PDF they
+/// never made.
+const V017_AI_SOURCE_SETS: &str = r#"
+CREATE TABLE ai_job_sources (
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  job_id INTEGER NOT NULL REFERENCES ai_jobs(id),
+  source_id INTEGER NOT NULL,
+  ord INTEGER NOT NULL,
+  PRIMARY KEY (job_id, ord)
+) STRICT, WITHOUT ROWID;
+CREATE INDEX idx_ai_job_sources_source ON ai_job_sources(source_id);
+INSERT INTO ai_job_sources (user_id, job_id, source_id, ord)
+  SELECT user_id, id, source_id, 0 FROM ai_jobs;
+
+ALTER TABLE ai_sources ADD COLUMN origin_mime TEXT;
+"#;
+
+/// The thread under a review: what the person asked the model to do
+/// to the drafts, and the model's one-sentence answers. `job_id` is the
+/// root job (the review the thread belongs to); `child_job_id` is the
+/// pass that ran a person's turn or wrote the model's, so a failed
+/// pass can be shown as such. Order is by id, since two turns can
+/// share a millisecond.
+const V018_AI_TURNS: &str = r#"
+CREATE TABLE ai_turns (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  job_id INTEGER NOT NULL REFERENCES ai_jobs(id),
+  role TEXT NOT NULL CHECK (role IN ('user','model')),
+  text TEXT NOT NULL,
+  child_job_id INTEGER REFERENCES ai_jobs(id),
+  created_at INTEGER NOT NULL
+) STRICT;
+CREATE INDEX idx_ai_turns_job ON ai_turns(job_id, id);
+"#;
+
+/// Voice study on every surface. The account chooses a voice, a speed,
+/// how grades apply and whether the sound cues play, and web and app
+/// read the same row. A synthesized clip is
+/// one row per (spoken text, voice, model) with its bytes in the media
+/// store under `key` (64 hex, a hash of the three with its own prefix,
+/// never a media hash), shared by every account whose card says the
+/// same words; `envelope` is the loudness curve the apps animate with,
+/// one byte per 50 ms. A ref is which account's card resolved to which
+/// clip: no foreign key on the card on purpose, since cards are hard
+/// deleted with their deck and the sweep drops refs whose card is gone.
+/// A card clip nobody references is an orphan; phrase clips (`kind =
+/// 'phrase'`) have no refs and stay.
+const V019_VOICE: &str = r#"
+ALTER TABLE user_settings ADD COLUMN voice_id TEXT NOT NULL DEFAULT 'af_heart';
+ALTER TABLE user_settings ADD COLUMN speech_rate REAL NOT NULL DEFAULT 1.0;
+ALTER TABLE user_settings ADD COLUMN voice_apply TEXT NOT NULL DEFAULT 'auto'
+  CHECK (voice_apply IN ('auto','confirm'));
+ALTER TABLE user_settings ADD COLUMN sound_cues INTEGER NOT NULL DEFAULT 1;
+
+CREATE TABLE voice_clips (
+  id INTEGER PRIMARY KEY,
+  key TEXT NOT NULL UNIQUE,
+  kind TEXT NOT NULL CHECK (kind IN ('card','phrase')),
+  voice TEXT NOT NULL,
+  model TEXT NOT NULL,
+  phrase TEXT,
+  mime TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  duration_ms INTEGER NOT NULL,
+  envelope BLOB NOT NULL,
+  created_at INTEGER NOT NULL
+) STRICT;
+CREATE INDEX idx_voice_clips_phrase ON voice_clips(voice, model, phrase) WHERE phrase IS NOT NULL;
+
+CREATE TABLE voice_clip_refs (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  card_id INTEGER NOT NULL,
+  side TEXT NOT NULL CHECK (side IN ('front','back')),
+  clip_id INTEGER NOT NULL REFERENCES voice_clips(id),
+  created_at INTEGER NOT NULL,
+  last_used_at INTEGER NOT NULL,
+  UNIQUE (user_id, card_id, side, clip_id)
+) STRICT;
+CREATE INDEX idx_voice_clip_refs_clip ON voice_clip_refs(clip_id);
+CREATE INDEX idx_voice_clip_refs_user ON voice_clip_refs(user_id);
+"#;
+
+/// Imported Anki history: one review_log row per revlog row, source
+/// `import`. A revlog id is the review's timestamp and the collection's
+/// primary key, so a user's imported timestamps identify the reviews;
+/// the partial unique index lets a second import of the same collection
+/// add nothing. No existing row has source `import` (nothing wrote it
+/// before now), so the index builds empty.
+const V020_IMPORT_HISTORY: &str = r#"
+CREATE UNIQUE INDEX idx_review_import_once ON review_log(user_id, reviewed_at) WHERE source = 'import';
+"#;
+
+/// The ledger is rebuilt (the old table renamed aside, copied, dropped)
+/// to carry everything the reply's usage record says (cached, tool-use
+/// and thinking tokens, the model version that answered, the response
+/// id, and the record itself as sent) and to admit the voice `turn`
+/// step. What a call costs is no concern of the core's: a downstream
+/// extension may keep its own account of each row.
+const V021_AI_LEDGER_DETAIL: &str = r#"
+ALTER TABLE ai_calls RENAME TO ai_calls_before_detail;
+CREATE TABLE ai_calls (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  job_id INTEGER REFERENCES ai_jobs(id),
+  step TEXT NOT NULL CHECK (step IN ('extract','generate','revise','more','grade','clarify','turn')),
+  model TEXT NOT NULL,
+  model_version TEXT,
+  response_id TEXT,
+  input_kind TEXT NOT NULL CHECK (input_kind IN ('text','pdf','image','youtube','video','audio')),
+  input_tokens INTEGER NOT NULL DEFAULT 0,
+  cached_tokens INTEGER NOT NULL DEFAULT 0,
+  tool_tokens INTEGER NOT NULL DEFAULT 0,
+  output_tokens INTEGER NOT NULL DEFAULT 0,
+  thoughts_tokens INTEGER NOT NULL DEFAULT 0,
+  media_seconds INTEGER NOT NULL DEFAULT 0,
+  ms INTEGER NOT NULL DEFAULT 0,
+  usage_json TEXT,
+  ok INTEGER NOT NULL DEFAULT 1,
+  error TEXT,
+  started_at INTEGER NOT NULL
+) STRICT;
+INSERT INTO ai_calls (id, user_id, job_id, step, model, input_kind, input_tokens,
+  output_tokens, media_seconds, ms, ok, error, started_at)
+SELECT id, user_id, job_id, step, model, input_kind, input_tokens,
+  output_tokens, media_seconds, ms, ok, error, started_at
+FROM ai_calls_before_detail;
+DROP TABLE ai_calls_before_detail;
+CREATE INDEX idx_ai_calls_user_time ON ai_calls(user_id, started_at);
+CREATE INDEX idx_ai_calls_time ON ai_calls(started_at);
+"#;
+
+/// A deck can be archived: kept whole (cards, media, review history) but
+/// out of every study queue and every due count until it is unarchived.
+/// The column is the moment it was archived, NULL while the deck is
+/// active; nothing on the cards changes either way, so unarchiving just
+/// recomputes the queue from the review data that was there all along.
+const V022_DECK_ARCHIVE: &str = "ALTER TABLE decks ADD COLUMN archived_at INTEGER;";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A database with the first `n` core steps applied the way `run`
+    /// applies them.
+    fn core_up_to(n: usize) -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        crate::pragmas::apply(&conn).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE schema_migrations (extension TEXT NOT NULL, name TEXT NOT NULL, \
+             applied_at INTEGER NOT NULL, PRIMARY KEY (extension, name)) STRICT;",
+        )
+        .unwrap();
+        for (i, m) in CORE.iter().take(n).enumerate() {
+            apply(&conn, "core", m, Some((i + 1) as i64)).unwrap();
+        }
+        conn
+    }
+
+    #[test]
+    fn the_ledger_detail_step_keeps_every_old_call_and_admits_the_voice_turn() {
+        let conn = core_up_to(20);
+        conn.execute_batch(
+            "INSERT INTO users (id, display_name, role, created_at) VALUES (7, 'Ada', 'member', 1);
+             INSERT INTO ai_calls (id, user_id, step, model, input_kind, input_tokens, output_tokens,
+               media_seconds, ms, ok, error, started_at)
+             VALUES (1, 7, 'generate', 'gemini-3.8-flash', 'pdf', 1000, 200, 0, 900, 1, NULL, 5),
+                    (2, 7, 'grade', 'gemini-3.5-flash-lite', 'audio', 1200, 300, 4, 300, 1, NULL, 6),
+                    (3, 7, 'extract', 'gemini-3.8-flash', 'video', 0, 0, 0, 10, 0, 'http 503', 7);",
+        )
+        .unwrap();
+        apply(&conn, "core", &CORE[20], Some(21)).unwrap();
+
+        let totals: (i64, i64, i64) = conn
+            .query_row(
+                "SELECT COUNT(*), SUM(input_tokens), SUM(ok = 0) FROM ai_calls WHERE user_id = 7",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(totals, (3, 2200, 1), "every call survives with its counts");
+        // The detail the old rows never had reads as nothing.
+        let detail: (i64, Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT cached_tokens, model_version, usage_json FROM ai_calls WHERE id = 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(detail, (0, None, None));
+        // The rebuilt table admits the voice turn step and keeps its
+        // index.
+        conn.execute(
+            "INSERT INTO ai_calls (user_id, step, model, input_kind, started_at) \
+             VALUES (7, 'turn', 'gemini-3.5-flash-lite', 'text', 8)",
+            [],
+        )
+        .unwrap();
+        let index: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' \
+                 AND name = 'idx_ai_calls_user_time'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(index, 1);
+    }
+
+    #[test]
+    fn the_archive_step_leaves_every_existing_deck_active() {
+        let conn = core_up_to(21);
+        conn.execute_batch(
+            "INSERT INTO users (id, display_name, role, created_at) VALUES (7, 'Ada', 'member', 1);
+             INSERT INTO decks (id, user_id, name, created_at) VALUES (3, 7, 'Old exam', 2);",
+        )
+        .unwrap();
+        apply(&conn, "core", &CORE[21], Some(22)).unwrap();
+
+        let archived_at: Option<i64> = conn
+            .query_row("SELECT archived_at FROM decks WHERE id = 3", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(
+            archived_at, None,
+            "a deck that predates the column is active"
+        );
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, 22);
+    }
+}

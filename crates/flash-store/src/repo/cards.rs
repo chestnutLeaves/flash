@@ -19,8 +19,11 @@ pub struct DeckSummary {
     pub id: DeckId,
     pub name: String,
     pub description: String,
+    /// Zero for an archived deck, whatever its cards say.
     pub due_count: u32,
     pub new_count: u32,
+    /// When the deck was archived; None while it is active.
+    pub archived_at: Option<i64>,
 }
 
 /// Per-deck daily-limit overrides (None = inherit the account default)
@@ -105,7 +108,7 @@ impl Store {
         Ok(DeckId(conn.last_insert_rowid()))
     }
 
-    /// Removes a deck and every card in it — hard delete, unlike the
+    /// Removes a deck and every card in it: hard delete, unlike the
     /// per-card soft delete, because soft-deleted cards would pin the
     /// deck's FK and its UNIQUE(user_id, name) slot forever. Review history
     /// stays (review_log has no card FK); the only wrinkle is that today's
@@ -132,8 +135,21 @@ impl Store {
             "DELETE FROM cards WHERE deck_id = ?1 AND user_id = ?2",
             params![deck.0, user.raw()],
         )?;
+        // A kept draft remembers the note it made and a generation job
+        // remembers its deck; both references are dropped rather than
+        // the rows, so the job's review page and the ledger survive
+        // the deck and the user picks another deck at keep.
+        tx.execute(
+            "UPDATE ai_drafts SET note_id = NULL WHERE user_id = ?2 AND note_id IN
+               (SELECT id FROM notes WHERE deck_id = ?1 AND user_id = ?2)",
+            params![deck.0, user.raw()],
+        )?;
         tx.execute(
             "DELETE FROM notes WHERE deck_id = ?1 AND user_id = ?2",
+            params![deck.0, user.raw()],
+        )?;
+        tx.execute(
+            "UPDATE ai_jobs SET deck_id = NULL WHERE deck_id = ?1 AND user_id = ?2",
             params![deck.0, user.raw()],
         )?;
         for ext in &self.extensions {
@@ -154,7 +170,8 @@ impl Store {
                 "SELECT m.id, m.sha256 FROM media m
                  WHERE m.user_id = ?1
                    AND m.created_at < (unixepoch() * 1000) - 3600000
-                   AND NOT EXISTS (SELECT 1 FROM card_media cm WHERE cm.media_id = m.id)",
+                   AND NOT EXISTS (SELECT 1 FROM card_media cm WHERE cm.media_id = m.id)
+                   AND NOT EXISTS (SELECT 1 FROM ai_figures f WHERE f.media_id = m.id)",
             )?;
             let rows = stmt.query_map([user.raw()], |r| Ok((r.get(0)?, r.get(1)?)))?;
             rows.collect::<rusqlite::Result<_>>()?
@@ -269,6 +286,24 @@ impl Store {
         )
     }
 
+    /// Archives the deck (`Some(now)`) or puts it back (`None`). Nothing
+    /// on its cards changes: an archived deck is skipped by the queue and
+    /// the counts, and unarchiving hands the same review data back to
+    /// them. Idempotent; a stranger's deck is not found.
+    pub fn set_deck_archived(
+        &self,
+        user: UserId,
+        deck: DeckId,
+        archived_at: Option<i64>,
+    ) -> Result<()> {
+        exec_expect_row(
+            &self.conn(),
+            "deck",
+            "UPDATE decks SET archived_at = ?1 WHERE id = ?2 AND user_id = ?3",
+            params![archived_at, deck.0, user.raw()],
+        )
+    }
+
     /// Sets the deck's "more new cards today" boost for the study day
     /// starting at `day_ms` (replaces any earlier value).
     pub fn set_deck_boost(
@@ -296,18 +331,25 @@ impl Store {
         Ok(n.max(0) as u32)
     }
 
-    /// Decks with counts of currently-due and unseen cards.
+    /// Decks with counts of currently-due and unseen cards: active decks
+    /// first, by name, then the archived ones (whose counts are zero).
     pub fn list_decks(&self, user: UserId, now_ms: i64) -> Result<Vec<DeckSummary>> {
         let conn = self.conn();
         let mut stmt = conn.prepare(
             "SELECT d.id, d.name, d.description,
-               (SELECT COUNT(*) FROM cards c JOIN card_state s ON s.card_id = c.id
-                 WHERE c.deck_id = d.id AND c.deleted_at IS NULL AND c.suspended = 0
-                   AND s.phase != 0 AND s.due <= ?2) AS due_count,
-               (SELECT COUNT(*) FROM cards c JOIN card_state s ON s.card_id = c.id
-                 WHERE c.deck_id = d.id AND c.deleted_at IS NULL AND c.suspended = 0
-                   AND s.phase = 0) AS new_count
-             FROM decks d WHERE d.user_id = ?1 ORDER BY d.name",
+               CASE WHEN d.archived_at IS NULL THEN
+                 (SELECT COUNT(*) FROM cards c JOIN card_state s ON s.card_id = c.id
+                   WHERE c.deck_id = d.id AND c.deleted_at IS NULL AND c.suspended = 0
+                     AND s.phase != 0 AND s.due <= ?2)
+               ELSE 0 END AS due_count,
+               CASE WHEN d.archived_at IS NULL THEN
+                 (SELECT COUNT(*) FROM cards c JOIN card_state s ON s.card_id = c.id
+                   WHERE c.deck_id = d.id AND c.deleted_at IS NULL AND c.suspended = 0
+                     AND s.phase = 0)
+               ELSE 0 END AS new_count,
+               d.archived_at
+             FROM decks d WHERE d.user_id = ?1
+             ORDER BY (d.archived_at IS NOT NULL), d.name",
         )?;
         let rows = stmt.query_map(params![user.raw(), now_ms], |r| {
             Ok(DeckSummary {
@@ -316,6 +358,7 @@ impl Store {
                 description: r.get(2)?,
                 due_count: r.get::<_, i64>(3)? as u32,
                 new_count: r.get::<_, i64>(4)? as u32,
+                archived_at: r.get(5)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
@@ -335,8 +378,8 @@ impl Store {
         Ok((active as u32, mature as u32))
     }
 
-    /// Every live card with its deck name and tags, oldest first — the
-    /// export surface. Never filtered by plan or cap.
+    /// Every live card with its deck name and tags, oldest first (the
+    /// export surface). Never filtered by plan or cap.
     pub fn export_cards(&self, user: UserId) -> Result<Vec<crate::export::ExportCard>> {
         let conn = self.conn();
         let mut stmt = conn.prepare(
@@ -395,7 +438,7 @@ impl Store {
     }
 
     /// Live cards the user has already seen (phase past New), suspended or
-    /// not — suspending must not free up rotation slots for the cap gate.
+    /// not: suspending must not free up rotation slots for the cap gate.
     pub fn cards_in_rotation(&self, user: UserId) -> Result<u32> {
         let n: i64 = self.conn().query_row(
             "SELECT COUNT(*) FROM cards c JOIN card_state s ON s.card_id = c.id
@@ -624,7 +667,7 @@ impl Store {
         self.list_cards_page(user, deck, search, limit, 0)
     }
 
-    /// Newest first, `offset` rows in — one page of the deck view.
+    /// Newest first, `offset` rows in (one page of the deck view).
     pub fn list_cards_page(
         &self,
         user: UserId,
@@ -731,7 +774,7 @@ fn reap_empty_note(conn: &Connection, user: UserId, note: Option<i64>, now_ms: i
 }
 
 /// The deck must exist and belong to `user`; anything else is
-/// `NotFound("deck")` — a stranger's deck is indistinguishable from none.
+/// `NotFound("deck")`: a stranger's deck is indistinguishable from none.
 /// Every multi-statement mutation on a deck opens with this.
 pub fn require_deck(conn: &Connection, user: UserId, deck: DeckId) -> Result<()> {
     let owned: bool = conn.query_row(

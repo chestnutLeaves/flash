@@ -7,7 +7,7 @@
 
 use std::collections::BTreeMap;
 
-use flash_core::{CardId, DeckId, NoteId, UserId};
+use flash_core::{AiJobId, CardId, DeckId, NoteId, UserId};
 use rusqlite::{params, OptionalExtension, Transaction};
 
 use crate::notes::{GeneratedCard, NoteType};
@@ -27,6 +27,8 @@ pub struct NoteRow {
     pub tags: Vec<String>,
     /// Live cards, ascending by ord.
     pub cards: Vec<(u32, CardId)>,
+    /// The generation job this note was kept from, if any.
+    pub ai_job_id: Option<AiJobId>,
 }
 
 /// Everything a note save needs, beyond the generated cards.
@@ -38,6 +40,10 @@ pub struct NoteSave<'a> {
     pub tags: &'a [String],
     /// Free-plan card cap; the check runs inside the write transaction.
     pub cap: Option<u32>,
+    /// The generation job a kept draft came from; the lineage voice
+    /// study grounds its answers in. Set on creation only. An update
+    /// leaves the column as it is.
+    pub ai_job_id: Option<AiJobId>,
     pub now_ms: i64,
 }
 
@@ -53,15 +59,27 @@ impl Store {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
         require_deck(&tx, user, deck)?;
+        if let Some(job) = save.ai_job_id {
+            let owned: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM ai_jobs WHERE id = ?1 AND user_id = ?2)",
+                params![job.0, user.raw()],
+                |r| r.get(0),
+            )?;
+            if !owned {
+                return Err(StoreError::NotFound("ai job"));
+            }
+        }
         tx.execute(
-            "INSERT INTO notes (user_id, deck_id, note_type, front_html, back_html, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
+            "INSERT INTO notes (user_id, deck_id, note_type, front_html, back_html, ai_job_id,
+               created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
             params![
                 user.raw(),
                 deck.0,
                 save.note_type.as_str(),
                 save.front_html,
                 save.back_html,
+                save.ai_job_id.map(|j| j.0),
                 save.now_ms
             ],
         )?;
@@ -111,7 +129,7 @@ impl Store {
         let conn = self.conn();
         let row = conn
             .query_row(
-                "SELECT id, deck_id, note_type, front_html, back_html
+                "SELECT id, deck_id, note_type, front_html, back_html, ai_job_id
                  FROM notes WHERE id = ?1 AND user_id = ?2 AND deleted_at IS NULL",
                 params![note.0, user.raw()],
                 |r| {
@@ -121,11 +139,12 @@ impl Store {
                         r.get::<_, String>(2)?,
                         r.get::<_, String>(3)?,
                         r.get::<_, String>(4)?,
+                        r.get::<_, Option<i64>>(5)?,
                     ))
                 },
             )
             .optional()?;
-        let Some((id, deck_id, kind, front_html, back_html)) = row else {
+        let Some((id, deck_id, kind, front_html, back_html, ai_job_id)) = row else {
             return Ok(None);
         };
         let note_type = NoteType::parse(&kind).ok_or(StoreError::NotFound("note type"))?;
@@ -150,7 +169,23 @@ impl Store {
             back_html,
             tags,
             cards,
+            ai_job_id: ai_job_id.map(AiJobId),
         }))
+    }
+
+    /// The generation job a live note was kept from, if any.
+    pub fn note_ai_job(&self, user: UserId, note: NoteId) -> Result<Option<AiJobId>> {
+        Ok(self
+            .conn()
+            .query_row(
+                "SELECT ai_job_id FROM notes
+                 WHERE id = ?1 AND user_id = ?2 AND deleted_at IS NULL",
+                params![note.0, user.raw()],
+                |r| r.get::<_, Option<i64>>(0),
+            )
+            .optional()?
+            .flatten()
+            .map(AiJobId))
     }
 
     /// The note a live card belongs to, if any.

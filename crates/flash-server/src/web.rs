@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use askama::Template;
 use axum::extract::{DefaultBodyLimit, Multipart, Path, Query, RawQuery, State};
-use axum::http::{header, StatusCode};
+use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::{delete, get, post};
 use axum::{Form, Router};
@@ -72,10 +72,43 @@ pub fn router() -> Router<AppState> {
             "/media",
             post(crate::media::upload_media).layer(DefaultBodyLimit::max(MEDIA_UPLOAD_MAX_BYTES)),
         )
+        // Card generation: the picker, the source it reads, the job the
+        // runner takes, and the review of what it wrote. Every one of
+        // them answers 404 on a server with no model configured.
+        .route("/generate", get(crate::web_ai::generate_page))
+        .route(
+            "/decks/{id}/generate",
+            get(crate::web_ai::deck_generate_page),
+        )
+        .route(
+            "/ai/sources",
+            // One file at the media cap plus multipart framing.
+            post(crate::web_ai::create_source).layer(DefaultBodyLimit::max(MEDIA_UPLOAD_MAX_BYTES)),
+        )
+        .route("/ai/sources/{id}", delete(crate::web_ai::delete_source))
+        .route("/ai/preflight", post(crate::web_ai::preflight_set))
+        .route("/ai/jobs", post(crate::web_ai::create_job))
+        .route("/ai/jobs/{id}", get(crate::web_ai::job_page))
+        .route("/ai/jobs/{id}/review", get(crate::web_ai::review_page))
+        .route("/ai/jobs/{id}/keep", post(crate::web_ai::keep_job))
+        .route("/ai/jobs/{id}/discard", post(crate::web_ai::discard_job))
+        .route("/ai/jobs/{id}/edit", post(crate::web_ai::edit_job))
+        .route("/ai/jobs/{id}/thread", get(crate::web_ai::thread_partial))
+        .route("/ai/drafts/{id}/keep", post(crate::web_ai::keep_draft))
+        .route(
+            "/ai/drafts/{id}/discard",
+            post(crate::web_ai::discard_draft),
+        )
+        .route(
+            "/ai/drafts/{id}/edit",
+            get(crate::web_ai::draft_editor).post(crate::web_ai::save_draft),
+        )
         .route("/decks/{id}/settings", get(deck_settings_page))
         .route("/decks/{id}/rename", post(rename_deck))
         .route("/decks/{id}/limits", post(save_deck_limits))
         .route("/decks/{id}/boost", post(boost_deck))
+        .route("/decks/{id}/archive", post(archive_deck))
+        .route("/decks/{id}/unarchive", post(unarchive_deck))
         .route("/decks/{id}/delete", post(delete_deck))
         .route("/study/boost", post(boost_all))
         .route("/connect/dismiss", post(dismiss_connect_cta))
@@ -83,10 +116,32 @@ pub fn router() -> Router<AppState> {
         .route("/study", get(study_page))
         .route("/study/reveal", post(study_reveal))
         .route("/study/review", post(study_review))
+        .route(
+            "/study/turn",
+            // A recording rides in the form as base64, past the default
+            // limit once form encoding is counted.
+            post(crate::web_voice::spoken_turn)
+                .layer(DefaultBodyLimit::max(crate::bounds::VOICE_BODY_BYTES)),
+        )
+        .route(
+            "/study/cards/{card}/audio",
+            get(crate::web_voice::card_audio),
+        )
+        .route("/voice/phrases", get(crate::web_voice::phrases))
+        .route(
+            "/voice/phrases/{voice}/{key}/audio",
+            get(crate::web_voice::phrase_audio),
+        )
+        .route(
+            "/voice/answers/{token}/audio",
+            get(crate::web_voice::answer_audio),
+        )
+        .route("/voice/voices", get(crate::web_voice::voices))
         .route("/stats", get(stats_page))
         .route("/users", get(users_page))
         .route("/settings", get(settings_page))
         .route("/settings/grading", post(save_grading))
+        .route("/settings/voice", post(save_voice))
         .route("/settings/appearance", post(save_appearance))
         .route("/settings/name", post(save_name))
         .route("/settings/scheduling", post(save_scheduling))
@@ -110,10 +165,19 @@ pub fn router() -> Router<AppState> {
         .route("/static/htmx.min.js", get(static_htmx))
         .route("/static/webauthn.js", get(static_webauthn))
         .route("/static/study.js", get(static_study))
+        .route("/static/speech.js", get(static_speech))
+        .route("/static/glow.js", get(static_glow))
+        .route("/static/voice.js", get(static_voice))
+        .route("/static/cue-tick.wav", get(static_cue_tick))
+        .route("/static/cue-done.wav", get(static_cue_done))
+        .route("/static/ai.js", get(static_ai))
         .route("/static/favicon.svg", get(static_favicon))
-        // Icon scrapers (connector dialogs, link previews) try this path
-        // before parsing <link rel="icon">; serve the same square tile.
-        .route("/favicon.ico", get(static_favicon))
+        // The same tile as bitmaps: search engines and icon scrapers read
+        // ICO/PNG, not SVG, and many try /favicon.ico before parsing
+        // <link rel="icon">.
+        .route("/static/favicon-192.png", get(static_favicon_png))
+        .route("/static/apple-touch-icon.png", get(static_touch_icon))
+        .route("/favicon.ico", get(static_favicon_ico))
         .route("/static/ui.js", get(static_ui))
         .route("/static/editor.js", get(static_editor))
         .route("/static/fonts/Geist-Regular.woff2", get(font_sans_regular))
@@ -299,12 +363,12 @@ pub fn agent_reason(headers: &axum::http::HeaderMap) -> Option<&'static str> {
 }
 
 /// True when the request looks like a crawler or script rather than a
-/// person — those must not inflate view counters.
+/// person. Those must not inflate view counters.
 pub fn is_probably_bot(headers: &axum::http::HeaderMap) -> bool {
     bot_reason(&axum::http::Method::GET, headers).is_some()
 }
 
-/// The extension's anonymous product counter (event + ref only — never a
+/// The extension's anonymous product counter (event + ref only, never a
 /// user id, session, or IP).
 pub(crate) fn count_event(state: &AppState, event: &'static str, ref_code: Option<&str>) {
     state.ext.count_event(&state.services, event, ref_code);
@@ -335,6 +399,11 @@ pub fn err_response(err: ServiceError) -> Response {
             (StatusCode::NOT_FOUND, format!("not found: {what}")).into_response()
         }
         ServiceError::OverCap { .. } => (StatusCode::FORBIDDEN, err.to_string()).into_response(),
+        // A generation this plan or this server will not run. The
+        // sentence is the policy's own and is what the page shows; a
+        // server with no model at all answers `AiOff`'s 404 instead,
+        // before any service call is made.
+        ServiceError::AiDenied { message, .. } => (StatusCode::FORBIDDEN, message).into_response(),
         ServiceError::Store(e) if e.is_constraint() => {
             (StatusCode::CONFLICT, "that already exists").into_response()
         }
@@ -459,6 +528,36 @@ async fn static_favicon() -> impl IntoResponse {
     )
 }
 
+async fn static_favicon_ico() -> impl IntoResponse {
+    (
+        [
+            (header::CONTENT_TYPE, "image/x-icon"),
+            (header::CACHE_CONTROL, "max-age=86400"),
+        ],
+        include_bytes!("../static/favicon.ico").as_slice(),
+    )
+}
+
+async fn static_favicon_png() -> impl IntoResponse {
+    (
+        [
+            (header::CONTENT_TYPE, "image/png"),
+            (header::CACHE_CONTROL, "max-age=86400"),
+        ],
+        include_bytes!("../static/favicon-192.png").as_slice(),
+    )
+}
+
+async fn static_touch_icon() -> impl IntoResponse {
+    (
+        [
+            (header::CONTENT_TYPE, "image/png"),
+            (header::CACHE_CONTROL, "max-age=86400"),
+        ],
+        include_bytes!("../static/apple-touch-icon.png").as_slice(),
+    )
+}
+
 async fn static_editor() -> impl IntoResponse {
     (
         [
@@ -476,6 +575,69 @@ async fn static_study() -> impl IntoResponse {
             (header::CACHE_CONTROL, "max-age=3600"),
         ],
         include_str!("../static/study.js"),
+    )
+}
+
+async fn static_voice() -> impl IntoResponse {
+    (
+        [
+            (header::CONTENT_TYPE, "application/javascript"),
+            (header::CACHE_CONTROL, "max-age=3600"),
+        ],
+        include_str!("../static/voice.js"),
+    )
+}
+
+async fn static_speech() -> impl IntoResponse {
+    (
+        [
+            (header::CONTENT_TYPE, "application/javascript"),
+            (header::CACHE_CONTROL, "max-age=3600"),
+        ],
+        include_str!("../static/speech.js"),
+    )
+}
+
+async fn static_glow() -> impl IntoResponse {
+    (
+        [
+            (header::CONTENT_TYPE, "application/javascript"),
+            (header::CACHE_CONTROL, "max-age=3600"),
+        ],
+        include_str!("../static/glow.js"),
+    )
+}
+
+/// The two sound cues of voice study: a bell tap when the microphone
+/// opens, a marimba pair when a rating posts. Both files are rendered by
+/// `tools/cues/make-cues.mjs`; edit the recipe there, never the bytes.
+async fn static_cue_tick() -> impl IntoResponse {
+    (
+        [
+            (header::CONTENT_TYPE, "audio/wav"),
+            (header::CACHE_CONTROL, "max-age=86400"),
+        ],
+        include_bytes!("../static/cue-tick.wav").as_slice(),
+    )
+}
+
+async fn static_cue_done() -> impl IntoResponse {
+    (
+        [
+            (header::CONTENT_TYPE, "audio/wav"),
+            (header::CACHE_CONTROL, "max-age=86400"),
+        ],
+        include_bytes!("../static/cue-done.wav").as_slice(),
+    )
+}
+
+async fn static_ai() -> impl IntoResponse {
+    (
+        [
+            (header::CONTENT_TYPE, "application/javascript"),
+            (header::CACHE_CONTROL, "max-age=3600"),
+        ],
+        include_str!("../static/ai.js"),
     )
 }
 
@@ -876,8 +1038,12 @@ pub async fn dashboard_for(
 ) -> Response {
     let shell = Shell::new(state, theme, "today", is_admin);
     account_event(state, user, "view", Some("today"), None);
+    let tts = state.tts.clone();
     respond(state.services.clone(), move |s| {
         let d = s.dashboard(user, now_ms())?;
+        if let Some(tts) = &tts {
+            crate::tts::prefetch_queue_head(tts, &s, user, now_ms());
+        }
         Ok(DashboardPage {
             shell,
             due_now: d.counts.due,
@@ -907,31 +1073,43 @@ async fn dismiss_connect_cta(
 #[template(path = "decks.html")]
 struct DecksPage {
     shell: Shell,
-    decks: Vec<DeckSummary>,
-    usage_banner: String,
-    usage_count: String,
+    /// The decks in study, and the archived ones, listed below them only
+    /// when asked for (`?archived=1`, the Archived link in the page head).
+    active: Vec<DeckSummary>,
+    archived: Vec<DeckSummary>,
+    show_archived: bool,
+    /// Whether this server has a model behind it, so the page offers
+    /// generation beside import.
+    ai_enabled: bool,
+}
+
+#[derive(Deserialize)]
+struct DecksQuery {
+    #[serde(default, deserialize_with = "crate::bounds::opt_keyword")]
+    archived: Option<String>,
 }
 
 async fn decks_page(
     State(state): State<AppState>,
     AuthUser { id: user, is_admin }: AuthUser,
     theme: Theme,
+    Query(query): Query<DecksQuery>,
 ) -> Response {
     let shell = Shell::new(&state, theme, "decks", is_admin);
+    let ai_enabled = state.ai.is_some();
+    let show_archived = query.archived.as_deref() == Some("1");
     account_event(&state, user, "view", Some("decks"), None);
-    let app = state.clone();
     respond(state.services.clone(), move |s| {
+        let (active, archived) = s
+            .list_decks(user, now_ms())?
+            .into_iter()
+            .partition(|d| d.archived_at.is_none());
         Ok(DecksPage {
             shell,
-            decks: s.list_decks(user, now_ms())?,
-            usage_banner: app.ext.render(
-                &app,
-                Slot::UsageBanner {
-                    user,
-                    limit_hit: false,
-                },
-            )?,
-            usage_count: app.ext.render(&app, Slot::UsageCount { user })?,
+            active,
+            archived,
+            show_archived,
+            ai_enabled,
         })
     })
     .await
@@ -968,7 +1146,7 @@ struct CardView {
     front_html: Option<String>,
     back_html: Option<String>,
     tags: String,
-    /// "cloze 2", "reversed", "typed" — how this card relates to its note.
+    /// "cloze 2", "reversed", "typed": how this card relates to its note.
     kind: Option<String>,
 }
 
@@ -1027,19 +1205,21 @@ fn cards_view(
 }
 
 /// The advanced editor's prefill (empty for the deck page's add form).
-struct EditorView {
-    card_id: i64,
-    note_type: &'static str,
-    front_html: String,
-    back_html: String,
-    tags: String,
-    sibling_count: usize,
-    types: Vec<(&'static str, &'static str)>,
-    hues: Vec<&'static str>,
+/// `card_id` only ever reaches the markup as an element-id suffix, so a
+/// generated draft seeds it with its own id and the same body renders.
+pub(crate) struct EditorView {
+    pub(crate) card_id: i64,
+    pub(crate) note_type: &'static str,
+    pub(crate) front_html: String,
+    pub(crate) back_html: String,
+    pub(crate) tags: String,
+    pub(crate) sibling_count: usize,
+    pub(crate) types: Vec<(&'static str, &'static str)>,
+    pub(crate) hues: Vec<&'static str>,
 }
 
 impl EditorView {
-    fn empty() -> Self {
+    pub(crate) fn empty() -> Self {
         EditorView {
             card_id: 0,
             note_type: NoteType::Basic.as_str(),
@@ -1066,10 +1246,23 @@ impl EditorView {
             ..EditorView::empty()
         }
     }
+
+    /// A generated draft in the same editor: no note behind it yet, so
+    /// no siblings to warn about.
+    pub(crate) fn from_draft(draft: &flash_store::AiDraftRow) -> Self {
+        EditorView {
+            card_id: draft.id.0,
+            note_type: draft.note_type.as_str(),
+            front_html: draft.front_html.clone(),
+            back_html: draft.back_html.clone(),
+            tags: draft.tags.join(", "),
+            ..EditorView::empty()
+        }
+    }
 }
 
 #[derive(Deserialize)]
-struct NoteForm {
+pub struct NoteForm {
     #[serde(deserialize_with = "crate::bounds::keyword")]
     note_type: String,
     #[serde(default, deserialize_with = "crate::bounds::field_html")]
@@ -1081,7 +1274,7 @@ struct NoteForm {
 }
 
 impl NoteForm {
-    fn into_input(self) -> Result<NoteInput, ServiceError> {
+    pub(crate) fn into_input(self) -> Result<NoteInput, ServiceError> {
         let note_type = NoteType::parse(&self.note_type)
             .ok_or_else(|| ServiceError::Invalid("unknown note type".into()))?;
         Ok(NoteInput {
@@ -1120,6 +1313,9 @@ fn editor_error_copy(code: &str) -> Option<&'static str> {
         "long" => "That card wasn't added: a side is too long.",
         "media" => "That card wasn't added: it references media that isn't yours.",
         "invalid" => "That card wasn't added: the content couldn't be saved.",
+        // Only a downstream card policy can refuse for size; the open
+        // server never does.
+        "limit" => "That card wasn't added: this account has reached its card limit.",
         _ => return None,
     })
 }
@@ -1145,17 +1341,18 @@ struct DeckPage {
     pages: u32,
     total: u32,
     q: String,
-    /// The extension's over-limit banner (after a blocked add, `?limit=1`
-    /// makes it say why).
-    usage_banner: String,
-    /// Why the last advanced add was refused, if it was.
+    /// Why the last add was refused, if it was.
     editor_error: Option<&'static str>,
     editor: EditorView,
+    /// Whether this server has a model behind it, so the page offers
+    /// "Generate cards" beside "Study this deck".
+    ai_enabled: bool,
+    /// An archived deck offers "Unarchive" where "Study this deck" was.
+    archived: bool,
 }
 
 #[derive(Deserialize)]
 struct DeckPageQuery {
-    limit: Option<u8>,
     page: Option<u32>,
     #[serde(default, deserialize_with = "crate::bounds::opt_keyword")]
     err: Option<String>,
@@ -1169,27 +1366,25 @@ async fn deck_page(
     Query(query): Query<DeckPageQuery>,
 ) -> Response {
     let shell = Shell::new(&state, theme, "decks", is_admin);
-    let limit_hit = query.limit == Some(1);
     let editor_error = query.err.as_deref().and_then(editor_error_copy);
-    let app = state.clone();
+    let ai_enabled = state.ai.is_some();
     respond(state.services.clone(), move |s| {
         let deck = DeckId(id);
-        let name = s.deck_by_id(user, deck, now_ms())?.name;
+        let summary = s.deck_by_id(user, deck, now_ms())?;
         let view = cards_view(&s, user, deck, None, query.page)?;
         Ok(DeckPage {
             shell,
             deck_id: id,
-            deck_name: name,
+            deck_name: summary.name,
             cards: view.cards,
             page: view.page,
             pages: view.pages,
             total: view.total,
             q: view.q,
-            usage_banner: app
-                .ext
-                .render(&app, Slot::UsageBanner { user, limit_hit })?,
             editor_error,
             editor: EditorView::empty(),
+            ai_enabled,
+            archived: summary.archived_at.is_some(),
         })
     })
     .await
@@ -1202,12 +1397,14 @@ struct DeckSettingsPage {
     deck_id: i64,
     deck_name: String,
     limits: DeckLimitsView,
-    /// Which form just saved: "name" | "limits" | "".
+    /// Which form just saved: "name" | "limits" | "archive" | "".
     saved: String,
     /// Why the last rename was refused, if it was.
     name_error: Option<String>,
     /// The extension's sharing card.
     sharing_html: String,
+    /// Whether the deck is archived, which flips the archive card.
+    archived: bool,
 }
 
 #[derive(Deserialize)]
@@ -1229,7 +1426,7 @@ async fn deck_settings_page(
     let shell = Shell::new(&state, theme, "decks", is_admin);
     let saved = query
         .saved
-        .filter(|v| matches!(v.as_str(), "name" | "limits"))
+        .filter(|v| matches!(v.as_str(), "name" | "limits" | "archive"))
         .unwrap_or_default();
     let name_error = match query.err.as_deref() {
         Some("empty") => Some("the name can't be blank".to_string()),
@@ -1243,6 +1440,7 @@ async fn deck_settings_page(
         Ok(DeckSettingsPage {
             shell,
             deck_id: id,
+            archived: d.deck.archived_at.is_some(),
             deck_name: d.deck.name,
             limits: DeckLimitsView {
                 new_override: d.limits.new_per_day,
@@ -1366,6 +1564,58 @@ async fn boost_deck(
     }
 }
 
+#[derive(Deserialize)]
+struct ArchiveForm {
+    /// Where the button lived: `decks` returns to the list, `archived`
+    /// to the list with its archived rows shown, `deck` to the deck
+    /// page; the settings page otherwise, with its saved note.
+    #[serde(default, deserialize_with = "crate::bounds::opt_keyword")]
+    back: Option<String>,
+}
+
+impl ArchiveForm {
+    fn destination(&self, id: i64) -> String {
+        match self.back.as_deref() {
+            Some("decks") => "/decks".to_string(),
+            Some("archived") => "/decks?archived=1".to_string(),
+            Some("deck") => format!("/decks/{id}"),
+            _ => format!("/decks/{id}/settings?saved=archive"),
+        }
+    }
+}
+
+async fn archive_deck(
+    State(state): State<AppState>,
+    AuthUser { id: user, .. }: AuthUser,
+    Path(id): Path<i64>,
+    Form(form): Form<ArchiveForm>,
+) -> Response {
+    match act(state.services.clone(), move |s| {
+        s.archive_deck(user, DeckId(id), now_ms())
+    })
+    .await
+    {
+        Ok(()) => Redirect::to(&form.destination(id)).into_response(),
+        Err(response) => response,
+    }
+}
+
+async fn unarchive_deck(
+    State(state): State<AppState>,
+    AuthUser { id: user, .. }: AuthUser,
+    Path(id): Path<i64>,
+    Form(form): Form<ArchiveForm>,
+) -> Response {
+    match act(state.services.clone(), move |s| {
+        s.unarchive_deck(user, DeckId(id))
+    })
+    .await
+    {
+        Ok(()) => Redirect::to(&form.destination(id)).into_response(),
+        Err(response) => response,
+    }
+}
+
 async fn boost_all(
     State(state): State<AppState>,
     AuthUser { id: user, .. }: AuthUser,
@@ -1421,7 +1671,7 @@ async fn card_rows(
 }
 
 /// The advanced editor's create path: a full-page form post, like the
-/// quick add, so the over-cap and validation banners ride the redirect.
+/// quick add, so the refusal banners ride the redirect.
 async fn create_note(
     State(state): State<AppState>,
     AuthUser { id: user, .. }: AuthUser,
@@ -1432,7 +1682,7 @@ async fn create_note(
         let input = form.into_input()?;
         match s.create_note(user, DeckId(id), &input, now_ms()) {
             Ok(_) => Ok(None),
-            Err(ServiceError::OverCap { .. }) => Ok(Some("limit=1")),
+            Err(ServiceError::OverCap { .. }) => Ok(Some("err=limit")),
             Err(err @ ServiceError::Invalid(_)) => Ok(Some(match editor_error_code(&err) {
                 "nocloze" => "err=nocloze",
                 "empty" => "err=empty",
@@ -1545,8 +1795,8 @@ async fn create_card(
         let tags = split_tags(&form.tags);
         match s.create_cards_in_deck(user, DeckId(id), &[(form.front, form.back, tags)], now_ms()) {
             Ok(_) => Ok(true),
-            // Land back on the deck page with the inline over-limit banner
-            // instead of a bare error page.
+            // Land back on the deck page with the inline refusal instead
+            // of a bare error page.
             Err(ServiceError::OverCap { .. }) => Ok(false),
             Err(other) => Err(other),
         }
@@ -1557,7 +1807,7 @@ async fn create_card(
             account_event(&state, user, "cards_created", Some("manual"), Some(1));
             Redirect::to(&format!("/decks/{id}")).into_response()
         }
-        Ok(false) => Redirect::to(&format!("/decks/{id}?limit=1")).into_response(),
+        Ok(false) => Redirect::to(&format!("/decks/{id}?err=limit")).into_response(),
         Err(response) => response,
     }
 }
@@ -1585,17 +1835,25 @@ struct StudyCardView {
     card_id: i64,
     front: String,
     front_html: Option<String>,
+    /// The front read aloud, for the page's read-aloud control.
+    spoken_front: String,
     wants_typing: bool,
     /// Images on this card's (still hidden) back: emitted as
     /// `<link rel="preload">` so they're cached before the reveal.
     preload: Vec<i64>,
     /// Images on the next card (both sides): `<link rel="prefetch">`.
     prefetch: Vec<i64>,
+    /// The answer's words for the recognizer, as a JSON array in
+    /// `data-answer-hints`; None once the back is on screen, or when
+    /// there is nothing to prime with.
+    hints_json: Option<String>,
 }
 
 struct RevealView {
     back: String,
     back_html: Option<String>,
+    /// The back read aloud.
+    spoken_back: String,
     /// Typed-answer comparison, char-aligned against the expected answer.
     typed_diff: Option<Vec<DiffSpan>>,
 }
@@ -1606,11 +1864,97 @@ impl From<StudyCard> for StudyCardView {
             card_id: c.card_id.0,
             front: c.front,
             front_html: c.front_html,
+            spoken_front: c.spoken_front,
             wants_typing: c.wants_typing,
             preload: c.preload_media,
             prefetch: c.prefetch_media,
+            hints_json: if c.answer_hints.is_empty() {
+                None
+            } else {
+                serde_json::to_string(&c.answer_hints).ok()
+            },
         }
     }
+}
+
+/// The account's voice settings as the page's data attributes and the
+/// settings dialog carry them.
+struct VoicePrefsView {
+    /// A sidecar is configured: the page may ask for clips.
+    voice_on: bool,
+    voice_id: String,
+    /// One of the picker's steps, as its form value.
+    speech_rate: String,
+    voice_apply: &'static str,
+    voice_cues: bool,
+    voice_groups: Vec<VoiceGroupView>,
+}
+
+struct VoiceGroupView {
+    label: &'static str,
+    voices: Vec<VoiceOptionView>,
+}
+
+struct VoiceOptionView {
+    id: &'static str,
+    name: String,
+    /// Where the page plays the voice's sample, once it is made.
+    sample_url: Option<String>,
+}
+
+impl VoicePrefsView {
+    fn new(state: &AppState, settings: &flash_core::VoiceSettings) -> Self {
+        // The picker offers four steps; a rate saved by an older client
+        // between two of them shows as the nearest.
+        let steps = [("0.8", 0.8f32), ("1.0", 1.0), ("1.15", 1.15), ("1.3", 1.3)];
+        let speech_rate = steps
+            .iter()
+            .min_by(|a, b| {
+                (a.1 - settings.speech_rate)
+                    .abs()
+                    .total_cmp(&(b.1 - settings.speech_rate).abs())
+            })
+            .map(|(label, _)| *label)
+            .unwrap_or("1.0")
+            .to_string();
+        // The picker only renders with a sidecar; without one the
+        // groups are empty and the template says so instead.
+        let listing = crate::tts::serve::voice_listing(state, |voice| {
+            format!("/voice/phrases/{voice}/sample/audio")
+        });
+        VoicePrefsView {
+            voice_on: listing.is_some(),
+            voice_id: settings.voice_id.clone(),
+            speech_rate,
+            voice_apply: settings.apply.as_str(),
+            voice_cues: settings.sound_cues,
+            voice_groups: listing
+                .map(|listing| {
+                    listing
+                        .groups
+                        .into_iter()
+                        .map(|g| VoiceGroupView {
+                            label: g.label,
+                            voices: g
+                                .voices
+                                .into_iter()
+                                .map(|v| VoiceOptionView {
+                                    id: v.id,
+                                    name: v.name,
+                                    sample_url: v.sample.map(|s| s.url),
+                                })
+                                .collect(),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+        }
+    }
+}
+
+/// Where the page fetches a card side's clip.
+fn card_audio_url(card_id: i64, side: &str) -> String {
+    format!("/study/cards/{card_id}/audio?side={side}")
 }
 
 #[derive(Template)]
@@ -1619,16 +1963,33 @@ struct StudyPage {
     shell: Shell,
     card: Option<StudyCardView>,
     revealed: Option<RevealView>,
+    /// The card's clips in the account's voice, when made.
+    audio_front: Option<String>,
+    audio_back: Option<String>,
     session_id: i64,
     remaining: u32,
     total: u32,
-    /// Eligible cards today's limits kept out of the queue — the empty
+    /// Eligible cards today's limits kept out of the queue. The empty
     /// state explains itself instead of a bare "nothing due" (same fix
     /// the MCP queue_note applies for assistants).
     held_by_limit: u32,
-    /// The deck being studied, if the session is deck-scoped — the done
+    /// The deck being studied, if the session is deck-scoped. The done
     /// state offers a boost for that deck rather than the account.
     scope_deck: Option<i64>,
+    /// What the page's voice mode sends the grader (`transcript` or
+    /// `audio`), when this server grades at all; None hides the mode.
+    voice_input: Option<&'static str>,
+    /// The user's voice grading setting: `self` means the page asks
+    /// for a grade word instead of calling the grader.
+    grading_mode: &'static str,
+    /// How the account studies by voice; the page's data attributes
+    /// and the settings dialog read it.
+    voice_on: bool,
+    voice_id: String,
+    speech_rate: String,
+    voice_apply: &'static str,
+    voice_cues: bool,
+    voice_groups: Vec<VoiceGroupView>,
 }
 
 #[derive(Template)]
@@ -1636,11 +1997,14 @@ struct StudyPage {
 struct StudyCardPartial {
     card: Option<StudyCardView>,
     revealed: Option<RevealView>,
+    /// The card's clips in the account's voice, when made.
+    audio_front: Option<String>,
+    audio_back: Option<String>,
     session_id: i64,
     remaining: u32,
     total: u32,
     held_by_limit: u32,
-    /// The deck being studied, if the session is deck-scoped — the done
+    /// The deck being studied, if the session is deck-scoped. The done
     /// state offers a boost for that deck rather than the account.
     scope_deck: Option<i64>,
 }
@@ -1660,6 +2024,8 @@ async fn study_page(
 ) -> Response {
     let shell = Shell::new(&state, theme, "study", is_admin);
     account_event(&state, user, "view", Some("study"), None);
+    let voice_input = state.ai.as_ref().map(|ai| ai.voice_input.as_str());
+    let app = state.clone();
     respond(state.services.clone(), move |s| {
         let scope_deck = query.deck;
         let scope = match (query.deck, query.tag) {
@@ -1668,19 +2034,48 @@ async fn study_page(
             _ => StudyScope::All,
         };
         let session = s.start_session(user, scope, now_ms())?;
+        let tts = app.tts.as_deref();
+        let card = session
+            .first_card
+            .map(|c| {
+                let mut card = s.study_card(user, c, session.next_card_id)?;
+                if let Some(tts) = tts {
+                    crate::tts::prefetch_for_study(
+                        tts,
+                        &s,
+                        user,
+                        Some(card.card_id),
+                        &session.upcoming,
+                    );
+                }
+                crate::tts::serve::attach_study_card(tts, &s, user, &mut card);
+                Ok::<_, ServiceError>(card)
+            })
+            .transpose()?;
+        let audio_front = card
+            .as_ref()
+            .filter(|c| c.audio_front.is_some())
+            .map(|c| card_audio_url(c.card_id.0, "front"));
+        let prefs = VoicePrefsView::new(&app, &s.voice_settings(user)?);
         Ok(StudyPage {
             shell,
-            card: session
-                .first_card
-                .map(|c| s.study_card(user, c, session.next_card_id))
-                .transpose()?
-                .map(Into::into),
+            card: card.map(Into::into),
             revealed: None,
+            audio_front,
+            audio_back: None,
             session_id: session.session_id.0,
             remaining: session.cards_due,
             total: session.cards_due,
             held_by_limit: session.held_by_limit,
             scope_deck,
+            voice_input,
+            grading_mode: session.grading_mode.as_str(),
+            voice_on: prefs.voice_on,
+            voice_id: prefs.voice_id,
+            speech_rate: prefs.speech_rate,
+            voice_apply: prefs.voice_apply,
+            voice_cues: prefs.voice_cues,
+            voice_groups: prefs.voice_groups,
         })
     })
     .await
@@ -1703,20 +2098,35 @@ async fn study_reveal(
     ApiUser(user): ApiUser,
     Form(form): Form<RevealForm>,
 ) -> Response {
+    let app = state.clone();
     respond(state.services.clone(), move |s| {
-        let reveal = s.reveal_card(user, CardId(form.card), form.typed.as_deref())?;
+        let mut reveal = s.reveal_card(user, CardId(form.card), form.typed.as_deref())?;
+        crate::tts::serve::attach_reveal(app.tts.as_deref(), &s, user, &mut reveal);
+        let audio_front = reveal
+            .audio_front
+            .as_ref()
+            .map(|_| card_audio_url(reveal.card_id.0, "front"));
+        let audio_back = reveal
+            .audio_back
+            .as_ref()
+            .map(|_| card_audio_url(reveal.card_id.0, "back"));
         Ok(StudyCardPartial {
+            audio_front,
+            audio_back,
             card: Some(StudyCardView {
                 card_id: reveal.card_id.0,
                 front: reveal.front,
                 front_html: reveal.front_html,
+                spoken_front: reveal.spoken_front,
                 wants_typing: false,  // already answered; reveal shows the back
                 preload: Vec::new(),  // the back is on screen now
                 prefetch: Vec::new(), // already hinted while the front showed
+                hints_json: None,     // nothing is listened for as an answer
             }),
             revealed: Some(RevealView {
                 back: reveal.back,
                 back_html: reveal.back_html,
+                spoken_back: reveal.spoken_back,
                 typed_diff: reveal.typed_diff,
             }),
             session_id: form.session,
@@ -1744,6 +2154,7 @@ async fn study_review(
     ApiUser(user): ApiUser,
     Form(form): Form<ReviewForm>,
 ) -> Response {
+    let app = state.clone();
     respond(state.services.clone(), move |s| {
         let rating = Rating::from_i64(form.rating)
             .ok_or_else(|| ServiceError::Invalid("rating must be 1-4".into()))?;
@@ -1763,12 +2174,32 @@ async fn study_review(
         } else {
             None
         };
+        let tts = app.tts.as_deref();
+        let card = result
+            .next_card
+            .map(|c| {
+                let mut card = s.study_card(user, c, result.next_card_id)?;
+                if let Some(tts) = tts {
+                    crate::tts::prefetch_for_study(
+                        tts,
+                        &s,
+                        user,
+                        Some(card.card_id),
+                        &result.upcoming,
+                    );
+                }
+                crate::tts::serve::attach_study_card(tts, &s, user, &mut card);
+                Ok::<_, ServiceError>(card)
+            })
+            .transpose()?;
+        let audio_front = card
+            .as_ref()
+            .filter(|c| c.audio_front.is_some())
+            .map(|c| card_audio_url(c.card_id.0, "front"));
         Ok(StudyCardPartial {
-            card: result
-                .next_card
-                .map(|c| s.study_card(user, c, result.next_card_id))
-                .transpose()?
-                .map(Into::into),
+            audio_front,
+            audio_back: None,
+            card: card.map(Into::into),
             revealed: None,
             session_id: form.session,
             remaining: result.remaining,
@@ -1829,12 +2260,29 @@ struct StatsPage {
     upcoming: Vec<DayCount>,
     heat_weeks: Vec<Vec<HeatCell>>,
     heat_months: Vec<MonthSpan>,
+    /// The calendar year the heatmap shows; None is the past year.
+    heat_year: Option<i32>,
+    /// One link per year of history, oldest first, the trailing view
+    /// last; empty when the history fits in one year.
+    year_links: Vec<YearLink>,
+}
+
+struct YearLink {
+    label: String,
+    href: String,
+    current: bool,
+}
+
+#[derive(Deserialize)]
+struct StatsQuery {
+    year: Option<i32>,
 }
 
 async fn stats_page(
     State(state): State<AppState>,
     AuthUser { id: user, is_admin }: AuthUser,
     theme: Theme,
+    Query(query): Query<StatsQuery>,
 ) -> Response {
     let shell = Shell::new(&state, theme, "stats", is_admin);
     let heavy = match state.heavy(user) {
@@ -1842,7 +2290,27 @@ async fn stats_page(
         Err(busy) => return busy.into_response(),
     };
     respond(state.services.clone(), move |s| {
-        let stats = s.stats(&heavy, now_ms())?;
+        let stats = s.stats(&heavy, now_ms(), query.year)?;
+        let last = stats.heat_years.last().copied();
+        let year_links = stats
+            .heat_years
+            .iter()
+            .map(|&y| {
+                if Some(y) == last {
+                    YearLink {
+                        label: "Past year".to_string(),
+                        href: "/stats".to_string(),
+                        current: stats.heat_year.is_none(),
+                    }
+                } else {
+                    YearLink {
+                        label: y.to_string(),
+                        href: format!("/stats?year={y}"),
+                        current: stats.heat_year == Some(y),
+                    }
+                }
+            })
+            .collect();
         Ok(StatsPage {
             shell,
             reviews_30d: stats.reviews_30d,
@@ -1861,6 +2329,8 @@ async fn stats_page(
             upcoming: stats.upcoming,
             heat_weeks: stats.heat_weeks,
             heat_months: stats.heat_months,
+            heat_year: stats.heat_year,
+            year_links,
         })
     })
     .await
@@ -1981,6 +2451,13 @@ struct SettingsPage {
     new_per_day: u32,
     reviews_per_day: u32,
     saved: String,
+    /// How the account studies by voice (the "Voice study" card).
+    voice_on: bool,
+    voice_id: String,
+    speech_rate: String,
+    voice_apply: &'static str,
+    voice_cues: bool,
+    voice_groups: Vec<VoiceGroupView>,
     passkeys: Vec<PasskeyView>,
     apps: Vec<AppView>,
     invite_url: Option<String>,
@@ -2062,6 +2539,7 @@ fn settings_page_data(
         })
         .collect();
     let has_external_login = app.ext.has_external_login(s.store(), user)?;
+    let prefs = VoicePrefsView::new(app, &o.voice);
     Ok(SettingsPage {
         shell,
         display_name: o.display_name,
@@ -2071,6 +2549,12 @@ fn settings_page_data(
         new_per_day: o.new_per_day,
         reviews_per_day: o.reviews_per_day,
         saved: flags.saved,
+        voice_on: prefs.voice_on,
+        voice_id: prefs.voice_id,
+        speech_rate: prefs.speech_rate,
+        voice_apply: prefs.voice_apply,
+        voice_cues: prefs.voice_cues,
+        voice_groups: prefs.voice_groups,
         passkeys,
         apps,
         invite_url,
@@ -2121,7 +2605,7 @@ async fn settings_page(
     let flags = SettingsFlags {
         saved: query
             .saved
-            .filter(|v| matches!(v.as_str(), "limits" | "grading" | "apps"))
+            .filter(|v| matches!(v.as_str(), "limits" | "grading" | "apps" | "voice"))
             .unwrap_or_default(),
         name_saved: query.name == Some(1),
         name_error: query.nameerr == Some(1),
@@ -2239,6 +2723,55 @@ async fn save_grading(
     }
 }
 
+/// The voice study form, from the settings page or the study page's
+/// dialog. The checkbox is absent when off.
+#[derive(Deserialize)]
+struct VoiceForm {
+    #[serde(default, deserialize_with = "crate::bounds::opt_keyword")]
+    voice_id: Option<String>,
+    speech_rate: Option<f32>,
+    #[serde(default, deserialize_with = "crate::bounds::opt_keyword")]
+    voice_apply: Option<String>,
+    #[serde(default, deserialize_with = "crate::bounds::opt_keyword")]
+    sound_cues: Option<String>,
+}
+
+async fn save_voice(
+    State(state): State<AppState>,
+    AuthUser { id: user, .. }: AuthUser,
+    headers: HeaderMap,
+    Form(form): Form<VoiceForm>,
+) -> Response {
+    let patch = match crate::api::settings::voice_patch(
+        form.voice_id,
+        form.speech_rate,
+        form.voice_apply,
+        // A form always carries the whole card, so an absent checkbox
+        // is "off".
+        Some(form.sound_cues.is_some()),
+    ) {
+        Ok(patch) => patch,
+        Err(message) => return (StatusCode::BAD_REQUEST, message).into_response(),
+    };
+    let tts = state.tts.clone();
+    let from_dialog = headers.contains_key("hx-request");
+    match act(state.services.clone(), move |s| {
+        s.set_voice_settings(user, &patch)?;
+        // A new voice starts with a cold cache: the card on screen and
+        // the next few are queued in it now, ahead of anyone asking.
+        if let (Some(tts), Some(_)) = (tts, &patch.voice_id) {
+            crate::tts::prefetch_queue_head(&tts, &s, user, now_ms());
+        }
+        Ok(())
+    })
+    .await
+    {
+        Ok(()) if from_dialog => StatusCode::NO_CONTENT.into_response(),
+        Ok(()) => Redirect::to("/settings?saved=voice").into_response(),
+        Err(response) => response,
+    }
+}
+
 #[derive(Deserialize)]
 struct SchedulingForm {
     new_per_day: u32,
@@ -2306,11 +2839,11 @@ struct ImportPreview {
     sample: Vec<(String, String)>,
     messages: Vec<String>,
     token: String,
-    /// Total Anki reviews found — >0 offers the bring-your-progress box.
+    /// Total Anki reviews found: >0 offers the bring-your-progress box.
     progress_reviews: usize,
     /// Human summary of importable Anki FSRS settings, when found.
     settings_desc: Option<String>,
-    /// Cards whose deck colors were remapped to the Flash palette — >0
+    /// Cards whose deck colors were remapped to the Flash palette: >0
     /// offers the keep-colors/clean-look choice.
     colored_cards: usize,
 }
@@ -2321,40 +2854,19 @@ struct ImportPage {
     shell: Shell,
     preview: Option<ImportPreview>,
     imported: Option<usize>,
-    usage_banner: String,
-    usage_count: String,
-}
-
-/// The extension's usage fragments for the import page; empty on the
-/// preview, so the file's own numbers are what's on screen.
-fn import_usage(app: &AppState, user: UserId) -> Result<(String, String), ServiceError> {
-    Ok((
-        app.ext.render(
-            app,
-            Slot::UsageBanner {
-                user,
-                limit_hit: false,
-            },
-        )?,
-        app.ext.render(app, Slot::UsageCount { user })?,
-    ))
 }
 
 async fn import_page(
     State(state): State<AppState>,
-    AuthUser { id: user, is_admin }: AuthUser,
+    AuthUser { is_admin, .. }: AuthUser,
     theme: Theme,
 ) -> Response {
     let shell = Shell::new(&state, theme, "decks", is_admin);
-    let app = state.clone();
     respond(state.services.clone(), move |_| {
-        let (usage_banner, usage_count) = import_usage(&app, user)?;
         Ok(ImportPage {
             shell,
             preview: None,
             imported: None,
-            usage_banner,
-            usage_count,
         })
     })
     .await
@@ -2464,8 +2976,6 @@ async fn import_preview(
             shell,
             preview: Some(preview.into()),
             imported: None,
-            usage_banner: String::new(),
-            usage_count: String::new(),
         })
     })
     .await;
@@ -2543,33 +3053,25 @@ async fn import_commit(
         settings: form.settings.is_some(),
         clean_colors: form.colors.as_deref() == Some("clean"),
     };
-    let app = state.clone();
-    let result =
-        tokio::task::spawn_blocking(move || -> Result<(usize, (String, String)), Failure> {
-            let total = import_flow::commit(
-                &heavy,
-                &services,
-                media_store.as_ref(),
-                &dir,
-                is_admin,
-                &opts,
-            )?;
-            // Post-import usage so an oversized import immediately shows its
-            // grace-period banner.
-            let usage = import_usage(&app, user).unwrap_or_default();
-            Ok((total, usage))
-        })
-        .await;
+    let result = tokio::task::spawn_blocking(move || -> Result<usize, Failure> {
+        import_flow::commit(
+            &heavy,
+            &services,
+            media_store.as_ref(),
+            &dir,
+            is_admin,
+            &opts,
+        )
+    })
+    .await;
     match result {
-        Ok(Ok((n, (usage_banner, usage_count)))) => {
+        Ok(Ok(n)) => {
             account_event(&state, user, "import_commit", None, Some(n as i64));
             Html(
                 ImportPage {
                     shell: Shell::new(&state, theme, "decks", is_admin),
                     preview: None,
                     imported: Some(n),
-                    usage_banner,
-                    usage_count,
                 }
                 .render()
                 .unwrap_or_default(),

@@ -312,7 +312,7 @@ pub async fn security_headers(
 
 /// Rejects cross-origin mutations. Browsers send `Origin` on all
 /// non-GET requests; htmx requests are same-origin by construction.
-/// Applied to web routes only — OAuth/MCP endpoints authenticate with
+/// Applied to web routes only. OAuth/MCP endpoints authenticate with
 /// Bearer tokens and are mounted outside this layer.
 pub async fn same_origin_mutations(
     State(state): State<AppState>,

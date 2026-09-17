@@ -27,6 +27,15 @@ const PER_USER_TABLES: &[&str] = &[
     "media",
     "card_media",
     "notes",
+    "ai_sources",
+    "ai_extractions",
+    "ai_figures",
+    "ai_jobs",
+    "ai_job_sources",
+    "ai_turns",
+    "ai_drafts",
+    "ai_calls",
+    "voice_clip_refs",
 ];
 
 /// Functions whose per-user SQL deliberately carries no user: they are
@@ -62,9 +71,34 @@ const UNSCOPED_BY_DESIGN: &[(&str, &str)] = &[
         "purge_unused_oauth_clients",
         "scheduler sweep of registrations no grant ever used",
     ),
+    (
+        "sweep_stale_ai_sources",
+        "scheduler sweep of generation sources unused for a month, every account; each delete binds the row's own user",
+    ),
+    // The generation runner takes work from every account's queue.
+    ("next_queued_ai_job", "runner: the oldest queued job, whoever queued it"),
+    (
+        "queued_ai_jobs",
+        "runner: the head of the queue, whoever queued it, so a blocked account is stepped over",
+    ),
+    (
+        "requeue_interrupted_ai_jobs",
+        "runner at boot: every job the previous process left mid-way",
+    ),
     // Content-addressed blobs: the question is whether *anyone* holds the hash.
     ("blob_known", "dedupe by hash across users"),
     ("blob_refs", "orphan check by hash across users"),
+    // Voice clips are shared by every account whose card says the same
+    // words; the refs that make one reachable are scoped, the clip
+    // rows and the sweep are not.
+    (
+        "sweep_voice_clips",
+        "scheduler sweep of clip refs whose card is gone or unused, every account, then the clips nobody names",
+    ),
+    (
+        "forget_voice_clip",
+        "a clip whose bytes vanished from the store is dropped for everyone, refs included",
+    ),
     // The admin's view of every account.
     (
         "list_users_admin",
@@ -116,6 +150,7 @@ const NOT_PER_USER: &[&str] = &[
     "invites",
     "oauth_clients",
     "review_log_v12",
+    "voice_clips",
 ];
 
 #[test]

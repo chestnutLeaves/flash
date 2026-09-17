@@ -1,6 +1,7 @@
 //! Server library: composition of config, services, and (in later phases)
 //! web, OAuth, and MCP surfaces. The binary in main.rs stays thin.
 
+pub mod ai;
 pub mod api;
 pub mod auth;
 pub mod boot;
@@ -24,7 +25,11 @@ pub mod service;
 pub mod state;
 #[cfg(feature = "test-support")]
 pub mod testing;
+pub mod tts;
+pub mod voice_hints;
 pub mod web;
+pub mod web_ai;
+pub mod web_voice;
 pub mod webauthn;
 
 use axum::Router;

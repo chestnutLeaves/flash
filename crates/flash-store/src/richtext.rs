@@ -1,7 +1,7 @@
 //! Rich card content: the sanitized-HTML side of the dual representation.
 //! Imported cards keep their *semantic* structure (bold, lists, tables,
-//! sub/sup) for the web UI while every scrap of imported styling — style
-//! attributes, font/color tags, classes — is stripped: rich cards render
+//! sub/sup) for the web UI while every scrap of imported styling (style
+//! attributes, font/color tags, classes) is stripped: rich cards render
 //! entirely in the Flash Design System, theme-aware. Plain text for
 //! MCP/voice/CSV is derived separately (import pipeline).
 //!
@@ -129,7 +129,7 @@ pub fn media_image_ids(html: &str) -> Vec<i64> {
 }
 
 /// Ids of every media element (img/audio/video) a sanitized side embeds,
-/// in order, deduped — what a card must be linked to so orphan GC keeps
+/// in order, deduped: what a card must be linked to so orphan GC keeps
 /// the blobs alive.
 pub fn media_ids(html: &str) -> Vec<i64> {
     const MARK: &str = "src=\"/media/";
@@ -151,7 +151,7 @@ pub fn media_ids(html: &str) -> Vec<i64> {
 }
 
 /// Rewrites every `/media/<id>` reference through `map` (ids without a
-/// mapping are left alone) and re-sanitizes under the media profile —
+/// mapping are left alone) and re-sanitizes under the media profile,
 /// the step that moves sanitized HTML between id spaces (a share
 /// snapshot, a copied deck) without loosening the sanitizer's wall.
 pub fn remap_media_ids(html: &str, map: &std::collections::HashMap<i64, i64>) -> SanitizedHtml {
@@ -432,7 +432,7 @@ pub fn strip_leading_text(text: &str, prefix: &str) -> Option<String> {
     None
 }
 
-/// Removes `hl-*` highlight classes from sanitized HTML — the "clean look"
+/// Removes `hl-*` highlight classes from sanitized HTML, the "clean look"
 /// import choice. Spans whose class list empties keep the bare tag (the
 /// sanitizer accepts attribute-less spans; they render as plain text).
 /// The rewritten markup goes back through the sanitizer: the rewrite
@@ -479,7 +479,7 @@ fn unescape_attr(s: &str) -> String {
 
 /// Replaces media elements (`<img>`, `<audio>`, `<video>`, `<source>`,
 /// `<object>`, `<embed>`) and `[sound:...]` tags with neutral chip spans
-/// the UI styles — no broken-image jank while file ingest is dark, and a
+/// the UI styles: no broken-image jank while file ingest is dark, and a
 /// stable shape to upgrade to real elements when it activates. External
 /// (http/data:) references are dropped outright.
 pub fn media_placeholders(html: &str) -> String {
@@ -587,7 +587,7 @@ pub fn convert_latex_delims(s: &str) -> String {
 }
 
 /// Removes `[anki:tts ...] ... [/anki:tts]` wrappers, keeping the inner
-/// text (TTS is runtime synthesis, not content — and Flash voice mode IS
+/// text (TTS is runtime synthesis, not content, and Flash voice mode IS
 /// the TTS).
 pub fn strip_tts_wrappers(s: &str) -> String {
     if !s.contains("[anki:tts") {
@@ -607,6 +607,295 @@ pub fn strip_tts_wrappers(s: &str) -> String {
     }
     out.push_str(rest);
     out.replace("[/anki:tts]", "")
+}
+
+/// What a card side sounds like read aloud: the one derivation the
+/// web's read-aloud button, the app's voice study and MCP all use.
+/// `html` is the side's sanitized rich view when it has one, `plain`
+/// the text every other surface uses. A cloze blank is spoken as
+/// "blank" (with its hint when it carries one), so the front hides the
+/// deletion; the back's answer span is spoken as its own text. An image
+/// is spoken by its alt text, unless that is a filename, in which case
+/// it is skipped; a side that is nothing but media names its kind. A
+/// formula is "a formula" rather than TeX read out letter by letter.
+/// List items, line breaks and block ends become sentence breaks so the
+/// voice pauses where the eye would. Anything else is the plain text.
+pub fn spoken_text(html: Option<&str>, plain: &str) -> String {
+    let text = match html {
+        Some(html) => {
+            let s = strip_tts_wrappers(html);
+            let s = speak_cloze_blanks(&s);
+            let s = speak_images(&s);
+            let text = html_to_text(&s);
+            // A side that was nothing but pictures with no alt worth
+            // speaking still names its kind, from the untouched markup.
+            if text.trim().is_empty() {
+                html_to_text(html)
+            } else {
+                text
+            }
+        }
+        None => strip_tts_wrappers(plain),
+    };
+    let text = text
+        .replace("[...]", "blank")
+        .replace("[image]", "an image")
+        .replace("[audio]", "an audio clip")
+        .replace("[video]", "a video");
+    sentence_breaks(&speak_math(&text))
+}
+
+/// `<span class="cloze-blank">[...]</span>` becomes "blank", a hinted
+/// blank `[city]` becomes "blank, city". The rest of the markup is left
+/// for `html_to_text`.
+fn speak_cloze_blanks(html: &str) -> String {
+    if !html.contains("cloze-blank") {
+        return html.to_string();
+    }
+    let mut out = String::with_capacity(html.len());
+    let mut rest = html;
+    while let Some(lt) = rest.find("<span") {
+        let Some(gt_rel) = rest[lt..].find('>') else {
+            break;
+        };
+        let body = &rest[lt + 1..lt + gt_rel];
+        let is_blank = crate::media::attr_value(body, "class")
+            .is_some_and(|c| c.split_ascii_whitespace().any(|t| t == "cloze-blank"));
+        let close = rest[lt..].find("</span>");
+        match (is_blank, close) {
+            (true, Some(close_rel)) => {
+                out.push_str(&rest[..lt]);
+                let inner = rest[lt + gt_rel + 1..lt + close_rel].trim();
+                let hint = inner
+                    .strip_prefix('[')
+                    .and_then(|s| s.strip_suffix(']'))
+                    .unwrap_or(inner)
+                    .trim();
+                if hint.is_empty() || hint == "..." {
+                    out.push_str(" blank ");
+                } else {
+                    out.push_str(" blank, ");
+                    out.push_str(hint);
+                    out.push(' ');
+                }
+                rest = &rest[lt + close_rel + "</span>".len()..];
+            }
+            _ => {
+                out.push_str(&rest[..lt + gt_rel + 1]);
+                rest = &rest[lt + gt_rel + 1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// `<img alt="...">` becomes its alt text, or nothing when the alt is a
+/// filename (what activation writes for imported media) or absent. The
+/// tag itself is removed either way so a side that also has words is
+/// not labelled "an image" by the text pipeline.
+fn speak_images(html: &str) -> String {
+    if !html.contains("<img") {
+        return html.to_string();
+    }
+    let mut out = String::with_capacity(html.len());
+    let mut rest = html;
+    while let Some(lt) = rest.find("<img") {
+        out.push_str(&rest[..lt]);
+        let Some(gt_rel) = rest[lt..].find('>') else {
+            // An unterminated tag: nothing after it is content.
+            rest = "";
+            break;
+        };
+        let body = &rest[lt + 1..lt + gt_rel];
+        if crate::media::tag_name(body) == "img" {
+            if let Some(alt) = crate::media::attr_value(body, "alt") {
+                let spoken = unescape_attr(alt);
+                let spoken = spoken.trim();
+                if !spoken.is_empty() && !looks_like_filename(spoken) {
+                    out.push(' ');
+                    out.push_str(&esc_attr(spoken));
+                    out.push(' ');
+                }
+            }
+        } else {
+            out.push_str(&rest[lt..lt + gt_rel + 1]);
+        }
+        rest = &rest[lt + gt_rel + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// A single token with a short alphanumeric extension: "cat.jpg",
+/// "paste-1699.png". Not "e.g." and not a sentence with a full stop.
+fn looks_like_filename(s: &str) -> bool {
+    if s.contains(char::is_whitespace) {
+        return false;
+    }
+    match s.rfind('.') {
+        Some(0) | None => false,
+        Some(dot) => {
+            let ext = &s[dot + 1..];
+            (1..=5).contains(&ext.len()) && ext.chars().all(|c| c.is_ascii_alphanumeric())
+        }
+    }
+}
+
+/// Every delimited formula (`\(...\)`, `\[...\]`, `$$...$$`) becomes
+/// "a formula". An opener with no closer is left as written.
+fn speak_math(text: &str) -> String {
+    const PAIRS: [(&str, &str); 3] = [("\\(", "\\)"), ("\\[", "\\]"), ("$$", "$$")];
+    if !PAIRS.iter().any(|(open, _)| text.contains(open)) {
+        return text.to_string();
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    loop {
+        let next = PAIRS
+            .iter()
+            .filter_map(|(open, close)| rest.find(open).map(|at| (at, *open, *close)))
+            .min_by_key(|(at, _, _)| *at);
+        let Some((at, open, close)) = next else {
+            break;
+        };
+        let after = &rest[at + open.len()..];
+        match after.find(close) {
+            Some(end) => {
+                out.push_str(&rest[..at]);
+                out.push_str(" a formula ");
+                rest = &after[end + close.len()..];
+            }
+            None => {
+                out.push_str(&rest[..at + open.len()]);
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Lines (block ends, breaks and list items in the text pipeline's
+/// output) become sentences: a line that does not already end in
+/// punctuation gets a full stop before the next one; bullets are
+/// dropped; whitespace collapses to single spaces.
+fn sentence_breaks(text: &str) -> String {
+    let mut sentences: Vec<String> = Vec::new();
+    for line in text.lines() {
+        let words: Vec<&str> = line
+            .trim()
+            .trim_start_matches('•')
+            .split_whitespace()
+            .collect();
+        if words.is_empty() {
+            continue;
+        }
+        sentences.push(words.join(" "));
+    }
+    let last = sentences.len().saturating_sub(1);
+    let mut out = String::new();
+    for (i, sentence) in sentences.iter().enumerate() {
+        if i > 0 {
+            out.push(' ');
+        }
+        out.push_str(sentence);
+        if i < last && !sentence.ends_with(['.', '!', '?', ':', ';', ',']) {
+            out.push('.');
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod spoken_tests {
+    use super::spoken_text;
+
+    #[test]
+    fn cloze_front_hides_the_deletion_and_the_back_speaks_it() {
+        let front = r#"Ottawa is in <span class="cloze-blank">[...]</span> since 1867"#;
+        assert_eq!(
+            spoken_text(Some(front), "Ottawa is in [...] since 1867"),
+            "Ottawa is in blank since 1867"
+        );
+        let hinted = r#"<span class="cloze-blank">[city]</span> rocks"#;
+        assert_eq!(spoken_text(Some(hinted), ""), "blank, city rocks");
+        let back = r#"<span class="cloze-answer">Ottawa</span> is in Canada"#;
+        assert_eq!(spoken_text(Some(back), ""), "Ottawa is in Canada");
+        let block = r#"<div class="cloze-answer-block">Pooling<br>of blood</div>"#;
+        assert_eq!(spoken_text(Some(block), ""), "Pooling. of blood");
+    }
+
+    #[test]
+    fn plain_side_speaks_its_blank_and_breaks() {
+        assert_eq!(
+            spoken_text(None, "The [...] of France\nis Paris"),
+            "The blank of France. is Paris"
+        );
+        assert_eq!(spoken_text(None, "  spaced   out  "), "spaced out");
+        assert_eq!(spoken_text(None, "[image]"), "an image");
+    }
+
+    #[test]
+    fn images_speak_their_alt_unless_it_is_a_filename() {
+        let named = r#"<p>The heart <img src="/media/7" alt="cat.jpg"> pumps</p>"#;
+        assert_eq!(spoken_text(Some(named), ""), "The heart pumps");
+        let described = r#"<img src="/media/7" alt="four chambers of the heart">"#;
+        assert_eq!(
+            spoken_text(Some(described), ""),
+            "four chambers of the heart"
+        );
+        let only = r#"<img src="/media/7" alt="x.png">"#;
+        assert_eq!(spoken_text(Some(only), "[image]"), "an image");
+        let bare = r#"<img src="/media/7">"#;
+        assert_eq!(spoken_text(Some(bare), ""), "an image");
+        let entity = r#"<img src="/media/7" alt="Tom &amp; Jerry">"#;
+        assert_eq!(spoken_text(Some(entity), ""), "Tom & Jerry");
+    }
+
+    #[test]
+    fn formulas_are_named_not_read() {
+        assert_eq!(
+            spoken_text(Some(r"Area \(\pi r^2\) of a circle"), ""),
+            "Area a formula of a circle"
+        );
+        assert_eq!(
+            spoken_text(None, r"a $$\sum_i x_i$$ b \[x\] c"),
+            "a a formula b a formula c"
+        );
+        assert_eq!(
+            spoken_text(None, r"open \(x never closes"),
+            r"open \(x never closes"
+        );
+    }
+
+    #[test]
+    fn lists_and_breaks_become_sentences() {
+        let html = "<p>Signs:</p><ul><li>fever</li><li>rash!</li></ul><div>rest</div>";
+        assert_eq!(spoken_text(Some(html), ""), "Signs: fever. rash! rest");
+        assert_eq!(spoken_text(Some("one<br>two."), ""), "one. two.");
+        let details = "<details><summary>Hint</summary>the answer</details>";
+        assert_eq!(spoken_text(Some(details), ""), "Hint: the answer");
+    }
+
+    #[test]
+    fn tts_wrappers_and_hostile_markup_do_not_upset_it() {
+        assert_eq!(
+            spoken_text(None, "[anki:tts lang=ja_JP]こんにちは[/anki:tts] world"),
+            "こんにちは world"
+        );
+        for hostile in [
+            r#"<span class="cloze-blank">[never closed"#,
+            r#"<img alt="dangling"#,
+            "<span<span<img<",
+            r#"<span class="cloze-blank"><span class="cloze-blank">[a]</span></span>"#,
+            "\\(\\[$$\\)",
+            "]]]]",
+        ] {
+            let _ = spoken_text(Some(hostile), hostile);
+            let _ = spoken_text(None, hostile);
+        }
+    }
 }
 
 #[cfg(test)]

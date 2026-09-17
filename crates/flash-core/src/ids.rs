@@ -25,8 +25,20 @@ id_type!(CardId);
 id_type!(SessionId);
 id_type!(MediaId);
 id_type!(NoteId);
+id_type!(
+    /// A file, text or link a user handed to card generation.
+    AiSourceId
+);
+id_type!(
+    /// One run of the generation pipeline over a source.
+    AiJobId
+);
+id_type!(
+    /// A generated card awaiting the user's keep or discard.
+    AiDraftId
+);
 
-/// A user's row id — and, unlike the other ids, a capability.
+/// A user's row id and, unlike the other ids, a capability.
 ///
 /// Ordinary code cannot build one from an integer. A `UserId` in scope
 /// is therefore one of two things: the authenticated user of the current

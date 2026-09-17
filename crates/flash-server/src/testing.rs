@@ -15,7 +15,7 @@ use crate::config::Config;
 use crate::email::Mailer;
 use crate::ext::ServerExtension;
 use crate::media_store::{Blob, ByteRange, DiskStore, MediaStore, MediaStoreError};
-use crate::policy::{CardPolicy, Unlimited};
+use crate::policy::{AiPolicy, CardPolicy, Unlimited};
 use crate::service::{now_ms, Services};
 use crate::state::AppState;
 use axum::body::Body;
@@ -47,6 +47,8 @@ pub fn config(data_dir: PathBuf) -> Config {
         mail: None,
         dev_mail_log: false,
         media_r2: None,
+        ai: None,
+        tts: None,
     }
 }
 
@@ -56,10 +58,13 @@ pub struct TestApp {
     pub store: Arc<Store>,
     pub services: Services,
     pub data_dir: PathBuf,
+    /// The state the router was built over, for tests that drive a
+    /// background loop (the generation runner) against the same app.
+    pub state: AppState,
 }
 
 /// Builds an `AppState` the way production does, then swaps in whichever
-/// fakes the test provides — exactly the overrides the per-file harnesses
+/// fakes the test provides, exactly the overrides the per-file harnesses
 /// used to apply by hand.
 pub struct AppBuilder {
     tag: String,
@@ -67,6 +72,9 @@ pub struct AppBuilder {
     mailer: Option<Arc<dyn Mailer>>,
     ext: Option<Arc<dyn ServerExtension>>,
     policy: Option<Arc<dyn CardPolicy>>,
+    ai_policy: Option<Arc<dyn AiPolicy>>,
+    ai: Option<Arc<crate::state::AiRuntime>>,
+    tts: Option<Arc<crate::tts::TtsRuntime>>,
     media: Option<Arc<dyn MediaStore>>,
     tight_limits: bool,
 }
@@ -87,9 +95,35 @@ impl AppBuilder {
             mailer: None,
             ext: None,
             policy: None,
+            ai_policy: None,
+            ai: None,
+            tts: None,
             media: None,
             tight_limits: false,
         }
+    }
+
+    /// Turns natural voice on with `backend` (the fake sidecar in every
+    /// test); without it the voice audio routes answer as they do on a
+    /// server with no sidecar.
+    pub fn tts(mut self, backend: Arc<dyn crate::tts::TtsBackend>) -> Self {
+        self.tts = Some(Arc::new(crate::tts::TtsRuntime::with_backend(
+            backend,
+            flash_core::settings::DEFAULT_VOICE,
+        )));
+        self
+    }
+
+    /// Turns card generation on with `provider` (the scripted fake in
+    /// every test) accepting `inputs`; without it the AI routes answer
+    /// as they do on a server with no key.
+    pub fn ai(
+        mut self,
+        provider: Arc<dyn crate::ai::provider::LlmProvider>,
+        inputs: Vec<crate::policy::AiInput>,
+    ) -> Self {
+        self.ai = Some(fake_ai(provider, inputs));
+        self
     }
 
     /// Every rate limiter allows `TIGHT_BURST` requests and refills
@@ -114,10 +148,17 @@ impl AppBuilder {
         self
     }
 
-    /// The card policy `Services` consults; `Unlimited` unless the hosted
-    /// product's harness plugs its cap in.
+    /// The card policy `Services` consults; `Unlimited` unless a test
+    /// plugs a cap in.
     pub fn policy(mut self, policy: Arc<dyn CardPolicy>) -> Self {
         self.policy = Some(policy);
+        self
+    }
+
+    /// The generation policy `Services` consults; `Unlimited` unless the
+    /// hosted product's harness plugs its quotas in.
+    pub fn ai_policy(mut self, policy: Arc<dyn AiPolicy>) -> Self {
+        self.ai_policy = Some(policy);
         self
     }
 
@@ -140,7 +181,8 @@ impl AppBuilder {
             .store
             .unwrap_or_else(|| Arc::new(Store::open_in_memory().unwrap()));
         let policy = self.policy.unwrap_or_else(|| Arc::new(Unlimited));
-        let services = Services::with_policy(store.clone(), policy);
+        let ai_policy = self.ai_policy.unwrap_or_else(|| Arc::new(Unlimited));
+        let services = Services::with_policies(store.clone(), policy, ai_policy);
         let data_dir = data_dir(&self.tag);
         let config = config(data_dir.clone());
         let ext = self.ext.unwrap_or_else(|| Arc::new(crate::ext::CoreOnly));
@@ -151,6 +193,12 @@ impl AppBuilder {
         if let Some(media) = self.media {
             state.install_media(media);
         }
+        if let Some(ai) = self.ai {
+            state.install_ai(ai);
+        }
+        if let Some(tts) = self.tts {
+            state.install_tts(tts);
+        }
         if self.tight_limits {
             // Two different bursts, so a probe can tell which band
             // answered: the strict one (sign-in, reset, token minting)
@@ -160,15 +208,45 @@ impl AppBuilder {
                 Arc::new(crate::middleware::RateLimiter::new(TIGHT_BURST_GENEROUS, 1));
         }
         TestApp {
-            app: crate::build_app(state),
+            app: crate::build_app(state.clone()),
             store,
             services,
             data_dir,
+            state,
         }
     }
 }
 
 // ---- fixtures ----
+
+/// A generation runtime over `provider` with no PDF renderer: what
+/// `AppBuilder::ai` installs, and what a test that calls a voice service
+/// method directly hands it.
+pub fn fake_ai(
+    provider: Arc<dyn crate::ai::provider::LlmProvider>,
+    inputs: Vec<crate::policy::AiInput>,
+) -> Arc<crate::state::AiRuntime> {
+    fake_ai_with(provider, inputs, None)
+}
+
+/// `fake_ai` with a document converter, for tests of the document path.
+pub fn fake_ai_with(
+    provider: Arc<dyn crate::ai::provider::LlmProvider>,
+    inputs: Vec<crate::policy::AiInput>,
+    converter: Option<crate::ai::convert::DocConverter>,
+) -> Arc<crate::state::AiRuntime> {
+    Arc::new(
+        crate::state::AiRuntime::new(
+            provider,
+            Some(inputs),
+            #[cfg(feature = "pdf")]
+            None,
+            converter,
+            std::env::temp_dir().join("flash-test-convert"),
+        )
+        .expect("the fake reads every kind"),
+    )
+}
 
 /// A heavy-job permit for `user` from a gate of its own, for tests that
 /// call an import, export or Stats function directly.

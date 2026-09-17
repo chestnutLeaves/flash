@@ -6,7 +6,11 @@
 {% if total > 0 %}
 <div class="fl-progress"><div style="width:{{ total.saturating_sub(remaining.clone()) * 100 / total }}%"></div></div>
 {% endif %}
-<div class="fl-card study-card">
+{# data-audio-front / data-audio-back name this card's clips in the
+   chosen voice, when the server has made them; the page plays those
+   and reads the spoken text itself otherwise. data-answer-hints carries
+   the answer's words for the recognizer while the front shows. #}
+<div class="fl-card study-card" data-card-id="{{ card.card_id }}" data-spoken-front="{{ card.spoken_front }}"{% if let Some(r) = revealed %} data-spoken-back="{{ r.spoken_back }}"{% endif %}{% if let Some(h) = card.hints_json %} data-answer-hints="{{ h }}"{% endif %}{% if let Some(u) = audio_front %} data-audio-front="{{ u }}"{% endif %}{% if let Some(u) = audio_back %} data-audio-back="{{ u }}"{% endif %}>
   <div class="front">{% if let Some(html) = card.front_html %}<div class="card-rich">{{ html|safe }}</div>{% else %}{{ card.front }}{% endif %}</div>
   {% if let Some(r) = revealed %}
   {% if let Some(diff) = r.typed_diff %}
@@ -25,6 +29,7 @@
           hx-vals='{"session": {{ session_id }}, "card": {{ card.card_id }}, "rating": 3, "total": {{ total }}}'>Good <kbd>3</kbd></button>
   <button id="grade-4" class="fl-btn fl-btn-secondary" hx-post="/study/review" hx-target="#study"
           hx-vals='{"session": {{ session_id }}, "card": {{ card.card_id }}, "rating": 4, "total": {{ total }}}'>Easy <kbd>4</kbd></button>
+  {% include "study_speak.html" %}
 </div>
 {% else %}
 <div class="row">
@@ -33,16 +38,17 @@
          placeholder="Type the answer…" autocomplete="off" autocapitalize="off" spellcheck="false" autofocus>
   {% endif %}
   <button id="reveal-btn" class="fl-btn fl-btn-primary" hx-post="/study/reveal" hx-target="#study"
-          hx-include="#type-input"
+          {% if card.wants_typing %}hx-include="#type-input"{% endif %}
           hx-vals='{"session": {{ session_id }}, "card": {{ card.card_id }}, "remaining": {{ remaining }}, "total": {{ total }}}'>Show answer</button>
   <kbd>{% if card.wants_typing %}enter{% else %}space{% endif %}</kbd>
+  {% include "study_speak.html" %}
 </div>
 {% endif %}
 <p class="mono small muted">{{ remaining }} left</p>
 {% when None %}
 <div class="fl-card study-done">
   {% if held_by_limit > 0 %}
-  <p class="muted">That's today's allowance done — nice work. <strong>{{ held_by_limit }}</strong> more
+  <p class="muted">That's today's allowance done. Nice work. <strong>{{ held_by_limit }}</strong> more
   card{% if held_by_limit != 1 %}s{% endif %} are ready but held back by your daily limit.</p>
   <form class="row" method="post" action="{% if let Some(d) = scope_deck %}/decks/{{ d }}/boost{% else %}/study/boost{% endif %}" hx-boost="true" hx-push-url="false" hx-select="#study" hx-target="#study" hx-swap="outerHTML show:none">
     <input type="hidden" name="back" value="study">

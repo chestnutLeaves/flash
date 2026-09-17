@@ -1,24 +1,29 @@
 {% extends "base.html" %}
-{% block title %}Decks — Flash{% endblock %}
+{% block title %}Decks - Flash{% endblock %}
 {% block content %}
+<div id="decks-main" style="display:contents">
 <div class="page-head">
   <h1>Decks</h1>
-  <a class="small muted" href="/import">Import</a>
+  <span class="small muted">
+    {# The archived rows swap into the list in place; the href is the fallback without script. #}
+    {% if !archived.is_empty() %}{% if show_archived %}<a class="muted" href="/decks" hx-get="/decks" hx-select="#decks-main" hx-target="#decks-main" hx-swap="outerHTML show:none" hx-push-url="false">Hide archived</a>{% else %}<a class="muted" href="/decks?archived=1" hx-get="/decks?archived=1" hx-select="#decks-main" hx-target="#decks-main" hx-swap="outerHTML show:none" hx-push-url="false">Archived</a>{% endif %} &middot; {% endif %}<a class="muted" href="/import">Import</a>{% if ai_enabled %} &middot; <a class="muted" href="/generate">Generate</a>{% endif %}
+  </span>
 </div>
-{{ usage_banner|safe }}
-{{ usage_count|safe }}
 <form class="row" method="post" action="/decks">
   <input class="fl-input" type="text" name="name" placeholder="New deck name" required maxlength="120">
   <button class="fl-btn fl-btn-primary" type="submit">Create</button>
 </form>
 
-{% if decks.is_empty() %}
+{% if active.is_empty() && archived.is_empty() %}
 <p class="muted">No decks yet.</p>
+{% else %}
+{% if active.is_empty() %}
+<p class="muted">Every deck is archived.</p>
 {% else %}
 <table class="fl-table">
   <thead><tr><th>Deck</th><th>Due</th><th>New</th><th></th></tr></thead>
   <tbody>
-  {% for deck in decks %}
+  {% for deck in active %}
   <tr>
     <td><a href="/decks/{{ deck.id }}">{{ deck.name }}</a></td>
     <td class="num">{{ deck.due_count }}</td>
@@ -29,4 +34,24 @@
   </tbody>
 </table>
 {% endif %}
+{% if show_archived && !archived.is_empty() %}
+<table class="fl-table fl-archived">
+  <thead><tr><th>Archived</th><th></th></tr></thead>
+  <tbody>
+  {% for deck in archived %}
+  <tr>
+    <td><a href="/decks/{{ deck.id }}">{{ deck.name }}</a></td>
+    <td style="text-align:right">
+      <form method="post" action="/decks/{{ deck.id }}/unarchive" hx-boost="true" hx-push-url="false" hx-select="#decks-main" hx-target="#decks-main" hx-swap="outerHTML show:none" style="display:inline">
+        <input type="hidden" name="back" value="archived">
+        <button class="small muted fl-linkbtn" type="submit">unarchive</button>
+      </form>
+    </td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endif %}
+</div>
 {% endblock %}

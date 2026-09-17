@@ -93,11 +93,25 @@ async fn start(
         StudyScope::Deck(d) => Some(d.0),
         _ => None,
     };
+    let tts = state.tts.clone();
     call(state.services.clone(), move |s| {
         let info = s.start_session(user.id, scope, now_ms())?;
         let card = info
             .first_card
-            .map(|c| s.study_card(user.id, c, info.next_card_id))
+            .map(|c| {
+                let mut card = s.study_card(user.id, c, info.next_card_id)?;
+                if let Some(tts) = &tts {
+                    crate::tts::prefetch_for_study(
+                        tts,
+                        &s,
+                        user.id,
+                        Some(card.card_id),
+                        &info.upcoming,
+                    );
+                }
+                crate::tts::serve::attach_study_card(tts.as_deref(), &s, user.id, &mut card);
+                Ok::<_, ServiceError>(card)
+            })
             .transpose()?
             .map(Into::into);
         Ok::<_, ServiceError>(Session {
@@ -128,8 +142,11 @@ async fn reveal(
     Path(_sid): Path<i64>,
     ApiJson(body): ApiJson<RevealBody>,
 ) -> ApiResult<Reveal> {
+    let tts = state.tts.clone();
     let reveal = call(state.services.clone(), move |s| {
-        s.reveal_card(user.id, CardId(body.card_id), body.typed.as_deref())
+        let mut reveal = s.reveal_card(user.id, CardId(body.card_id), body.typed.as_deref())?;
+        crate::tts::serve::attach_reveal(tts.as_deref(), &s, user.id, &mut reveal);
+        Ok::<_, ServiceError>(reveal)
     })
     .await?;
     Ok(Json(reveal.into()))
@@ -159,6 +176,7 @@ async fn review(
     let rating =
         Rating::from_i64(body.rating).ok_or_else(|| ApiError::invalid("rating must be 1-4"))?;
     let platform = app_platform(&headers);
+    let tts = state.tts.clone();
     call(state.services.clone(), move |s| {
         let session = SessionId(sid);
         let result = s.submit_review(
@@ -174,7 +192,20 @@ async fn review(
         )?;
         let next_card = result
             .next_card
-            .map(|c| s.study_card(user.id, c, result.next_card_id))
+            .map(|c| {
+                let mut card = s.study_card(user.id, c, result.next_card_id)?;
+                if let Some(tts) = &tts {
+                    crate::tts::prefetch_for_study(
+                        tts,
+                        &s,
+                        user.id,
+                        Some(card.card_id),
+                        &result.upcoming,
+                    );
+                }
+                crate::tts::serve::attach_study_card(tts.as_deref(), &s, user.id, &mut card);
+                Ok::<_, ServiceError>(card)
+            })
             .transpose()?
             .map(Into::into);
         Ok::<_, ServiceError>(Reviewed {

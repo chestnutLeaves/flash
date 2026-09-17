@@ -348,7 +348,7 @@ pub(crate) async fn finish_login_ceremony(
             };
             if passkey.cred_id() == result.cred_id() {
                 // Persist counter/backup-state updates when present; either
-                // way stamp last_used_at — most authenticators keep their
+                // way stamp last_used_at: most authenticators keep their
                 // sign counter at 0, and the login still happened.
                 if passkey.update_credential(&result) == Some(true) {
                     if let Ok(json) = serde_json::to_string(&passkey) {

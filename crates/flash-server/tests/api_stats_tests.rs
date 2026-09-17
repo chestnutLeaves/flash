@@ -82,4 +82,70 @@ async fn stats_reflect_reviews() {
         .unwrap();
     assert_eq!(today["count"], 2);
     assert_eq!(today["level"], 4);
+    // One year of history: no years to pick from, the trailing view.
+    assert_eq!(s["heat_years"], serde_json::json!([]));
+    assert_eq!(s["heat_year"], serde_json::Value::Null);
+
+    // A review two years back opens the picker; `?year=` shows that
+    // calendar year, with no today or future cells.
+    let two_years_ago = now - 2 * 365 * 24 * 60 * 60 * 1000;
+    let deck = t
+        .store
+        .find_deck_by_name(flashtester, "Bio")
+        .unwrap()
+        .unwrap();
+    let cards = t
+        .store
+        .list_cards(flashtester, Some(deck), None, 1)
+        .unwrap();
+    let scheduler = flash_core::Scheduler::new(None, 0.9).unwrap();
+    let state = t.store.get_card_state(flashtester, cards[0].id).unwrap();
+    let outcome = scheduler
+        .review(&state, Rating::Good, two_years_ago)
+        .unwrap();
+    t.store
+        .record_review(
+            flashtester,
+            cards[0].id,
+            &outcome,
+            two_years_ago,
+            "web",
+            None,
+            None,
+        )
+        .unwrap();
+    let year = jiff::Timestamp::from_millisecond(two_years_ago)
+        .unwrap()
+        .to_zoned(jiff::tz::TimeZone::UTC)
+        .year();
+    let s = send(&t.app, json_get("/api/v1/stats", Some(&bearer)))
+        .await
+        .json();
+    assert_eq!(s["heat_years"].as_array().unwrap().len(), 3);
+    assert_eq!(s["heat_years"][0], year);
+    assert_eq!(s["heat_year"], serde_json::Value::Null);
+    let s = send(
+        &t.app,
+        json_get(&format!("/api/v1/stats?year={year}"), Some(&bearer)),
+    )
+    .await
+    .json();
+    assert_eq!(s["heat_year"], year);
+    assert_eq!(s["total_reviews"], 3);
+    let cells: Vec<_> = s["heat_weeks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|w| w.as_array().unwrap())
+        .collect();
+    assert!(cells
+        .iter()
+        .all(|c| c["today"] == false && c["future"] == false));
+    assert_eq!(
+        cells
+            .iter()
+            .filter(|c| c["level"].as_u64() > Some(0))
+            .count(),
+        1
+    );
 }

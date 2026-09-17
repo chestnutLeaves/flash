@@ -1,5 +1,5 @@
 //! Password authentication: Argon2id hashing plus the login, reset, and
-//! settings handlers. Passwords are optional alongside passkeys — an
+//! settings handlers. Passwords are optional alongside passkeys. An
 //! account always keeps at least one login method.
 //!
 //! Hashing is CPU/memory-heavy by design, so every hash/verify (a) runs
@@ -323,9 +323,9 @@ pub async fn reset_request_submit(
     }
     // Uniform: a malformed or unknown email gets the same "check your
     // email" page.
-    let base_url = state.config.base_url.clone();
+    let site = state.site.clone();
     let result = flow_call(&state, move |s| {
-        reset::request(s.store(), mailer.as_ref(), &base_url, &form.email, now_ms())
+        reset::request(s.store(), mailer.as_ref(), &site, &form.email, now_ms())
     })
     .await;
     match result {

@@ -1,0 +1,36 @@
+{# The voice dock: the glow along the bottom of the viewport, and under
+   the card the live transcript, the verdict with the grader's remark,
+   and the controls. Outside #study so it survives every card swap;
+   shown by static/voice.js while the mode is on. The notice sits
+   outside the dock so a sentence that ends the session (the microphone
+   refused, the recognizer gone) stays readable once the dock hides. #}
+<div id="voice-glow" class="voice-glow" data-mode="still" aria-hidden="true" hidden><i></i><i></i><i></i></div>
+<p id="voice-notice" class="voice-notice" role="status" hidden></p>
+<div id="voice-dock" class="voice-dock" data-phase="starting" hidden>
+  <p id="voice-phase" class="fl-sr-only" role="status" aria-live="polite">Starting</p>
+  <p id="voice-transcript" class="voice-transcript" data-placeholder=""></p>
+  <div class="voice-status">
+    <p id="voice-verdict-line" class="voice-verdict-line" hidden><strong id="voice-verdict" class="voice-verdict"></strong> <span id="voice-remark" class="voice-remark"></span></p>
+    <button id="voice-undo" type="button" class="fl-btn fl-btn-sm fl-btn-ghost voice-undo" hidden>Undo</button>
+  </div>
+  <div class="voice-controls">
+    <div class="voice-controls-side">
+      <button id="voice-repeat" type="button" class="fl-btn fl-btn-ghost fl-iconbtn voice-side" aria-label="Repeat" title="Repeat">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 15.5-6.3L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.3L3 16"/><path d="M3 21v-5h5"/></svg>
+      </button>
+    </div>
+    <button id="voice-mic" type="button" class="voice-mic" aria-pressed="false" aria-label="Pause" title="Pause (m)">
+      <svg class="voice-ico voice-ico-mic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>
+      <svg class="voice-ico voice-ico-micoff" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6a3 3 0 0 1 6 0v5"/><path d="M15 11.5a3 3 0 0 1-5 2"/><path d="M5 11a7 7 0 0 0 10.6 6"/><path d="M19 11a7 7 0 0 1-.6 2.8"/><path d="M12 18v3"/><path d="m3 3 18 18"/></svg>
+    </button>
+    <div class="voice-controls-side">
+      <button id="voice-settings" type="button" class="fl-btn fl-btn-ghost fl-iconbtn voice-side" aria-label="Voice settings" title="Voice settings">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+      </button>
+      <button id="voice-stop" type="button" class="fl-btn fl-btn-ghost fl-iconbtn voice-side" aria-label="Stop voice study" title="Stop voice study (v)">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+      </button>
+    </div>
+  </div>
+</div>
+{% include "study_voice_settings.html" %}

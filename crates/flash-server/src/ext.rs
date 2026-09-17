@@ -1,5 +1,5 @@
 //! What a hosted build plugs into the open server. The open server is a
-//! complete product on its own — accounts, decks, study, import, MCP —
+//! complete product on its own (accounts, decks, study, import, MCP)
 //! and `build_app` composes it from core routers plus whatever the
 //! extension returns for each band. Every method has a no-op default;
 //! `CoreOnly` implements nothing and is what the open binary installs.
@@ -60,7 +60,7 @@ pub enum NavSection {
 
 /// The places in the core's pages that are the extension's to fill. Each
 /// is rendered to a String the page emits with `|safe`; an extension
-/// that has nothing for a slot returns "". The store-backed ones (usage,
+/// that has nothing for a slot returns "". The store-backed ones (quota,
 /// settings, sharing) are rendered inside the page's blocking closure.
 pub enum Slot<'a> {
     /// login.html, above "Sign in with passkey": external sign-in buttons,
@@ -73,11 +73,9 @@ pub enum Slot<'a> {
     },
     /// The challenge widget on the email-sending public forms.
     Captcha,
-    /// decks / deck / import: the over-limit banner; `limit_hit` after a
-    /// blocked add, so the banner says why.
-    UsageBanner { user: UserId, limit_hit: bool },
-    /// decks / import: the quiet running count.
-    UsageCount { user: UserId },
+    /// generate: the account's generation quota this month, as the
+    /// extension meters it.
+    AiQuota { user: UserId },
     /// settings: the plan-and-billing card, replacing the core's plain
     /// "Your cards" card when non-empty. `query` is the raw query string
     /// the extension's own redirects carry flags in.
@@ -229,7 +227,7 @@ pub trait ServerExtension: AccountHooks + Send + Sync + 'static {
 
     // ---- JSON the API carries for the extension ----
 
-    /// Fields flattened into the `Me` / `Settings` objects (plan, usage,
+    /// Fields flattened into the `Me` / `Settings` objects (plan, quota,
     /// billing, connected providers). Runs on a blocking thread.
     fn account_json(
         &self,

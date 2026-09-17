@@ -45,7 +45,7 @@ pub struct AdminUserRow {
     /// newer. Sessions cover enrollment and logins where the authenticator
     /// reported no state change.
     pub last_login_at: Option<i64>,
-    /// client_names with an unrevoked, unexpired OAuth grant — a user can
+    /// client_names with an unrevoked, unexpired OAuth grant. A user can
     /// have several MCP clients attached at once (Claude, ChatGPT, ...).
     pub mcp_clients: Vec<String>,
 }
@@ -437,16 +437,20 @@ impl Store {
     }
 
     /// Removes an account and everything it owns in one transaction:
-    /// cards (and their state/tags/media links), decks, tags, media rows,
-    /// study sessions, web sessions, password resets, OAuth codes and
-    /// tokens, passkeys, settings, the user row, and finally its review
-    /// log (permitted by the V008 trigger once the user row is gone).
-    /// Invites the user issued survive with `created_by` nulled; an
-    /// extension's own audit rows are its `before_delete_user` hook's call.
+    /// cards (and their state/tags/media links), the generation ledger,
+    /// drafts, notes, jobs, figure pins, readings and sources, decks,
+    /// tags, media rows, study sessions, web sessions, password resets,
+    /// OAuth codes and tokens, passkeys, settings, the user row, and
+    /// finally its review log (permitted by the V008 trigger once the
+    /// user row is gone). Invites the user issued survive with
+    /// `created_by` nulled; an extension's own audit rows are its
+    /// `before_delete_user` hook's call.
     ///
-    /// Foreign keys are ON with no cascades, so the order below matters.
-    /// Media blobs are content-addressed and shared across users: the
-    /// caller removes only the hashes returned in `orphan_blobs`.
+    /// Foreign keys are ON with no cascades, so the order below matters:
+    /// cards name notes, notes and drafts name jobs, jobs name decks,
+    /// figure pins name media. Blobs are content-addressed and shared
+    /// across users (a card's media and a generation source alike), so
+    /// the caller removes only the hashes returned in `orphan_blobs`.
     pub fn delete_user_account(&self, user: UserId) -> Result<DeletedAccount> {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
@@ -459,7 +463,10 @@ impl Store {
             return Err(StoreError::NotFound("user"));
         }
         let hashes: Vec<String> = {
-            let mut stmt = tx.prepare("SELECT DISTINCT sha256 FROM media WHERE user_id = ?1")?;
+            let mut stmt = tx.prepare(
+                "SELECT DISTINCT sha256 FROM media WHERE user_id = ?1
+                 UNION SELECT DISTINCT sha256 FROM ai_sources WHERE user_id = ?1",
+            )?;
             let rows = stmt.query_map([user.raw()], |r| r.get::<_, String>(0))?;
             rows.collect::<rusqlite::Result<_>>()?
         };
@@ -468,12 +475,21 @@ impl Store {
         }
 
         let uid = user.raw();
-        // Card children, then cards.
+        // Card children, then cards, then what cards and notes name.
         for sql in [
             "DELETE FROM card_media WHERE card_id IN (SELECT id FROM cards WHERE user_id = ?1)",
             "DELETE FROM card_tags WHERE card_id IN (SELECT id FROM cards WHERE user_id = ?1)",
             "DELETE FROM card_state WHERE card_id IN (SELECT id FROM cards WHERE user_id = ?1)",
             "DELETE FROM cards WHERE user_id = ?1",
+            "DELETE FROM ai_calls WHERE user_id = ?1",
+            "DELETE FROM ai_drafts WHERE user_id = ?1",
+            "DELETE FROM notes WHERE user_id = ?1",
+            "DELETE FROM ai_job_sources WHERE user_id = ?1",
+            "DELETE FROM ai_turns WHERE user_id = ?1",
+            "DELETE FROM ai_jobs WHERE user_id = ?1",
+            "DELETE FROM ai_figures WHERE user_id = ?1",
+            "DELETE FROM ai_extractions WHERE user_id = ?1",
+            "DELETE FROM ai_sources WHERE user_id = ?1",
             "DELETE FROM tags WHERE user_id = ?1",
             "DELETE FROM decks WHERE user_id = ?1",
             "DELETE FROM media WHERE user_id = ?1",
@@ -483,6 +499,7 @@ impl Store {
             "DELETE FROM oauth_codes WHERE user_id = ?1",
             "DELETE FROM oauth_tokens WHERE user_id = ?1",
             "DELETE FROM webauthn_credentials WHERE user_id = ?1",
+            "DELETE FROM voice_clip_refs WHERE user_id = ?1",
             "DELETE FROM user_settings WHERE user_id = ?1",
             "UPDATE invites SET created_by = NULL WHERE created_by = ?1",
             "DELETE FROM users WHERE id = ?1",
@@ -506,7 +523,8 @@ impl Store {
 /// What the server still has to clean up after a purge.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DeletedAccount {
-    /// Media hashes no remaining user references; safe to remove from disk.
+    /// Blob hashes (card media and generation sources) no remaining user
+    /// references; safe to remove from storage.
     pub orphan_blobs: Vec<String>,
 }
 

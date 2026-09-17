@@ -1,0 +1,100 @@
+{#
+  The layout every outgoing message is wrapped in. Mail is not the web:
+  Outlook renders with the Word engine, so there is no flexbox, no grid,
+  and no reliable box model on a div. Everything that matters to the
+  layout is a presentation table with inline styles on each cell.
+
+  Four rules to keep, each one learned the hard way:
+   * No rgba(). Outlook and several webmail clients drop it in `border`,
+     which yields no border at all, so the design-system --stroke token
+     is flattened to its composite over the page ground.
+   * No webfont. Geist is a self-hosted woff2 and unreachable from a mail
+     client, so the stack starts at the system fallbacks.
+   * The <style> below is progressive enhancement only. Strip it entirely
+     and the message still looks right.
+   * Double-quoted attributes everywhere. A single-quoted one would put
+     the burden on every interpolated value being apostrophe-safe.
+
+  Nothing here names a host: the links and the footer come from `site`.
+-#}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="x-apple-disable-message-reformatting">
+<meta name="color-scheme" content="light dark">
+<meta name="supported-color-schemes" content="light dark">
+<title>{% block title %}Flash{% endblock %}</title>
+<style>
+@media (prefers-color-scheme: dark) {
+  {# Every element painting the page ground needs the swap, not just body:
+     the wrapper table and its cell sit on top of it, and leaving them
+     light strands the wordmark and footer as near-white on near-white.
+     They carry their own class because `.fl-page td` would outrank the
+     card and button cells and blacken those too. #}
+  .fl-page, .fl-ground { background-color: #0a0a0b !important; }
+  .fl-card { background: #17171a !important; border-color: #2a2a30 !important; }
+  .fl-mark, .fl-h1, .fl-text { color: #ededf0 !important; }
+  .fl-muted, .fl-muted a { color: #a0a0a8 !important; }
+  .fl-btn { background: #e8e8e8 !important; }
+  .fl-btn a { color: #0a0a0b !important; }
+}
+</style>
+</head>
+<body class="fl-page" style="margin:0;padding:0;background-color:#fafafa;">
+
+{# The inbox preview line. No zero-width padding run after it: that trick
+   stops body copy bleeding into the preview, but a few hundred hidden
+   characters is a hiding-text signal, and looking unremarkable matters
+   more here than the last word of the preview. #}
+<div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all;">{% block preheader %}{% endblock %}</div>
+
+<table role="presentation" class="fl-ground" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#fafafa;">
+<tr><td class="fl-ground" align="center" style="padding:32px 16px;">
+<table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;">
+
+  <tr><td style="padding:0 4px 16px;">
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+      {# alt text carries the brand when images are off, which is the whole
+         reason the mark sits beside the wordmark rather than replacing it. #}
+      <td width="36" style="width:36px;"><img src="{{ site.base_url }}/static/favicon-192.png" width="36" height="36" alt="Flash" style="display:block;width:36px;height:36px;border:0;outline:none;text-decoration:none;"></td>
+      <td class="fl-mark" style="padding-left:9px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:17px;font-weight:600;letter-spacing:-0.4px;color:#18181b;">Flash</td>
+    </tr></table>
+  </td></tr>
+
+  <tr><td class="fl-card" style="background-color:#ffffff;border:1px solid #e6e6e6;border-radius:12px;padding:24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:25px;color:#18181b;mso-line-height-rule:exactly;">
+    <h1 class="fl-h1" style="margin:0 0 12px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:20px;line-height:27px;font-weight:600;letter-spacing:-0.2px;color:#18181b;">{% block heading %}{% endblock %}</h1>
+    {% block body %}{% endblock %}
+
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:20px 0 0;"><tr>
+      {# Padding on the td, not the a: Word ignores padding on an inline
+         anchor. No VML: it buys only the corner radius in Outlook
+         desktop, and a square button is honest degradation. #}
+      <td class="fl-btn" bgcolor="#111113" style="background-color:#111113;border-radius:6px;padding:11px 20px;">
+        <a href="{{ link }}" style="display:inline-block;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:15px;font-weight:600;line-height:20px;color:#ffffff;text-decoration:none;">{% block cta_label %}Open Flash{% endblock %}</a>
+      </td>
+    </tr></table>
+
+    {% block after_cta %}{% endblock %}
+
+    {# The visible URL is not decoration. It gives the reader the
+       destination before they commit, and it is the way through when a
+       client strips the button. Last, because it is the fallback: the
+       message should read as prose before it reads as a URL. #}
+    <p class="fl-muted" style="margin:16px 0 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:13px;line-height:20px;color:#52525b;">Or paste this link into your browser:<br><a href="{{ link }}" style="color:#52525b;word-break:break-all;">{{ link }}</a></p>
+  </td></tr>
+
+  <tr><td class="fl-muted" style="padding:20px 4px 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:12px;line-height:18px;color:#6d6d75;">
+    {% block footer_note %}{% endblock %}
+    <p style="margin:0 0 6px;">Flash · <a href="{{ site.base_url }}" style="color:#6d6d75;">{{ site.host() }}</a></p>
+    {% if let Some(email) = site.support_email %}
+    <p style="margin:0;">Questions? Reply to this email, or write to <a href="mailto:{{ email }}" style="color:#6d6d75;">{{ email }}</a>.</p>
+    {% endif %}
+  </td></tr>
+
+</table>
+</td></tr>
+</table>
+</body>
+</html>

@@ -1,7 +1,7 @@
 // Small shared UI behaviors (external file: CSP forbids inline script).
 
 // Math rendering (KaTeX, self-hosted): render on load and after every
-// htmx swap, scoped to the swapped subtree. \( \) inline, \[ \] display —
+// htmx swap, scoped to the swapped subtree. \( \) inline, \[ \] display,
 // no bare $ (false-positive jank).
 (function () {
   function renderMath(root) {

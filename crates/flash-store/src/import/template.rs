@@ -1,8 +1,8 @@
 //! Minimal Anki card-template renderer: enough of the mustache dialect to
-//! reproduce what each card actually shows — `{{Field}}` substitution,
-//! filters (`{{furigana:Reading}}`, `{{tts ja_JP:Word}}`, …: the field is
-//! the last `:`-segment; unknown filters just render the field),
-//! `{{#F}}/{{^F}}/{{/F}}` conditionals (nested), and the specials.
+//! reproduce what each card actually shows. It covers `{{Field}}`
+//! substitution, filters (`{{furigana:Reading}}`, `{{tts ja_JP:Word}}`, …:
+//! the field is the last `:`-segment; unknown filters just render the
+//! field), `{{#F}}/{{^F}}/{{/F}}` conditionals (nested), and the specials.
 //! `{{FrontSide}}` renders empty: Flash always shows the front above the
 //! back, so echoing it would be duplication, not fidelity.
 
@@ -15,7 +15,7 @@ use std::collections::HashMap;
 pub fn render(fmt: &str, fields: &HashMap<&str, &str>, is_back: bool) -> String {
     let mut out = String::new();
     let mut stack: Vec<bool> = Vec::new();
-    // Fields already shown as text in this format — lets {{tts:X}} render
+    // Fields already shown as text in this format: lets {{tts:X}} render
     // silently when X is visible anyway (Anki shows a play button there,
     // not the text twice).
     let mut shown: Vec<&str> = Vec::new();
@@ -194,7 +194,7 @@ mod tests {
             ),
             "食べる (たべる) "
         );
-        // A tts-only card keeps its text — voice needs something to say.
+        // A tts-only card keeps its text: voice needs something to say.
         assert_eq!(render("{{tts ja_JP:Word}}", &f, false), "食べる");
     }
 

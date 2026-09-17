@@ -1,8 +1,8 @@
 //! Signing in from the app. Every path ends in `issue_tokens`, the
 //! mobile twin of `auth::issue_session`: a 1 h access token plus a 60 d
 //! rotating refresh token, stored (hashed) in `oauth_tokens` under the
-//! first-party client id. Credentials are exchanged natively — password,
-//! a Google ID token, an Apple identity token — and resolved by the same
+//! first-party client id. Credentials are exchanged natively (password,
+//! a Google ID token, an Apple identity token) and resolved by the same
 //! `flows` the web uses, so the rules never fork.
 
 use axum::extract::{Path, State};
@@ -206,9 +206,9 @@ async fn reset_request(
     let Some(mailer) = state.mailer.clone() else {
         return Err(ApiError::not_available("reset"));
     };
-    let base_url = state.config.base_url.clone();
+    let site = state.site.clone();
     call(state.services.clone(), move |s| {
-        reset::request(s.store(), mailer.as_ref(), &base_url, &body.email, now_ms())
+        reset::request(s.store(), mailer.as_ref(), &site, &body.email, now_ms())
     })
     .await?;
     state

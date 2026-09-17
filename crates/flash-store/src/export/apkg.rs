@@ -1,11 +1,11 @@
 //! Anki .apkg writer: a zip holding a schema-11 `collection.anki2` SQLite
 //! file plus the legacy `media` map (`{"0": "cat.png", …}` with the bytes
-//! as numbered entries — the format every Anki version reads). Mirrors the reader in `import::apkg` —
-//! fields joined with \x1f, tags space-wrapped, everything exported as
-//! new. Plain cards become Basic notes (rich HTML preserved when the card
-//! carries it); cloze-derived cards re-group by their original source
-//! into REAL cloze notes, one Anki card per index — a cloze deck round
-//! trips as a cloze deck.
+//! as numbered entries, the format every Anki version reads). Mirrors the
+//! reader in `import::apkg`: fields joined with \x1f, tags space-wrapped,
+//! everything exported as new. Plain cards become Basic notes (rich HTML
+//! preserved when the card carries it); cloze-derived cards re-group by
+//! their original source into REAL cloze notes, one Anki card per index.
+//! A cloze deck round trips as a cloze deck.
 
 use std::io::{Seek, Write};
 

@@ -128,7 +128,7 @@ fn an_account_holds_at_most_the_deck_cap() {
         .rows;
     let err = t
         .services
-        .import_cards(user, "Imported", rows, false, None, now_ms())
+        .import_cards(user, "Imported", rows, vec![], None, now_ms())
         .unwrap_err();
     assert!(err.to_string().contains("at most 500 decks"), "{err}");
     assert_eq!(t.store.deck_count(user).unwrap(), bounds::DECKS_PER_USER);

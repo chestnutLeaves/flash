@@ -1,14 +1,16 @@
 //! Import (CSV or Anki .apkg) in two steps: `preview` parses the upload
-//! and parks it as a token-named pending file in the data dir; `commit`
-//! reads it back, ingests media, applies the user's choices, and inserts
-//! through `Services::import_cards` (one cap decision for the batch).
-//! Both surfaces show the same preview and accept the same choices.
+//! and parks it as a token-named pending file in the data dir, with the
+//! package itself beside it when commit will need it (media to ingest,
+//! a review history to replay); `commit` reads them back, applies the
+//! user's choices, and inserts through `Services::import_cards` (one cap
+//! decision for the batch). Both surfaces show the same preview and
+//! accept the same choices.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use flash_core::UserId;
-use flash_store::import::{parse_apkg, parse_csv, ImportRow, ImportedSettings};
+use flash_store::import::{parse_apkg, parse_csv, review_history, ImportRow, ImportedSettings};
 
 use super::Failure;
 use crate::auth::{hash_token, new_token};
@@ -30,10 +32,14 @@ struct PendingImport {
     /// FSRS-relevant deck options found in the package.
     #[serde(default)]
     settings: Option<ImportedSettings>,
-    /// The uploaded .apkg was kept next to the pending JSON so commit can
-    /// ingest its media.
+    /// The uploaded .apkg was kept next to the pending JSON because
+    /// commit may need it: media to ingest, a review history to replay.
     #[serde(default)]
-    media_apkg: bool,
+    apkg: bool,
+    /// Replayable Anki reviews the package holds; the history itself is
+    /// read from the kept package at commit, never parked in the JSON.
+    #[serde(default)]
+    progress_reviews: usize,
 }
 
 /// What the preview shows and what commit needs back (`token`).
@@ -51,11 +57,11 @@ pub struct ImportPreview {
     pub sample: Vec<(String, String)>,
     pub messages: Vec<String>,
     pub token: String,
-    /// Total Anki reviews found — >0 offers the bring-your-progress box.
+    /// Total Anki reviews found. >0 offers the bring-your-progress box.
     pub progress_reviews: usize,
     /// Human summary of importable Anki FSRS settings, when found.
     pub settings_desc: Option<String>,
-    /// Cards whose deck colors were remapped to the Flash palette — >0
+    /// Cards whose deck colors were remapped to the Flash palette. >0
     /// offers the keep-colors/clean-look choice.
     pub colored_cards: usize,
 }
@@ -217,12 +223,13 @@ pub fn preview(
         bytes = bytes.len(),
         rows = parsed.rows.len(),
         media_referenced = parsed.media.referenced(),
+        history = parsed.progress_reviews,
         parse_ms = started.elapsed().as_millis() as u64,
         "import preview parsed"
     );
     if parsed.rows.len() > MAX_ROWS {
         return Err(Failure::user(format!(
-            "that file has {} cards; imports are capped at {MAX_ROWS} per file — split it in Anki first",
+            "that file has {} cards; imports are capped at {MAX_ROWS} per file, so split it in Anki first",
             parsed.rows.len()
         )));
     }
@@ -237,9 +244,10 @@ pub fn preview(
     cleanup(dir);
     discard_pending_for(dir, user);
     let (path, apkg_path) = pending_paths(dir, user, &token);
-    // Media ingest at commit needs the original package.
-    let keep_media_apkg = is_apkg && parsed.media.total_bytes > 0 && parsed.media.referenced() > 0;
-    if keep_media_apkg {
+    // Commit needs the original package for its media and its history.
+    let has_media = parsed.media.total_bytes > 0 && parsed.media.referenced() > 0;
+    let keep_apkg = is_apkg && (has_media || parsed.progress_reviews > 0);
+    if keep_apkg {
         std::fs::write(&apkg_path, bytes)?;
     }
     let file_decks: Vec<String> = {
@@ -272,11 +280,11 @@ pub fn preview(
         messages: parsed.messages.clone(),
         skipped: parsed.skipped,
         settings: parsed.settings.clone(),
-        media_apkg: keep_media_apkg,
+        apkg: keep_apkg,
+        progress_reviews: parsed.progress_reviews,
     };
     std::fs::write(&path, serde_json::to_vec(&pending)?)?;
 
-    let progress_reviews = pending.rows.iter().map(|r| r.reviews.len()).sum();
     let has_hl = |h: &Option<flash_store::richtext::SanitizedHtml>| {
         h.as_ref().is_some_and(|h| h.contains("hl-"))
     };
@@ -300,7 +308,7 @@ pub fn preview(
             .collect(),
         messages: pending.messages,
         token,
-        progress_reviews,
+        progress_reviews: pending.progress_reviews,
         settings_desc: pending
             .settings
             .as_ref()
@@ -339,25 +347,37 @@ pub fn commit(
         row.deck = None;
     }
 
-    // Media ingestion: pull the referenced files out of the kept
-    // package, then upgrade the rows' placeholder chips into real
-    // /media/ elements.
     let commit_started = std::time::Instant::now();
-    let media_map = if pending.media_apkg {
-        std::fs::read(&apkg_path).ok().map(|package| {
-            crate::media::ingest_package_media(
-                permit,
-                services,
-                media_store,
-                is_admin,
-                &package,
-                &pending.rows,
-                now_ms(),
-            )
-        })
+    let package = if pending.apkg {
+        std::fs::read(&apkg_path).ok()
     } else {
         None
     };
+    // The history is read before any media is stored, so a package
+    // that can no longer be read leaves nothing behind.
+    let history = if opts.progress && pending.progress_reviews > 0 {
+        let Some(package) = &package else {
+            return Err(Failure::user("preview expired; upload again"));
+        };
+        review_history(package).map_err(|e| parse_failed(user, "pending package", e))?
+    } else {
+        Vec::new()
+    };
+    // Media ingestion: pull the referenced files out of the kept
+    // package, then upgrade the rows' placeholder chips into real
+    // /media/ elements.
+    let has_media = pending.rows.iter().any(|r| !r.media.is_empty());
+    let media_map = package.filter(|_| has_media).map(|package| {
+        crate::media::ingest_package_media(
+            permit,
+            services,
+            media_store,
+            is_admin,
+            &package,
+            &pending.rows,
+            now_ms(),
+        )
+    });
     if let Some(map) = &media_map {
         if !map.is_empty() {
             let resolve: HashMap<String, i64> =
@@ -391,13 +411,13 @@ pub fn commit(
 
     let ingest_ms = commit_started.elapsed().as_millis() as u64;
     let insert_started = std::time::Instant::now();
-    // The service admits or rejects the whole batch in one decision
-    // (and starts the one-time overflow grace on oversized imports).
+    // The service admits or rejects the whole batch in one decision.
+    let history_rows = history.len();
     let total = services.import_cards(
         user,
         &pending.default_deck,
         pending.rows,
-        opts.progress,
+        history,
         media_map.as_ref(),
         now_ms(),
     )?;
@@ -406,6 +426,7 @@ pub fn commit(
         cards = total,
         media = media_map.as_ref().map_or(0, |m| m.len()),
         with_progress = opts.progress,
+        history = history_rows,
         ingest_ms,
         insert_ms = insert_started.elapsed().as_millis() as u64,
         "import committed"

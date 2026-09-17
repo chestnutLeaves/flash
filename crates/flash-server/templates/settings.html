@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Settings — Flash{% endblock %}
+{% block title %}Settings - Flash{% endblock %}
 {% block content %}
 <h1>Settings</h1>
 
@@ -20,7 +20,7 @@
 <div class="fl-card fl-card-pad" style="display:flex;flex-direction:column;gap:12px">
   <h3>Your cards</h3>
   <p class="fl-hint">{{ card_count }} cards.</p>
-  <p class="fl-hint">Your cards are always yours — export is never blocked:
+  <p class="fl-hint">Your cards are always yours, and export is never blocked:
     <a href="/export.apkg">Anki .apkg</a> · <a href="/export.csv">CSV</a></p>
 </div>
 {% else %}
@@ -44,15 +44,30 @@
   </form>
 </div>
 
+<div class="fl-card fl-card-pad" id="voice-card" style="display:flex;flex-direction:column;gap:14px">
+  <div>
+    <h3>Voice study</h3>
+    <p class="fl-hint" style="margin-top:4px">How Flash sounds and listens when you study by voice, on the web and in the app.</p>
+  </div>
+  {# A plain post: the redirect back here carries ?saved=voice for the toast. #}
+  <form method="post" action="/settings/voice" style="display:flex;flex-direction:column;gap:14px;align-items:flex-start">
+    {% include "voice_prefs_fields.html" %}
+    <div class="row"><button class="fl-btn fl-btn-sm fl-btn-primary" type="submit">Save</button>
+    {% if saved == "voice" %}<span class="save-note fl-badge-toast" role="status">Saved</span>{% endif %}</div>
+  </form>
+</div>
+{# bump ?v= together with base.html and study.html when static files change #}
+<script src="/static/speech.js?v=63" defer></script>
+
 <div class="fl-card fl-card-pad" id="grading-card" style="display:flex;flex-direction:column;gap:14px">
   <div>
     <h3>Voice grading</h3>
     <p class="fl-hint" style="margin-top:4px">How your AI reports grades when you study by voice.</p>
   </div>
   <form method="post" action="/settings/grading" hx-boost="true" hx-push-url="false" hx-select="#grading-card" hx-target="#grading-card" hx-swap="outerHTML show:none" style="display:flex;flex-direction:column;gap:10px;align-items:flex-start">
-    <label class="fl-check"><input type="radio" name="mode" value="silent" {% if grading_mode == "silent" %}checked{% endif %}> Silent — grades quietly and keeps the conversation moving</label>
-    <label class="fl-check"><input type="radio" name="mode" value="announce" {% if grading_mode == "announce" %}checked{% endif %}> Announce — says the grade; you can override it</label>
-    <label class="fl-check"><input type="radio" name="mode" value="self" {% if grading_mode == "self" %}checked{% endif %}> Self-grade — asks you to rate every card</label>
+    <label class="fl-check"><input type="radio" name="mode" value="silent" {% if grading_mode == "silent" %}checked{% endif %}> Silent: grades quietly and keeps the conversation moving</label>
+    <label class="fl-check"><input type="radio" name="mode" value="announce" {% if grading_mode == "announce" %}checked{% endif %}> Announce: says the grade; you can override it</label>
+    <label class="fl-check"><input type="radio" name="mode" value="self" {% if grading_mode == "self" %}checked{% endif %}> Self-grade: asks you to rate every card</label>
     <div class="row"><button class="fl-btn fl-btn-sm fl-btn-primary" type="submit">Save</button>
     {% if saved == "grading" %}<span class="save-note fl-badge-toast" role="status">Saved</span>{% endif %}</div>
   </form>
@@ -61,7 +76,7 @@
 <div class="fl-card fl-card-pad" id="password-card" style="display:flex;flex-direction:column;gap:12px">
   <div class="row">
     <h3>Password</h3>
-    {% if pw_error %}<span class="fl-badge fl-badge-warn">that didn't work — check the current password and that the new ones match (8+ characters)</span>{% endif %}
+    {% if pw_error %}<span class="fl-badge fl-badge-warn">that didn't work. Check the current password and that the new ones match (8+ characters)</span>{% endif %}
   </div>
   {% if !has_password %}
   <p class="fl-hint">Add a password to sign in without a passkey{% if has_external_login %} or a connected account{% endif %}.</p>
@@ -85,7 +100,7 @@
     {% if pw_saved %}<span class="save-note fl-badge-toast" role="status">Saved</span>{% endif %}
   </form>
   {% else %}
-  <p class="fl-hint">Tip: passkeys are faster and phishing-resistant — you can add one the next
+  <p class="fl-hint">Tip: passkeys are faster and phishing-resistant. You can add one the next
   time you're invited to enroll a device.</p>
   {% endif %}
   {% endif %}
@@ -171,7 +186,7 @@
     <h3>Delete account</h3>
     {% if delete_error.as_str() == "confirm" %}<span class="fl-badge fl-badge-warn">type DELETE exactly to confirm</span>{% endif %}
     {% if delete_error.as_str() == "password" %}<span class="fl-badge fl-badge-warn">that password is incorrect</span>{% endif %}
-    {% if delete_error.as_str() == "admin" %}<span class="fl-badge fl-badge-warn">you're the only admin — make someone else admin first</span>{% endif %}
+    {% if delete_error.as_str() == "admin" %}<span class="fl-badge fl-badge-warn">you're the only admin, so make someone else admin first</span>{% endif %}
     {{ delete_badge_html|safe }}
   </div>
   <p class="fl-hint">Permanently removes your account and everything in it: decks, cards, review

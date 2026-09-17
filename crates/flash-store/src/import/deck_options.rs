@@ -1,4 +1,4 @@
-//! Anki deck-options import — the FSRS-meaningful subset only. SM-2 knobs
+//! Anki deck-options import: the FSRS-meaningful subset only. SM-2 knobs
 //! (learning steps, ease, interval modifiers) are exactly what FSRS
 //! replaces, so what transfers is: tuned FSRS parameters, desired
 //! retention, and the new-cards/day limit. Offered as an opt-in at import

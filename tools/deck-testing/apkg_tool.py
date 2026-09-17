@@ -60,7 +60,7 @@ def main(path, budget_mb=None):
     if bad:
         print("SUSPICIOUS:", bad[:10])
     else:
-        print("all media files carry media magic bytes — no executables/scripts")
+        print("all media files carry media magic bytes, no executables/scripts")
 
     base = path.rsplit(".apkg", 1)[0]
     # -nomedia variant

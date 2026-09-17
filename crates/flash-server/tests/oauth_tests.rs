@@ -29,7 +29,7 @@ fn harness() -> Harness {
     }
 }
 
-/// (status, headers, JSON body — Null when the body isn't JSON).
+/// (status, headers, JSON body, which is Null when the body isn't JSON).
 async fn send(
     app: &axum::Router,
     request: Request<Body>,
@@ -230,7 +230,7 @@ async fn full_pkce_flow_and_bearer_access() {
     assert_eq!(body["token_type"], "Bearer");
     assert!(body["refresh_token"].is_string());
 
-    // Bearer token opens /mcp (a bad MCP body is fine — past the 401).
+    // Bearer token opens /mcp (a bad MCP body is fine: past the 401).
     let (status, _, _) = send(
         &h.app,
         Request::post("/mcp")

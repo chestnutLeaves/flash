@@ -15,6 +15,12 @@ workspace = true
 # the way production does with fakes swapped in. On for this crate's own
 # tests and for a downstream crate's.
 test-support = ["dep:tower", "dep:flash-scan"]
+# PDF sources for card generation: page counts, text and figure crops
+# through Pdfium, loaded at runtime from `FLASH_PDFIUM_PATH`. On by
+# default so one binary serves both cases; without the library the
+# server still boots with the `pdf` input disabled.
+pdf = ["dep:pdfium-render", "dep:image"]
+default = ["pdf"]
 
 [dependencies]
 argon2 = { version = "0.6.0-rc.8", features = ["password-hash"] }
@@ -26,6 +32,16 @@ hmac = "0.13.0"
 http = "1.5.0"
 jiff = "0.2.35"
 openssl = { version = "0.10.81", features = ["vendored"] }
+# Pdfium through dynamic binding only (no build-time link), so the same
+# binary runs with or without the library on the machine. `pdfium_latest`
+# is the API level the bindings expect; the release tarball fetched by
+# tools/fetch-pdfium is always at least that new. `thread_safe` serializes
+# the FFI calls, which is what makes the handle `Send` so it can live in
+# the shared state. `image_025` is the `image` line the crate hands
+# rendered pages to; the direct `image` dependency below is the same
+# crate, kept to PNG only.
+pdfium-render = { version = "0.9.4", default-features = false, features = ["pdfium_latest", "thread_safe", "image_025"], optional = true }
+image = { version = "0.25", default-features = false, features = ["png"], optional = true }
 # Every in-process lock. parking_lot has no poisoned state, so a panic
 # while a guard is held costs that request and nothing after it.
 parking_lot = "0.12"
@@ -36,7 +52,7 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 sha2 = "0.11.0"
 flash-core = { path = "../flash-core" }
-flash-store = { version = "0.1.0", path = "../flash-store" }
+flash-store = { path = "../flash-store" }
 thiserror = "2.0.20"
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "net", "fs"] }
 # `ReaderStream`: an export is built on disk and streamed from the file.
@@ -60,6 +76,7 @@ webauthn-rs = "0.5.5"
 [dev-dependencies]
 # The crate's own tests use the harness through the feature.
 flash-server = { path = ".", features = ["test-support"] }
+parking_lot = "0.12"
 flash-scan = { path = "../flash-scan" }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 base64 = "0.23.1"

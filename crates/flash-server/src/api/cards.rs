@@ -82,7 +82,7 @@ async fn editor_seed(
 struct EditorSaved {
     note_id: i64,
     card_ids: Vec<i64>,
-    /// What was actually stored after sanitizing — the app shows this,
+    /// What was actually stored after sanitizing: the app shows this,
     /// not what it sent.
     front_html: String,
     back_html: String,

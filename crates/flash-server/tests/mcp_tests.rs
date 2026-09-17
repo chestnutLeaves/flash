@@ -14,6 +14,7 @@ struct Harness {
     app: axum::Router,
     bearer: String,
     store: std::sync::Arc<flash_store::Store>,
+    user: flash_core::UserId,
 }
 
 fn harness() -> Harness {
@@ -31,6 +32,7 @@ fn harness() -> Harness {
         bearer: oauth_bearer(&t.store, user),
         store: t.store.clone(),
         app: t.app,
+        user,
     }
 }
 
@@ -188,6 +190,8 @@ async fn tools_are_discoverable() {
         "delete_card",
         "delete_deck",
         "list_cards",
+        "archive_deck",
+        "unarchive_deck",
     ] {
         assert!(
             names.contains(&expected),
@@ -249,6 +253,12 @@ async fn full_voice_study_loop() {
         .starts_with("silent"));
     let sid = started["session_id"].as_i64().unwrap();
     let card1 = started["first_card"]["card_id"].as_i64().unwrap();
+    // The assistant reads the spoken form, the same text as the plain
+    // front for a plain card.
+    assert_eq!(
+        started["first_card"]["spoken_front"],
+        started["first_card"]["front"]
+    );
 
     // She answers correctly -> silent Good; next card arrives in-call.
     let r1 = call_tool(
@@ -272,6 +282,7 @@ async fn full_voice_study_loop() {
     )
     .await;
     assert_eq!(answer["back"], "Protamine sulfate");
+    assert_eq!(answer["spoken_back"], "Protamine sulfate");
     let r2 = call_tool(
         &h,
         &session,
@@ -308,6 +319,55 @@ async fn full_voice_study_loop() {
         assert!(!text.contains("interval"));
         assert!(!text.contains("due"));
     }
+}
+
+/// A cloze card over MCP: the assistant is handed "blank" for the gap
+/// on the front and the word itself with the answer.
+#[tokio::test]
+async fn cloze_cards_hand_the_assistant_blank_then_the_word() {
+    let h = harness();
+    let services = flash_server::service::Services::new(h.store.clone());
+    let deck = services
+        .create_deck(h.user, "Capitals", "", now_ms())
+        .unwrap();
+    services
+        .create_note(
+            h.user,
+            deck,
+            &flash_server::service::NoteInput {
+                note_type: flash_store::notes::NoteType::Cloze,
+                front_html: "{{c1::Paris}} is the capital of France".into(),
+                back_html: String::new(),
+                tags: vec![],
+            },
+            now_ms(),
+        )
+        .unwrap();
+    let session = initialize(&h).await;
+
+    let started = call_tool(
+        &h,
+        &session,
+        20,
+        "start_study_session",
+        serde_json::json!({"deck": "Capitals"}),
+    )
+    .await;
+    assert_eq!(
+        started["first_card"]["spoken_front"],
+        "blank is the capital of France"
+    );
+    let card = started["first_card"]["card_id"].as_i64().unwrap();
+
+    let answer = call_tool(
+        &h,
+        &session,
+        21,
+        "show_answer",
+        serde_json::json!({"card_id": card}),
+    )
+    .await;
+    assert_eq!(answer["spoken_back"], "Paris is the capital of France");
 }
 
 /// The "I just made 44 cards, quiz me" case: the daily new-card limit
@@ -474,6 +534,94 @@ async fn delete_deck_removes_the_deck_and_reports_card_count() {
     assert!(!names.contains(&"Ephemeral"), "{names:?}");
 }
 
+/// Archiving needs no confirmation (nothing is deleted): the deck lists
+/// as archived with zero counts, a session finds nothing, and
+/// unarchiving hands the cards back.
+#[tokio::test]
+async fn archive_deck_parks_it_without_a_confirmation() {
+    let h = harness();
+    let session = initialize(&h).await;
+    let created = call_tool(
+        &h,
+        &session,
+        50,
+        "create_cards",
+        serde_json::json!({
+            "deck": "Passed exam",
+            "cards": [
+                {"front": "q1", "back": "a1"},
+                {"front": "q2", "back": "a2"}
+            ]
+        }),
+    )
+    .await;
+    assert_eq!(created["created"], 2);
+
+    let archived = call_tool(
+        &h,
+        &session,
+        51,
+        "archive_deck",
+        serde_json::json!({"deck": "Passed exam"}),
+    )
+    .await;
+    assert_eq!(archived["saved"], true);
+    let decks = call_tool(&h, &session, 52, "list_decks", serde_json::json!({})).await;
+    let row = decks["decks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["name"] == "Passed exam")
+        .expect("still listed")
+        .clone();
+    assert_eq!(row["archived"], true);
+    assert_eq!(
+        (row["due"].as_u64(), row["new"].as_u64()),
+        (Some(0), Some(0))
+    );
+    let study = call_tool(
+        &h,
+        &session,
+        53,
+        "start_study_session",
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(study["cards_due"], 0, "{study}");
+
+    let restored = call_tool(
+        &h,
+        &session,
+        54,
+        "unarchive_deck",
+        serde_json::json!({"deck": "Passed exam"}),
+    )
+    .await;
+    assert_eq!(restored["saved"], true);
+    let study = call_tool(
+        &h,
+        &session,
+        55,
+        "start_study_session",
+        serde_json::json!({"deck": "Passed exam"}),
+    )
+    .await;
+    assert_eq!(study["cards_due"], 2, "{study}");
+
+    // A deck that does not exist is an error, not a silent no-op.
+    let (status, _, body) = rpc(
+        &h,
+        Some(&session),
+        serde_json::json!({
+            "jsonrpc": "2.0", "id": 56, "method": "tools/call",
+            "params": {"name": "archive_deck", "arguments": {"deck": "Nope"}}
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("no deck named"), "{body}");
+}
+
 /// A token minted for the first-party app is not an MCP grant: the two
 /// are different consents, and the app's token must not drive tools.
 #[tokio::test]
@@ -484,6 +632,7 @@ async fn a_mobile_app_token_does_not_authenticate_mcp() {
         bearer: api_bearer(&t.store, user),
         store: t.store.clone(),
         app: t.app,
+        user,
     };
     let (status, _, _) = rpc(
         &h,
@@ -526,6 +675,7 @@ async fn tool_arguments_cannot_reach_another_users_cards() {
         bearer: oauth_bearer(&t.store, other),
         store: t.store.clone(),
         app: t.app,
+        user: other,
     };
     let mcp = initialize(&h).await;
 

@@ -1,0 +1,38 @@
+{# One generated card awaiting a decision. Keep, edit and discard each
+   answer with this same row, swapped in place, so the page never
+   reloads to show what changed. Rendered from the group and on its own;
+   both carry `row`. #}
+<tr id="draft-{{ row.id }}" class="gen-row" data-status="{{ row.status }}">
+  <td>
+    <div class="card-rich card-rich-row">{{ row.front_html|safe }}</div>
+    {% if !row.figures.is_empty() %}
+    <div class="gen-figs">
+      {% for id in row.figures %}<img class="gen-fig" src="/media/{{ id }}" alt="" loading="lazy">{% endfor %}
+    </div>
+    {% endif %}
+  </td>
+  <td class="muted"><div class="card-rich card-rich-row">{{ row.back_html|safe }}</div></td>
+  <td><span class="mono small muted">{{ row.tags }}</span></td>
+  <td class="gen-row-end">
+    <span class="{{ row.badge_class }}">{{ row.status_label }}</span>
+    {% if row.open %}
+    <button class="fl-btn fl-btn-sm fl-iconbtn fl-btn-ghost" aria-label="Keep this card" title="Keep"
+            hx-post="/ai/drafts/{{ row.id }}/keep" hx-include="#review-deck"
+            hx-target="#draft-{{ row.id }}" hx-swap="outerHTML">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+    </button>
+    <button class="fl-btn fl-btn-sm fl-iconbtn fl-btn-ghost" aria-label="Edit this card" title="Edit"
+            hx-get="/ai/drafts/{{ row.id }}/edit" hx-target="#editor-dialog" hx-swap="innerHTML">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
+    </button>
+    <button class="fl-btn fl-btn-sm fl-iconbtn fl-btn-ghost" aria-label="Discard this card" title="Discard"
+            hx-post="/ai/drafts/{{ row.id }}/discard"
+            hx-target="#draft-{{ row.id }}" hx-swap="outerHTML">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+    </button>
+    {% endif %}
+    {% if let Some(notice) = row.notice %}
+    <span class="fl-badge fl-badge-warn fl-badge-wrap">{{ notice }}</span>
+    {% endif %}
+  </td>
+</tr>

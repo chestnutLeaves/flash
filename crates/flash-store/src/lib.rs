@@ -26,6 +26,11 @@ use rusqlite::{Connection, Transaction};
 use ext::StoreExtension;
 
 pub use migrations::MONOLITH_MARKER;
+pub use repo::ai::{
+    AiCallNew, AiCallRow, AiCallStep, AiDraftCounts, AiDraftNew, AiDraftRow, AiDraftStatus,
+    AiExtractionNew, AiExtractionRow, AiJobNew, AiJobOp, AiJobRow, AiJobState, AiSourceKind,
+    AiSourceNew, AiSourceRow, AiTurnNew, AiTurnRole, AiTurnRow, AiUsageSince,
+};
 pub use repo::auth::{InviteInfo, StoredPasskey};
 pub use repo::cards::{
     check_tags, CardExtras, CardRow, DeckLimits, DeckSummary, DeletedDeck, MAX_DECKS_PER_USER,
@@ -36,11 +41,12 @@ pub use repo::notes::{NoteRow, NoteSave};
 pub use repo::oauth::{
     ApiTokenInfo, CodeConsume, CodeGrant, GrantRow, OAuthClient, RefreshGrant, TokenRow,
 };
-pub use repo::reviews::SessionStats;
+pub use repo::reviews::{ImportedReview, SessionStats};
 pub use repo::users::{
     AccountRow, AdminUserRow, DeletedAccount, PasswordLogin, PW_LOCKOUT_THRESHOLD,
     PW_LOCKOUT_WINDOW_MS,
 };
+pub use repo::voice::{VoiceClipKind, VoiceClipNew, VoiceClipRow, VoiceSide};
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -55,7 +61,7 @@ pub enum StoreError {
 }
 
 impl StoreError {
-    /// A UNIQUE/CHECK/FK violation from SQLite — "already exists" or "not
+    /// A UNIQUE/CHECK/FK violation from SQLite: "already exists" or "not
     /// allowed", as opposed to the database being broken. Callers turn
     /// it into a conflict answer instead of an internal error.
     pub fn is_constraint(&self) -> bool {
@@ -70,7 +76,7 @@ impl StoreError {
 pub type Result<T> = std::result::Result<T, StoreError>;
 
 /// Runs a mutation that must touch a row: a zero row count is
-/// `NotFound(what)`. Ownership-scoped UPDATEs rely on this — the WHERE
+/// `NotFound(what)`. Ownership-scoped UPDATEs rely on this. The WHERE
 /// carries the user id, so "not yours" and "doesn't exist" both land
 /// here. Takes any connection so transactions use it too.
 pub fn exec_expect_row<P: rusqlite::Params>(

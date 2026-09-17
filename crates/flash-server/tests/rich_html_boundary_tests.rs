@@ -23,7 +23,7 @@ fn writes_rich_html(sql: &str) -> bool {
 }
 
 /// The types that carry `SanitizedHtml` into a store function.
-const TYPED: &[&str] = &["SanitizedHtml", "CardExtras", "NoteSave"];
+const TYPED: &[&str] = &["SanitizedHtml", "CardExtras", "NoteSave", "AiDraftNew"];
 
 #[test]
 fn rich_columns_are_written_only_by_typed_store_functions() {

@@ -6,16 +6,19 @@
 //! The same is then confirmed at the HTTP surface for the API.
 
 use std::path::Path;
+use std::sync::Arc;
 
 use axum::http::StatusCode;
 use flash_core::queue::StudyScope;
 use flash_core::{CardId, DeckId, Rating, SessionId};
 use flash_scan::{compact, crate_at, parse_source, FnKind, Vis};
+use flash_server::ai::fake::FakeProvider;
+use flash_server::ai::provider::DialogState;
 use flash_server::api::MOBILE_CLIENT_ID;
 use flash_server::auth::hash_token;
-use flash_server::service::{now_ms, CardFront, NoteInput, ReviewOrigin, Services};
+use flash_server::service::{now_ms, CardFront, NoteInput, ReviewOrigin, Services, SpokenPayload};
 use flash_server::testing::{
-    api_bearer, json_delete, json_get, json_post, member, send, AppBuilder,
+    api_bearer, fake_ai, json_delete, json_get, json_post, member, send, AppBuilder,
 };
 use flash_store::notes::NoteType;
 
@@ -25,6 +28,8 @@ const COVERED: &[&str] = &[
     "deck_limits",
     "set_deck_limits",
     "rename_deck",
+    "archive_deck",
+    "unarchive_deck",
     "boost_new_today",
     "boost_today",
     "start_session",
@@ -32,6 +37,7 @@ const COVERED: &[&str] = &[
     "reveal",
     "study_card",
     "reveal_card",
+    "spoken_sides",
     "session_scope",
     "end_session",
     "queue_counts",
@@ -49,6 +55,25 @@ const COVERED: &[&str] = &[
     "list_cards_page",
     "delete_deck",
     "list_cards",
+    "voice_context",
+    "spoken_turn",
+    "create_note_from",
+    "ai_preflight",
+    "ai_preflight_set",
+    "ai_delete_source",
+    "ai_create_job",
+    "ai_revise_job",
+    "ai_more_job",
+    "ai_edit_job",
+    "ai_thread",
+    "ai_job",
+    "ai_job_detail",
+    "ai_drafts",
+    "ai_draft",
+    "ai_update_draft",
+    "ai_discard_draft",
+    "ai_discard_job",
+    "ai_keep_drafts",
 ];
 
 const ID_TYPES: &[&str] = &[
@@ -58,6 +83,9 @@ const ID_TYPES: &[&str] = &[
     "MediaId",
     "SessionId",
     "StudyScope",
+    "AiSourceId",
+    "AiJobId",
+    "AiDraftId",
 ];
 
 /// The public `Services` methods, in any file of the crate, whose
@@ -167,7 +195,12 @@ fn note_input() -> NoteInput {
 
 #[tokio::test]
 async fn another_user_cannot_touch_owned_resources_through_services() {
-    let t = AppBuilder::new("isolation-services").build();
+    let t = AppBuilder::new("isolation-services")
+        .ai(
+            Arc::new(FakeProvider::default()),
+            flash_server::policy::ALL_AI_INPUTS.to_vec(),
+        )
+        .build();
     let a = member(&t.store, "FlashTester", "flashtester@example.com");
     let b = member(&t.store, "Other", "other@example.com");
     let s = &t.services;
@@ -181,6 +214,8 @@ async fn another_user_cannot_touch_owned_resources_through_services() {
     assert!(s.deck_limits(b, owned.deck).is_err());
     assert!(s.set_deck_limits(b, owned.deck, Some(1), Some(1)).is_err());
     assert!(s.rename_deck(b, owned.deck, "stolen").is_err());
+    assert!(s.archive_deck(b, owned.deck, now).is_err());
+    assert!(s.unarchive_deck(b, owned.deck).is_err());
     assert!(s.boost_new_today(b, Some(owned.deck), 5, now).is_err());
     assert!(s.boost_today(b, Some(owned.deck), now).is_err());
     assert!(s.deck_by_id(b, owned.deck, now).is_err());
@@ -211,12 +246,15 @@ async fn another_user_cannot_touch_owned_resources_through_services() {
     assert!(s.card(b, owned.card).is_err());
     assert!(s.reveal(b, owned.card).is_err());
     assert!(s.reveal_card(b, owned.card, None).is_err());
+    // The voice clips' text lookup answers "no such card" for a foreign one.
+    assert_eq!(s.spoken_sides(b, owned.card).unwrap(), None);
     assert!(s
         .study_card(
             b,
             CardFront {
                 card_id: owned.card,
-                front: String::new()
+                front: String::new(),
+                spoken_front: String::new()
             },
             Some(owned.card)
         )
@@ -242,6 +280,62 @@ async fn another_user_cannot_touch_owned_resources_through_services() {
         .is_err());
     assert!(s.end_session(b, owned.session, now).is_err());
 
+    // Voice: the card's context, and a spoken turn in A's session on
+    // either side of the verdict, are refused before the model is asked.
+    let ai = fake_ai(Arc::new(FakeProvider::default()), vec![]);
+    assert!(s.voice_context(b, owned.card, now).is_err());
+    let four = SpokenPayload::Transcript("four".into());
+    for state in [DialogState::Front, DialogState::Window] {
+        assert!(s
+            .spoken_turn(b, owned.session, owned.card, state, &four, &ai, now)
+            .is_err());
+    }
+
+    // Card generation: A's source, job and draft are not B's to read,
+    // queue against, edit, keep or discard; nor may B keep into A's
+    // deck or make a note carrying A's job as its lineage.
+    let ai = fake_ai(
+        Arc::new(FakeProvider::default()),
+        flash_server::policy::ALL_AI_INPUTS.to_vec(),
+    );
+    let source = s
+        .ai_source_from_text(a, "The heart has four chambers.", "", "text/plain", now)
+        .unwrap();
+    let job = s
+        .ai_create_job(a, &[source], owned.deck, "", &ai, now)
+        .unwrap();
+    // The runner needs the app's own runtime, so A's job is run there.
+    assert_eq!(flash_server::ai::runner::run_once(&t.state).await, 1);
+    let draft = s.ai_drafts(a, job).unwrap()[0].id;
+    assert!(s.ai_preflight(b, source, &ai, now).is_err());
+    assert!(s.ai_preflight_set(b, &[source], &ai, now).is_err());
+    assert!(s
+        .ai_delete_source(b, source, t.state.media.as_ref())
+        .is_err());
+    assert!(s
+        .ai_create_job(b, &[source], owned.deck, "", &ai, now)
+        .is_err());
+    assert!(s.ai_revise_job(b, job, "", now).is_err());
+    assert!(s.ai_more_job(b, job, "", now).is_err());
+    assert!(s.ai_edit_job(b, job, "shorter", now).is_err());
+    assert!(s.ai_thread(b, job).is_err());
+    assert!(s.ai_job(b, job).is_err());
+    assert!(s.ai_job_detail(b, job).is_err());
+    assert!(s.ai_drafts(b, job).is_err());
+    assert!(s.ai_draft(b, draft).is_err());
+    assert!(s
+        .ai_update_draft(b, draft, NoteType::Basic, "<p>x</p>", "<p>y</p>", &[], now)
+        .is_err());
+    assert!(s.ai_discard_draft(b, draft, now).is_err());
+    assert!(s.ai_discard_job(b, job, now).is_err());
+    assert!(s
+        .ai_keep_drafts(b, job, None, Some(owned.deck), now)
+        .is_err());
+    assert!(s
+        .create_note_from(b, owned.deck, &note_input(), Some(job), now)
+        .is_err());
+    assert_eq!(s.ai_job_detail(a, job).unwrap().counts.pending, 3);
+
     // Import with a foreign media id: the id must not link.
     let foreign_media = t
         .store
@@ -259,7 +353,7 @@ async fn another_user_cannot_touch_owned_resources_through_services() {
         .into_iter()
         .collect();
     let row = flash_store::import::ImportRow {
-        reviews: vec![],
+        anki_card_id: None,
         media: vec![],
         front: "front".into(),
         back: "b".into(),
@@ -274,7 +368,7 @@ async fn another_user_cannot_touch_owned_resources_through_services() {
         cloze_index: None,
         type_answer: None,
     };
-    let _ = s.import_cards(b, "Imported", vec![row], false, Some(&media_map), now);
+    let _ = s.import_cards(b, "Imported", vec![row], vec![], Some(&media_map), now);
     let linked: i64 = t
         .store
         .with_conn(|conn| {
@@ -335,6 +429,24 @@ async fn another_users_bearer_is_turned_away_by_the_api() {
     .await;
     assert_eq!(deleted.status, StatusCode::NOT_FOUND);
     assert!(t.services.card(a, owned.card).is_ok());
+    // Nor archive A's deck: it stays in A's study queue.
+    let archived = send(
+        &t.app,
+        json_post(
+            &format!("/api/v1/decks/{}/archive", owned.deck.0),
+            Some(&b_bearer),
+            &serde_json::json!({}),
+        ),
+    )
+    .await;
+    assert_eq!(archived.status, StatusCode::NOT_FOUND);
+    assert_eq!(
+        t.services
+            .deck_by_id(a, owned.deck, now_ms())
+            .unwrap()
+            .archived_at,
+        None
+    );
 
     // B cannot revoke A's app session by id; A's bearer keeps working.
     let a_token = t

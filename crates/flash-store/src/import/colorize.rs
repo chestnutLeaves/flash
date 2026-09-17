@@ -3,7 +3,7 @@
 //! `<font color>`, `<mark>`, and (best-effort) notetype-CSS class colors
 //! become `hl-{hue}` (text) / `hl-bg-{hue}` (highlight) classes that the
 //! design system styles per theme. Near-neutral colors (low saturation,
-//! near-black/white) are treated as unstyled — they were contrast tweaks,
+//! near-black/white) are treated as unstyled: they were contrast tweaks,
 //! not meaning. Coverage is deliberately span/div/font/mark: that is what
 //! Anki's editor emits; styles on other tags stay stripped.
 //!

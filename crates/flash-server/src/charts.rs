@@ -1,7 +1,7 @@
 //! Small charts as inline SVG, rendered server-side so a page needs no
 //! script to show them. Geometry lives in the SVG (a fixed viewBox
 //! stretched to the container, strokes kept at their pixel width); the
-//! text — axis labels, tick labels — is HTML beside it, so nothing
+//! text (axis labels, tick labels) is HTML beside it, so nothing
 //! stretches. Colours come from `currentColor` under a `data-hue`
 //! attribute the stylesheet maps to its ink tokens, so every theme
 //! applies. Each day gets a full-height hover column whose `<title>`
@@ -279,6 +279,18 @@ fn open_svg(out: &mut String) {
     );
 }
 
+/// A dot `diameter_px` wide on screen. The plots stretch their viewBox to
+/// fill the box, so a circle would come out as an oval; a zero-length
+/// stroke with round caps and a non-scaling stroke stays round.
+fn dot(out: &mut String, x: f64, y: f64, diameter_px: u32) {
+    let _ = write!(
+        out,
+        "<path class=\"fl-chart-dot\" d=\"M{},{} h0\" stroke-width=\"{diameter_px}\"/>",
+        num(x),
+        num(y)
+    );
+}
+
 /// Lines over a shared axis; the first series is also filled to the
 /// baseline. Values beyond the shortest series are ignored.
 pub fn line_chart(x: &[String], series: &[Series], fmt: Fmt, height_px: u32) -> String {
@@ -293,12 +305,7 @@ pub fn line_chart(x: &[String], series: &[Series], fmt: Fmt, height_px: u32) -> 
     for (k, s) in series.iter().enumerate() {
         let _ = write!(out, "<g data-hue=\"{}\">", s.hue.attr());
         if n == 1 {
-            let _ = write!(
-                out,
-                "<circle class=\"fl-chart-dot\" cx=\"{}\" cy=\"{}\" r=\"4\"/>",
-                num(x_at(0, 1)),
-                num(y_at(s.values[0], max))
-            );
+            dot(&mut out, x_at(0, 1), y_at(s.values[0], max), 8);
         } else if n > 1 {
             let mut path = String::new();
             for i in 0..n {
@@ -322,12 +329,7 @@ pub fn line_chart(x: &[String], series: &[Series], fmt: Fmt, height_px: u32) -> 
             let _ = write!(out, "<path class=\"fl-chart-line\" d=\"{path}\"/>");
             if n <= 31 {
                 for i in 0..n {
-                    let _ = write!(
-                        out,
-                        "<circle class=\"fl-chart-dot\" cx=\"{}\" cy=\"{}\" r=\"2.5\"/>",
-                        num(x_at(i, n)),
-                        num(y_at(s.values[i], max))
-                    );
+                    dot(&mut out, x_at(i, n), y_at(s.values[i], max), 5);
                 }
             }
         }
@@ -420,12 +422,11 @@ pub fn sparkline(values: &[f64], hue: Hue, title: &str) -> String {
         1 => {
             let _ = write!(
                 out,
-                "<path class=\"fl-chart-line\" d=\"M0,{} L{SW},{}\"/><circle class=\"fl-chart-dot\" cx=\"{}\" cy=\"{}\" r=\"2\"/>",
+                "<path class=\"fl-chart-line\" d=\"M0,{} L{SW},{}\"/>",
                 num(y(values[0])),
-                num(y(values[0])),
-                num(SW / 2.0),
                 num(y(values[0]))
             );
+            dot(&mut out, SW / 2.0, y(values[0]), 4);
         }
         _ => {
             let mut path = String::new();
@@ -440,10 +441,9 @@ pub fn sparkline(values: &[f64], hue: Hue, title: &str) -> String {
             }
             let _ = write!(
                 out,
-                "<path class=\"fl-chart-area\" d=\"{} L{SW},{SH} L0,{SH} Z\"/><path class=\"fl-chart-line\" d=\"{path}\"/><circle class=\"fl-chart-dot\" cx=\"{SW}\" cy=\"{}\" r=\"2\"/>",
-                path,
-                num(y(values[n - 1]))
+                "<path class=\"fl-chart-area\" d=\"{path} L{SW},{SH} L0,{SH} Z\"/><path class=\"fl-chart-line\" d=\"{path}\"/>"
             );
+            dot(&mut out, SW, y(values[n - 1]), 4);
         }
     }
     out.push_str("</svg>");
@@ -522,7 +522,8 @@ mod tests {
             fmt_int,
             160,
         );
-        assert_eq!(one.matches("<circle").count(), 1);
+        assert_eq!(one.matches("class=\"fl-chart-dot\"").count(), 1);
+        assert!(!one.contains("<circle"), "a circle stretches with the plot");
         assert!(!one.contains("fl-chart-line"));
         assert!(!one.contains("NaN") && !one.contains("inf"));
     }
@@ -608,7 +609,21 @@ mod tests {
             let s = sparkline(values, Hue::Accent, "trend");
             assert!(s.starts_with("<svg") && s.contains("fl-chart-line"));
             assert!(!s.contains("NaN"));
+            assert!(!s.contains("<circle"), "a circle stretches with the plot");
+            assert_eq!(
+                s.contains("fl-chart-dot"),
+                !values.is_empty(),
+                "a dot marks the last value: {s}"
+            );
         }
+        // The dot is a zero-length round-capped stroke sized in pixels, so
+        // the stretched viewBox cannot pull it into an oval.
+        let s = sparkline(&[1.0, 4.0, 2.0], Hue::Accent, "trend");
+        assert!(
+            s.contains("<path class=\"fl-chart-dot\" d=\"M100,")
+                && s.contains(" h0\" stroke-width=\"4\"/>"),
+            "{s}"
+        );
     }
 
     #[test]

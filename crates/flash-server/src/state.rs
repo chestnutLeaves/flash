@@ -114,7 +114,7 @@ pub struct AppState {
     /// mailer; None keeps the classic invite-only behavior.
     pub mailer: Option<Arc<dyn crate::email::Mailer>>,
     /// Where media bytes live: a bucket when configured, disk otherwise.
-    /// Never optional — serving must always work.
+    /// Never optional: serving must always work.
     pub media: Arc<dyn crate::media_store::MediaStore>,
     /// The pages' Content-Security-Policy, built once: it names the media
     /// store's origin when blobs are fetched from there directly.
@@ -136,6 +136,12 @@ pub struct AppState {
     /// The gate every heavy job (import, export, Stats) must pass; see
     /// `HeavyJobs`.
     pub heavy: Arc<HeavyJobs>,
+    /// Card generation and voice grading; None when no provider is
+    /// configured, and every generate page and voice route says so.
+    pub ai: Option<Arc<AiRuntime>>,
+    /// Natural voice through the sidecar; None when none is configured,
+    /// and every voice audio route says so.
+    pub tts: Option<Arc<crate::tts::TtsRuntime>>,
     pub started_at_ms: i64,
 }
 
@@ -143,15 +149,183 @@ pub struct AppState {
 /// to matter; smaller ones are not counted.
 pub const MEDIA_READS: usize = 8;
 
+/// Model calls in flight across the process: each holds a blocking
+/// thread for up to minutes, and the runner's own bound is separate.
+pub const AI_CALLS: usize = 4;
+
+/// Everything a generation or a spoken-answer grade needs that a request
+/// does not carry: the model behind one trait, what it reads (the
+/// provider's own capabilities, narrowed by what the operator listed
+/// and by whether a PDF renderer is present), the document converter
+/// when there is one, and the handles the job runner is woken and
+/// throttled through.
+pub struct AiRuntime {
+    pub provider: Arc<dyn crate::ai::provider::LlmProvider>,
+    pub capabilities: crate::ai::provider::Capabilities,
+    /// `capabilities.kinds`, the list every "which inputs" question
+    /// reads.
+    pub inputs: Vec<crate::policy::AiInput>,
+    /// One renderer, used from blocking threads one at a time: rendering
+    /// a page is CPU work that gains nothing from running twice at once.
+    #[cfg(feature = "pdf")]
+    pub pdf: Option<Mutex<crate::ai::pdf::Pdf>>,
+    /// The operator's document converter; None refuses documents.
+    pub converter: Option<crate::ai::convert::DocConverter>,
+    /// Where the converter's scratch directories go.
+    pub convert_dir: std::path::PathBuf,
+    pub calls: tokio::sync::Semaphore,
+    /// Poked when a job is queued, so the runner does not wait out its
+    /// idle interval.
+    pub wake: tokio::sync::Notify,
+    /// What clients are told to send the grader for a spoken answer;
+    /// the grader takes either shape regardless.
+    pub voice_input: crate::config::VoiceInput,
+}
+
+impl AiRuntime {
+    /// A runtime over `provider` reading what it can, narrowed to
+    /// `inputs` when the operator listed some. Err names a listed kind
+    /// the provider cannot read.
+    pub fn new(
+        provider: Arc<dyn crate::ai::provider::LlmProvider>,
+        inputs: Option<Vec<crate::policy::AiInput>>,
+        #[cfg(feature = "pdf")] pdf: Option<crate::ai::pdf::Pdf>,
+        converter: Option<crate::ai::convert::DocConverter>,
+        convert_dir: std::path::PathBuf,
+    ) -> Result<Self, String> {
+        let all = provider.capabilities();
+        let mut capabilities = match &inputs {
+            Some(listed) => all.narrowed_to(listed).map_err(|kind| {
+                format!(
+                    "FLASH_AI_INPUTS lists {kind} but the {} model does not read it",
+                    provider.describe()
+                )
+            })?,
+            None => all,
+        };
+        // Without a renderer there are no page counts, no figure crops
+        // and no cap on pages: a listed `pdf` is a boot error upstream,
+        // an implied one is simply dropped.
+        #[cfg(feature = "pdf")]
+        let pdf_ready = pdf.is_some();
+        #[cfg(not(feature = "pdf"))]
+        let pdf_ready = false;
+        if inputs.is_none() && !pdf_ready && capabilities.accepts(crate::policy::AiInput::Pdf) {
+            tracing::warn!(
+                "pdf generation is off: FLASH_PDFIUM_PATH is not set (see tools/fetch-pdfium)"
+            );
+            capabilities = capabilities.without(crate::policy::AiInput::Pdf);
+        }
+        Ok(Self {
+            provider,
+            inputs: capabilities.kinds.clone(),
+            capabilities,
+            #[cfg(feature = "pdf")]
+            pdf: pdf.map(Mutex::new),
+            converter,
+            convert_dir,
+            calls: tokio::sync::Semaphore::new(AI_CALLS),
+            wake: tokio::sync::Notify::new(),
+            voice_input: crate::config::VoiceInput::default(),
+        })
+    }
+
+    /// Builds the runtime the configuration describes: the configured
+    /// provider, the renderer loaded from `FLASH_PDFIUM_PATH` when there
+    /// is one, and the document converter when one is named. Errors
+    /// name the missing piece.
+    pub fn from_config(
+        config: &crate::config::AiConfig,
+        data_dir: &std::path::Path,
+    ) -> Result<Self, String> {
+        let provider = crate::ai::build_provider(config)?;
+        let lists_pdf = config
+            .inputs
+            .as_ref()
+            .is_some_and(|list| list.contains(&crate::policy::AiInput::Pdf));
+        #[cfg(feature = "pdf")]
+        let pdf = match &config.pdfium_path {
+            Some(path) => Some(crate::ai::pdf::load(path)?),
+            None => None,
+        };
+        #[cfg(not(feature = "pdf"))]
+        if lists_pdf {
+            return Err(
+                "FLASH_AI_INPUTS lists pdf but this binary was built without the pdf feature"
+                    .to_string(),
+            );
+        }
+        let _ = lists_pdf;
+        let converter = match &config.doc_converter {
+            Some(template) => Some(crate::ai::convert::DocConverter::parse(
+                template,
+                config.doc_converter_timeout,
+            )?),
+            None => None,
+        };
+        let convert_dir = data_dir.join("convert");
+        if converter.is_some() {
+            std::fs::create_dir_all(&convert_dir)
+                .map_err(|e| format!("{}: {e}", convert_dir.display()))?;
+        }
+        let mut runtime = Self::new(
+            provider,
+            config.inputs.clone(),
+            #[cfg(feature = "pdf")]
+            pdf,
+            converter,
+            convert_dir,
+        )?;
+        runtime.voice_input = config.voice_input;
+        Ok(runtime)
+    }
+
+    pub fn accepts(&self, input: crate::policy::AiInput) -> bool {
+        self.capabilities.accepts(input)
+    }
+
+    pub fn accepts_mime(&self, input: crate::policy::AiInput, mime: &str) -> bool {
+        self.capabilities.accepts_mime(input, mime)
+    }
+
+    /// Whether office documents can be taken: a converter is configured
+    /// and the PDF it makes can be read.
+    pub fn converts_documents(&self) -> bool {
+        self.converter.is_some() && self.accepts(crate::policy::AiInput::Pdf)
+    }
+
+    /// The renderer, when PDFs are on. Callers hold the guard only
+    /// inside a blocking task.
+    #[cfg(feature = "pdf")]
+    pub fn pdf(&self) -> Option<parking_lot::MutexGuard<'_, crate::ai::pdf::Pdf>> {
+        self.pdf.as_ref().map(|m| m.lock())
+    }
+
+    pub fn describe(&self) -> String {
+        let inputs: Vec<&str> = self.inputs.iter().map(|i| i.as_str()).collect();
+        let documents = match &self.converter {
+            Some(c) if self.converts_documents() => format!("; documents via {}", c.program()),
+            _ => String::new(),
+        };
+        format!(
+            "{} ({}{documents})",
+            self.provider.describe(),
+            inputs.join(", ")
+        )
+    }
+}
+
 /// The pages' Content-Security-Policy. Scripts stay `'self'` only; inline
 /// *style* attributes are allowed (cosmetic, no script surface). Images
 /// and media come from us, or from the media store's origin when blobs
 /// are fetched there directly: CSP applies to a redirect's target.
+/// `blob:` images are the composer's thumbnails of photos not yet
+/// uploaded, minted by the page's own script from the person's files.
 pub fn page_csp(media_origin: Option<&str>) -> String {
     let media = media_origin.map(|o| format!(" {o}")).unwrap_or_default();
     format!(
         "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; \
-         img-src 'self' data:{media}; media-src 'self'{media}; \
+         img-src 'self' data: blob:{media}; media-src 'self'{media}; \
          frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
     )
 }
@@ -255,6 +429,34 @@ impl IntoResponse for HeavyBusy {
     }
 }
 
+/// No model is configured on this server.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AiOff;
+
+impl AiOff {
+    pub const MESSAGE: &'static str = "card generation is not set up on this server";
+}
+
+impl IntoResponse for AiOff {
+    fn into_response(self) -> Response {
+        (StatusCode::NOT_FOUND, Self::MESSAGE).into_response()
+    }
+}
+
+/// No natural-voice sidecar is configured on this server.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VoiceOff;
+
+impl VoiceOff {
+    pub const MESSAGE: &'static str = "natural voice is not set up on this server";
+}
+
+impl IntoResponse for VoiceOff {
+    fn into_response(self) -> Response {
+        (StatusCode::NOT_FOUND, Self::MESSAGE).into_response()
+    }
+}
+
 impl AppState {
     pub fn new(
         services: Services,
@@ -273,7 +475,7 @@ impl AppState {
         let webauthn_err = |e: WebauthnError| {
             format!(
                 "webauthn: {e} (FLASH_BASE_URL is {}; passkeys need a hostname, \
-                 not an IP address — http://localhost:8437 or a DNS name works)",
+                 not an IP address: http://localhost:8437 or a DNS name works)",
                 config.base_url
             )
         };
@@ -284,7 +486,10 @@ impl AppState {
             .map_err(webauthn_err)?;
         let mailer: Option<Arc<dyn crate::email::Mailer>> =
             match (&config.mail, config.dev_mail_log) {
-                (Some(mail), _) => Some(Arc::new(crate::email::ResendMailer::new(mail))),
+                (Some(mail), _) => Some(Arc::new(crate::email::ResendMailer::new(
+                    mail,
+                    config.support_email.as_deref(),
+                ))),
                 (None, true) => Some(Arc::new(crate::email::LogMailer)),
                 (None, false) => None,
             };
@@ -295,6 +500,19 @@ impl AppState {
         )?
         .into();
         tracing::info!("media store: {}", media.describe());
+        let ai = match &config.ai {
+            Some(ai_config) => {
+                let runtime = AiRuntime::from_config(ai_config, &config.data_dir)?;
+                tracing::info!("card generation: {}", runtime.describe());
+                Some(Arc::new(runtime))
+            }
+            None => None,
+        };
+        let tts = config.tts.as_ref().map(|tts_config| {
+            let runtime = crate::tts::TtsRuntime::from_config(tts_config);
+            tracing::info!("natural voice: {}", runtime.describe());
+            Arc::new(runtime)
+        });
         let csp = page_csp(media.origin().as_deref());
         let site = Arc::new(Site {
             base_url: config.base_url.clone(),
@@ -321,8 +539,21 @@ impl AppState {
             heavy: Arc::new(HeavyJobs::new(HEAVY_GLOBAL)),
             csp,
             media_reads: Arc::new(tokio::sync::Semaphore::new(MEDIA_READS)),
+            ai,
+            tts,
             started_at_ms,
         })
+    }
+
+    /// Installs a natural-voice runtime (tests install the fake sidecar).
+    pub fn install_tts(&mut self, tts: Arc<crate::tts::TtsRuntime>) {
+        self.tts = Some(tts);
+    }
+
+    /// The voice runtime, or the refusal every voice audio route answers
+    /// with when none is configured.
+    pub fn tts(&self) -> Result<&Arc<crate::tts::TtsRuntime>, VoiceOff> {
+        self.tts.as_ref().ok_or(VoiceOff)
     }
 
     /// Swaps the media store (tests install fakes) and everything derived
@@ -330,6 +561,17 @@ impl AppState {
     pub fn install_media(&mut self, media: Arc<dyn crate::media_store::MediaStore>) {
         self.csp = page_csp(media.origin().as_deref());
         self.media = media;
+    }
+
+    /// Installs a generation runtime (tests install the fake provider).
+    pub fn install_ai(&mut self, ai: Arc<AiRuntime>) {
+        self.ai = Some(ai);
+    }
+
+    /// The generation runtime, or the refusal every AI route answers
+    /// with when none is configured.
+    pub fn ai(&self) -> Result<&Arc<AiRuntime>, AiOff> {
+        self.ai.as_ref().ok_or(AiOff)
     }
 
     /// The permit a heavy job needs: one per user at a time, a few per

@@ -24,6 +24,69 @@ fn setup() -> (Services, flash_core::UserId) {
     (services(Arc::new(store)), user)
 }
 
+/// An archived deck leaves today's numbers, the dashboard's deck list and
+/// every study scope, and unarchiving brings the same cards back.
+#[test]
+fn an_archived_deck_leaves_today_and_comes_back_whole() {
+    let (services, user) = setup();
+    let ten = |prefix: &str| -> Vec<(String, String, Vec<String>)> {
+        (0..10)
+            .map(|i| (format!("{prefix} {i}"), "b".to_string(), vec![]))
+            .collect()
+    };
+    services.create_cards(user, "Old", &ten("o"), NOW).unwrap();
+    services.create_cards(user, "Live", &ten("l"), NOW).unwrap();
+    let old = services
+        .store()
+        .find_deck_by_name(user, "Old")
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        services
+            .queue_counts(user, &StudyScope::All, NOW)
+            .unwrap()
+            .new_available,
+        20
+    );
+
+    services.archive_deck(user, old, NOW).unwrap();
+    assert_eq!(
+        services
+            .queue_counts(user, &StudyScope::All, NOW)
+            .unwrap()
+            .new_available,
+        10
+    );
+    let dashboard = services.dashboard(user, NOW).unwrap();
+    assert_eq!(dashboard.counts.new_available, 10);
+    assert_eq!(dashboard.decks.len(), 1, "the archived deck is not today's");
+    assert_eq!(dashboard.decks[0].name, "Live");
+    let listed = services.list_decks(user, NOW).unwrap();
+    assert_eq!(listed.len(), 2, "but it is still listed, last");
+    assert_eq!(listed[1].name, "Old");
+    assert_eq!(listed[1].archived_at, Some(NOW));
+    assert_eq!((listed[1].due_count, listed[1].new_count), (0, 0));
+    assert_eq!(
+        services
+            .start_session(user, StudyScope::Deck(old), NOW)
+            .unwrap()
+            .cards_due,
+        0,
+        "studying it by name finds nothing"
+    );
+    assert_eq!(services.deck_detail(user, old, NOW).unwrap().card_count, 10);
+
+    services.unarchive_deck(user, old).unwrap();
+    assert_eq!(
+        services
+            .queue_counts(user, &StudyScope::All, NOW)
+            .unwrap()
+            .new_available,
+        20
+    );
+    assert_eq!(services.dashboard(user, NOW).unwrap().decks.len(), 2);
+}
+
 #[test]
 fn full_study_session_flow() {
     let (services, user) = setup();
@@ -359,7 +422,7 @@ fn empty_and_invalid_input_handling() {
     assert_eq!(session.cards_due, 0);
     assert!(session.first_card.is_none());
 
-    // Invalid card text is rejected before anything is written — including
+    // Invalid card text is rejected before anything is written, including
     // the would-be auto-created deck.
     let err = services
         .create_cards(user, "D", &[("  ".into(), "b".into(), vec![])], NOW)
@@ -400,7 +463,7 @@ fn stats_day_cutoff_merges_late_night_reviews() {
         .unwrap();
     // The cutoff is evaluated in the user's own zone, so pin one: in
     // America/New_York NOW is ~17:13, and nine hours later is ~2:13am the
-    // next civil day, still before the 4am cutoff — both land on the same
+    // next civil day, still before the 4am cutoff. Both land on the same
     // study day.
     store
         .set_study_settings(user, Some("America/New_York"), None, None)
@@ -409,7 +472,7 @@ fn stats_day_cutoff_merges_late_night_reviews() {
     seed_review(&store, user, ids[0], NOW + 9 * 60 * 60 * 1000);
 
     let stats = services
-        .stats(&heavy_permit(user), NOW + 9 * 60 * 60 * 1000)
+        .stats(&heavy_permit(user), NOW + 9 * 60 * 60 * 1000, None)
         .unwrap();
     assert_eq!(stats.streak, 1, "2am review must not start a second day");
     assert_eq!(stats.days_learned_pct, 100);
@@ -433,10 +496,15 @@ fn stats_streaks_and_heatmap_shape() {
         seed_review(&store, user, ids[0], NOW - offset * DAY);
     }
 
-    let stats = services.stats(&heavy_permit(user), NOW).unwrap();
+    let stats = services.stats(&heavy_permit(user), NOW, None).unwrap();
     assert_eq!(stats.streak, 3);
     assert_eq!(stats.longest_streak, 4);
     assert_eq!(stats.total_reviews, 7);
+    assert!(
+        stats.heat_years.is_empty(),
+        "one year of history, no picker"
+    );
+    assert_eq!(stats.heat_year, None);
     // Denominator: 9 days since the first review.
     assert_eq!(stats.days_learned_pct, 7 * 100 / 9);
 
@@ -469,7 +537,7 @@ fn stats_future_due_lands_in_heatmap() {
     // One Good review schedules the card a few days out.
     seed_review(&store, user, ids[0], NOW);
 
-    let stats = services.stats(&heavy_permit(user), NOW).unwrap();
+    let stats = services.stats(&heavy_permit(user), NOW, None).unwrap();
     let future_due: u32 = stats
         .heat_weeks
         .iter()
@@ -482,8 +550,160 @@ fn stats_future_due_lands_in_heatmap() {
     assert_eq!(stats.mature_cards, 0, "stability is far below 21 days");
 }
 
+/// One card to review, for the stats tests that only need history.
+fn one_card(store: &Store, user: flash_core::UserId) -> flash_core::CardId {
+    let deck = store.create_deck(user, "D", "", NOW).unwrap();
+    store
+        .create_cards(
+            user,
+            deck,
+            &[(flash_core::validate_card_text("f", "b").unwrap(), vec![])],
+            None,
+            NOW,
+        )
+        .unwrap()[0]
+}
+
+/// A local wall-clock moment in the zone the stats tests study in.
+fn at(zone: &str, date: (i16, i8, i8), hour: i8, minute: i8) -> i64 {
+    jiff::civil::date(date.0, date.1, date.2)
+        .at(hour, minute, 0, 0)
+        .in_tz(zone)
+        .unwrap()
+        .timestamp()
+        .as_millisecond()
+}
+
+#[test]
+fn stats_longest_streak_spans_more_than_a_year() {
+    let (services, store, user) = setup_with_store();
+    let card = one_card(&store, user);
+    // A daily run of 400 days that ended 500 days ago, then today.
+    for offset in (500..900).rev() {
+        seed_review(&store, user, card, NOW - offset * DAY);
+    }
+    seed_review(&store, user, card, NOW);
+
+    let stats = services.stats(&heavy_permit(user), NOW, None).unwrap();
+    assert_eq!(stats.longest_streak, 400, "the record is all-time");
+    assert_eq!(stats.streak, 1);
+    assert_eq!(stats.total_reviews, 401);
+    assert_eq!(stats.heat_years, vec![2021, 2022, 2023]);
+    assert_eq!(stats.heat_year, None);
+    // The legend still describes the past year: one studied day of 365.
+    assert_eq!(stats.days_learned_pct, 0);
+    assert_eq!(stats.daily_avg, 0);
+}
+
+#[test]
+fn stats_calendar_year_view() {
+    let (services, store, user) = setup_with_store();
+    let card = one_card(&store, user);
+    let march = at("America/New_York", (2022, 3, 15), 12, 0);
+    seed_review(&store, user, card, march);
+    seed_review(&store, user, card, NOW);
+
+    let stats = services
+        .stats(&heavy_permit(user), NOW, Some(2022))
+        .unwrap();
+    assert_eq!(stats.heat_year, Some(2022));
+    assert_eq!(stats.heat_years, vec![2022, 2023]);
+    // Jan 1 2022 was a Saturday and Dec 31 a Saturday: the Sunday before
+    // through that Saturday, 53 columns.
+    assert_eq!(stats.heat_weeks.len(), 53);
+    let cells: Vec<_> = stats.heat_weeks.iter().flatten().collect();
+    assert_eq!(cells[0].label, "12/26");
+    assert_eq!(cells.last().unwrap().label, "12/31");
+    assert!(cells.iter().all(|c| !c.future && !c.today));
+    // The one studied day is the busiest of the year: full level. Today's
+    // review lies outside the window and does not set the scale.
+    let lit: Vec<_> = cells.iter().filter(|c| c.level > 0).collect();
+    assert_eq!(lit.len(), 1);
+    assert_eq!(
+        (lit[0].label.as_str(), lit[0].level, lit[0].count),
+        ("03/15", 4, 1)
+    );
+    let month_cols: u32 = stats.heat_months.iter().map(|m| m.weeks).sum();
+    assert_eq!(month_cols, 53);
+    assert_eq!(
+        stats.heat_months[0].label, "",
+        "one December column is blanked"
+    );
+    assert_eq!(stats.heat_months[1].label, "Jan");
+    // The legend covers that year from its first review: Mar 15 to Dec 31.
+    assert_eq!(stats.days_learned_pct, 100 / 292);
+    // Streaks and totals stay all-time.
+    assert_eq!(stats.total_reviews, 2);
+    assert_eq!(stats.streak, 1);
+
+    // A year whose Dec 31 is a Sunday needs a 54th column.
+    let (services, store, user) = setup_with_store();
+    let card = one_card(&store, user);
+    let now = at("America/New_York", (2029, 6, 1), 12, 0);
+    seed_review(
+        &store,
+        user,
+        card,
+        at("America/New_York", (2028, 7, 4), 12, 0),
+    );
+    seed_review(&store, user, card, now);
+    let stats = services
+        .stats(&heavy_permit(user), now, Some(2028))
+        .unwrap();
+    assert_eq!(stats.heat_weeks.len(), 54);
+    let cells: Vec<_> = stats.heat_weeks.iter().flatten().collect();
+    assert_eq!(cells[0].label, "12/26");
+    assert_eq!(cells.last().unwrap().label, "01/06");
+}
+
+#[test]
+fn stats_year_outside_history_is_the_trailing_view() {
+    let (services, store, user) = setup_with_store();
+    let card = one_card(&store, user);
+    seed_review(&store, user, card, NOW - 2 * 365 * DAY);
+    seed_review(&store, user, card, NOW);
+    for year in [Some(1999), Some(2023), Some(2030), None] {
+        let stats = services.stats(&heavy_permit(user), NOW, year).unwrap();
+        assert_eq!(stats.heat_year, None, "{year:?}");
+        assert_eq!(stats.heat_years, vec![2021, 2022, 2023]);
+        assert_eq!(stats.heat_weeks.len(), 53);
+        assert!(stats.heat_weeks.iter().flatten().any(|c| c.today));
+    }
+}
+
+/// Quarter-hour buckets fold into study days on a zone whose offset is
+/// not a whole hour: a review just before the 4am cutoff belongs to the
+/// day before, one just after to the day itself.
+#[test]
+fn stats_buckets_fold_across_the_cutoff_in_kathmandu() {
+    let (services, store, user) = setup_with_store();
+    store
+        .set_study_settings(user, Some("Asia/Kathmandu"), None, None)
+        .unwrap();
+    let card = one_card(&store, user);
+    seed_review(
+        &store,
+        user,
+        card,
+        at("Asia/Kathmandu", (2023, 11, 14), 3, 59),
+    );
+    seed_review(
+        &store,
+        user,
+        card,
+        at("Asia/Kathmandu", (2023, 11, 14), 4, 1),
+    );
+    let now = at("Asia/Kathmandu", (2023, 11, 14), 5, 0);
+
+    let stats = services.stats(&heavy_permit(user), now, None).unwrap();
+    assert_eq!(stats.streak, 2, "two study days, both learned");
+    assert_eq!(stats.days_learned_pct, 100);
+    assert_eq!(stats.days[29].count, 1);
+    assert_eq!(stats.days[28].count, 1);
+}
+
 use flash_server::service::ServiceError;
-use flash_store::import::ImportRow;
+use flash_store::import::{HistoryEntry, ImportRow};
 
 /// Seeds `n` cards directly at the store level into one deck.
 fn seed_cards(store: &Store, user: flash_core::UserId, n: usize) -> Vec<flash_core::CardId> {
@@ -501,130 +721,226 @@ fn seed_cards(store: &Store, user: flash_core::UserId, n: usize) -> Vec<flash_co
 
 // ---- progress import (revlog replay) ----
 
-#[test]
-fn progress_import_replays_history_into_card_state() {
-    let (services, store, user) = setup_with_store();
-    let day = 24 * 60 * 60 * 1000;
-    let rows_with_history = vec![
-        ImportRow {
-            front: "seasoned".into(),
-            back: "b".into(),
-            tags: vec![],
-            deck: None,
-            media: vec![],
-            front_html: None,
-            back_html: None,
-            suspended: false,
-            cloze_text: None,
-            cloze_index: None,
-            type_answer: None,
-            reviews: vec![
-                (NOW - 30 * day, 3),
-                (NOW - 20 * day, 3),
-                (NOW - 10 * day, 2),
-            ],
-        },
-        ImportRow {
-            front: "fresh".into(),
-            back: "b".into(),
-            tags: vec![],
-            deck: None,
-            media: vec![],
-            front_html: None,
-            back_html: None,
-            suspended: false,
-            cloze_text: None,
-            cloze_index: None,
-            type_answer: None,
-            reviews: vec![],
-        },
-    ];
+/// A row as the Anki parser makes it: it knows which Anki card it was.
+fn anki_row(front: &str, anki_card_id: i64) -> ImportRow {
+    let mut row = import_row(front, "b");
+    row.anki_card_id = Some(anki_card_id);
+    row
+}
 
+fn review(at_ms: i64, anki_card_id: i64, rating: Rating) -> HistoryEntry {
+    HistoryEntry {
+        at_ms,
+        anki_card_id,
+        rating,
+    }
+}
+
+/// One review_log row: (reviewed_at, rating, phase_before, source,
+/// session_id, client).
+type LoggedReview = (i64, i64, i64, String, Option<i64>, Option<String>);
+
+/// Every review_log row of the user, oldest first.
+fn logged(store: &Store, user: flash_core::UserId) -> Vec<LoggedReview> {
+    store
+        .with_conn(|c| {
+            let mut stmt = c.prepare(
+                "SELECT reviewed_at, rating, phase_before, source, session_id, client
+                 FROM review_log WHERE user_id = ?1 ORDER BY reviewed_at",
+            )?;
+            let rows = stmt.query_map([user.raw()], |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                ))
+            })?;
+            Ok(rows.collect::<rusqlite::Result<_>>()?)
+        })
+        .unwrap()
+}
+
+#[test]
+fn progress_import_writes_the_full_history() {
+    let (services, store, user) = setup_with_store();
+    let rows = vec![
+        anki_row("seasoned", 1),
+        anki_row("fresh", 2),
+        anki_row("never", 3),
+    ];
+    let history = vec![
+        review(NOW - 30 * DAY, 1, Rating::Good),
+        review(NOW - 20 * DAY, 1, Rating::Good),
+        review(NOW - 10 * DAY, 1, Rating::Hard),
+        review(NOW - 5 * DAY, 2, Rating::Good),
+    ];
     services
-        .import_cards(user, "Anki", rows_with_history.clone(), true, None, NOW)
+        .import_cards(user, "Anki", rows, history, None, NOW)
         .unwrap();
+
+    // Every review is in the log, marked as imported, outside any session.
+    let log = logged(&store, user);
+    assert_eq!(log.len(), 4);
+    assert_eq!(
+        log.iter().map(|r| r.0).collect::<Vec<_>>(),
+        vec![
+            NOW - 30 * DAY,
+            NOW - 20 * DAY,
+            NOW - 10 * DAY,
+            NOW - 5 * DAY
+        ]
+    );
+    assert_eq!(log[2].1, Rating::Hard.as_i64());
+    assert_eq!(log[0].2, flash_core::Phase::New.as_i64());
+    assert_ne!(log[1].2, flash_core::Phase::New.as_i64());
+    assert!(log
+        .iter()
+        .all(|r| r.3 == "import" && r.4.is_none() && r.5.is_none()));
+
+    // The card's state is what replaying the same reviews gives.
     let cards = store.list_cards(user, None, Some("seasoned"), 10).unwrap();
     let state = store.get_card_state(user, cards[0].id).unwrap();
-    assert_eq!(state.phase, flash_core::Phase::Review);
+    let settings = store.get_settings(user).unwrap();
+    let scheduler =
+        flash_core::Scheduler::new(settings.fsrs_params.as_deref(), settings.desired_retention)
+            .unwrap();
+    let mut expected = flash_core::CardState::new_card(NOW - 30 * DAY);
+    for (at, rating) in [
+        (NOW - 30 * DAY, Rating::Good),
+        (NOW - 20 * DAY, Rating::Good),
+        (NOW - 10 * DAY, Rating::Hard),
+    ] {
+        expected = scheduler.review(&expected, rating, at).unwrap().state;
+    }
+    assert_eq!(state, expected);
     assert_eq!(state.reps, 3);
-    assert!(state.stability.is_some());
-    assert_eq!(state.last_review_ms, Some(NOW - 10 * day));
-    assert!(state.due_ms > NOW - 10 * day, "due after last review");
+    assert_eq!(state.last_review_ms, Some(NOW - 10 * DAY));
 
-    // The no-history card in the same batch stays new.
-    let fresh = store.list_cards(user, None, Some("fresh"), 10).unwrap();
-    let fresh_state = store.get_card_state(user, fresh[0].id).unwrap();
-    assert_eq!(fresh_state.phase, flash_core::Phase::New);
+    // The card without history stays new.
+    let never = store.list_cards(user, None, Some("never"), 10).unwrap();
+    let never_state = store.get_card_state(user, never[0].id).unwrap();
+    assert_eq!(never_state.phase, flash_core::Phase::New);
 
-    // Progress-imported cards count as in-rotation (not New) — they feed
+    // Progress-imported cards count as in-rotation (not New): they feed
     // the post-grace clamp and skip the new-card budget.
-    assert_eq!(store.cards_in_rotation(user).unwrap(), 1);
+    assert_eq!(store.cards_in_rotation(user).unwrap(), 2);
 }
 
 #[test]
-fn progress_import_opt_out_leaves_cards_new() {
+fn progress_import_twice_counts_once() {
     let (services, store, user) = setup_with_store();
-    let rows = vec![ImportRow {
-        front: "seasoned".into(),
-        back: "b".into(),
-        tags: vec![],
-        deck: None,
-        media: vec![],
-        front_html: None,
-        back_html: None,
-        suspended: false,
-        cloze_text: None,
-        cloze_index: None,
-        type_answer: None,
-        reviews: vec![(NOW - 1000, 3), (NOW - 500, 3)],
-    }];
+    let history = vec![
+        review(NOW - 3 * DAY, 1, Rating::Good),
+        review(NOW - DAY, 1, Rating::Good),
+    ];
     services
-        .import_cards(user, "Anki", rows, false, None, NOW)
+        .import_cards(
+            user,
+            "Anki",
+            vec![anki_row("a", 1)],
+            history.clone(),
+            None,
+            NOW,
+        )
         .unwrap();
+    // The same collection again, into another deck: no new log rows, but
+    // the new copy of the card still gets its state.
+    services
+        .import_cards(
+            user,
+            "Anki again",
+            vec![anki_row("a", 1)],
+            history,
+            None,
+            NOW,
+        )
+        .unwrap();
+    assert_eq!(logged(&store, user).len(), 2);
     let cards = store.list_cards(user, None, None, 10).unwrap();
-    let state = store.get_card_state(user, cards[0].id).unwrap();
-    assert_eq!(state.phase, flash_core::Phase::New);
-    assert_eq!(state.reps, 0);
+    assert_eq!(cards.len(), 2);
+    for card in &cards {
+        assert_eq!(store.get_card_state(user, card.id).unwrap().reps, 2);
+    }
 }
 
 #[test]
-fn progress_import_survives_junk_history() {
+fn progress_import_skips_junk() {
     let (services, store, user) = setup_with_store();
-    let rows = vec![ImportRow {
-        front: "messy".into(),
-        back: "b".into(),
-        tags: vec![],
-        deck: None,
-        media: vec![],
-        front_html: None,
-        back_html: None,
-        suspended: false,
-        cloze_text: None,
-        cloze_index: None,
-        type_answer: None,
-        // Out-of-order timestamp and invalid rating get skipped; the two
-        // valid chronological reviews still replay.
-        reviews: vec![
-            (NOW - 3000, 3),
-            (NOW - 5000, 3),
-            (NOW - 1000, 7),
-            (NOW - 500, 2),
-        ],
-    }];
+    // Out of order in the file, one in the future, one before the epoch,
+    // one for a card the package never made, one repeating a timestamp.
+    let history = vec![
+        review(NOW - 500, 1, Rating::Hard),
+        review(NOW - 3000, 1, Rating::Good),
+        review(NOW + 1000, 1, Rating::Good),
+        review(-5, 1, Rating::Good),
+        review(NOW - 2000, 99, Rating::Good),
+        review(NOW - 3000, 1, Rating::Again),
+    ];
     services
-        .import_cards(user, "Anki", rows, true, None, NOW)
+        .import_cards(user, "Anki", vec![anki_row("messy", 1)], history, None, NOW)
         .unwrap();
+    let log = logged(&store, user);
+    assert_eq!(
+        log.iter().map(|r| (r.0, r.1)).collect::<Vec<_>>(),
+        vec![
+            (NOW - 3000, Rating::Good.as_i64()),
+            (NOW - 500, Rating::Hard.as_i64())
+        ]
+    );
     let cards = store.list_cards(user, None, None, 10).unwrap();
     let state = store.get_card_state(user, cards[0].id).unwrap();
     assert_eq!(state.reps, 2);
     assert_eq!(state.last_review_ms, Some(NOW - 500));
 }
 
+#[test]
+fn progress_import_opt_out_writes_nothing() {
+    let (services, store, user) = setup_with_store();
+    services
+        .import_cards(
+            user,
+            "Anki",
+            vec![anki_row("seasoned", 1)],
+            vec![],
+            None,
+            NOW,
+        )
+        .unwrap();
+    assert!(logged(&store, user).is_empty());
+    let cards = store.list_cards(user, None, None, 10).unwrap();
+    let state = store.get_card_state(user, cards[0].id).unwrap();
+    assert_eq!(state.phase, flash_core::Phase::New);
+    assert_eq!(state.reps, 0);
+}
+
+/// A review the uploader did in Anki today is a review done today: it
+/// shows on the dashboard and spends today's budget, so nothing gets
+/// studied twice.
+#[test]
+fn progress_import_today_counts_toward_today() {
+    let (services, _store, user) = setup_with_store();
+    services
+        .import_cards(
+            user,
+            "Anki",
+            vec![anki_row("today", 1)],
+            vec![review(NOW - 1000, 1, Rating::Good)],
+            None,
+            NOW,
+        )
+        .unwrap();
+    let counts = services.queue_counts(user, &StudyScope::All, NOW).unwrap();
+    assert_eq!(counts.reviewed_today, 1);
+}
+
 // ---- full-fidelity import: suspension, rich extras, settings ----
 
 fn import_row(front: &str, back: &str) -> ImportRow {
     ImportRow {
-        reviews: vec![],
+        anki_card_id: None,
         media: vec![],
         front: front.into(),
         back: back.into(),
@@ -642,15 +958,14 @@ fn import_row(front: &str, back: &str) -> ImportRow {
 #[test]
 fn suspended_import_stays_out_of_the_study_queue() {
     let (services, store, user) = setup_with_store();
-    let mut paused = import_row("paused", "b");
+    let mut paused = anki_row("paused", 7);
     paused.suspended = true;
-    paused.reviews = vec![(NOW - 1000, 3)];
     services
         .import_cards(
             user,
             "Anki",
             vec![import_row("active", "b"), paused],
-            true,
+            vec![review(NOW - 1000, 7, Rating::Good)],
             None,
             NOW,
         )
@@ -679,7 +994,7 @@ fn mcp_edit_makes_card_plain_and_detached() {
     row.cloze_index = Some(1);
     row.type_answer = Some("answer".into());
     services
-        .import_cards(user, "Anki", vec![row], false, None, NOW)
+        .import_cards(user, "Anki", vec![row], vec![], None, NOW)
         .unwrap();
 
     let card = store.list_cards(user, None, None, 10).unwrap().remove(0);
@@ -688,7 +1003,7 @@ fn mcp_edit_makes_card_plain_and_detached() {
     let exported = store.export_cards(user).unwrap();
     assert_eq!(exported[0].cloze.as_ref().unwrap().1, 1);
 
-    // A plain-text (MCP) edit makes the card plain again — no stale rich view.
+    // A plain-text (MCP) edit makes the card plain again. No stale rich view.
     store
         .update_card(
             user,
@@ -896,7 +1211,7 @@ mod notes {
             rows.push(r);
         }
         services
-            .import_cards(user, "Anki", rows, false, None, NOW)
+            .import_cards(user, "Anki", rows, vec![], None, NOW)
             .unwrap();
         let cards = store.list_cards(user, None, None, 10).unwrap();
         assert_eq!(cards.len(), 3);
@@ -968,7 +1283,7 @@ mod notes {
         let mut r = import_row("type me", "answer");
         r.type_answer = Some("answer".into());
         services
-            .import_cards(user, "Anki", vec![r], false, None, NOW)
+            .import_cards(user, "Anki", vec![r], vec![], None, NOW)
             .unwrap();
         let typed = store
             .list_cards(user, None, Some("type me"), 10)

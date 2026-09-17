@@ -2,7 +2,7 @@
 //
 // Progressive enhancement over card_editor_body.html: the contenteditable
 // fields mirror their HTML into hidden inputs (front_html / back_html) on
-// every change, so a plain form post — or the htmx dialog post — carries
+// every change, so a plain form post (or the htmx dialog post) carries
 // exactly what is on screen. Formatting emits only markup the server's
 // sanitizer keeps: b/i/u/s/sup/sub, lists, and hl-{hue} / hl-bg-{hue}
 // spans (never inline styles). Media is uploaded on paste or drop and

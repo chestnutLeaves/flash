@@ -48,9 +48,9 @@ pub struct ValidatedMedia {
 }
 
 /// The gate every ingested file passes: sane filename, a format we accept
-/// (SVG and unknowns are rejected — scriptable content must never be
-/// served from our origin), size caps, and magic bytes that actually match
-/// the claimed format so HTML-as-.jpg dies here.
+/// (SVG and unknowns are rejected, since scriptable content must never
+/// be served from our origin), size caps, and magic bytes that actually
+/// match the claimed format so HTML-as-.jpg dies here.
 pub fn validate_media(filename: &str, bytes: &[u8]) -> Result<ValidatedMedia, String> {
     let filename = sanitize_filename(filename);
     let (kind, mime) = classify(&filename);
@@ -94,7 +94,7 @@ pub fn ingest_media(
         if services.store().media_count(user)? >= crate::bounds::MEDIA_OBJECTS_PER_USER {
             tracing::warn!(user = user.raw(), "media object cap reached");
             return Err(Failure::user(
-                "media file limit reached — remove some files first",
+                "media file limit reached. Remove some files first",
             ));
         }
         let used = services.store().media_bytes_used(user)?;
@@ -105,7 +105,7 @@ pub fn ingest_media(
                 "media soft cap reached"
             );
             return Err(Failure::user(
-                "media storage limit reached — contact support",
+                "media storage limit reached. Contact support",
             ));
         }
     }
@@ -322,7 +322,7 @@ pub fn ingest_package_media(
                                 return Err("media storage limit reached".to_string());
                             }
                             // Content-addressed: a blob any user already holds is
-                            // already in the store — no upload needed.
+                            // already in the store, so no upload needed.
                             if !services.store().blob_known(&v.sha256).unwrap_or(false) {
                                 store
                                     .put(&v.sha256, v.mime, &bytes)
@@ -411,7 +411,7 @@ pub fn delete_media(
 }
 
 /// Removes blobs the store reported as unreferenced (deck or account
-/// deletion) — in the background. The DB rows are already gone, so the
+/// deletion), in the background. The DB rows are already gone, so the
 /// user's request never waits on network deletes (a big deck is hundreds
 /// of them). Best effort: a failed delete is logged, never surfaced.
 pub fn remove_orphans(services: Services, store: Arc<dyn MediaStore>, hashes: &[String]) {
@@ -525,7 +525,7 @@ pub fn parse_range(headers: &HeaderMap) -> Option<ByteRange> {
     Some(ByteRange::From { start, end })
 }
 
-/// GET /media/{id} — authenticated (session cookie or the app's bearer),
+/// GET /media/{id}: authenticated (session cookie or the app's bearer),
 /// ownership-scoped (someone else's id is indistinguishable from a
 /// nonexistent one). Content-addressed blobs never change, so the cache
 /// header is immutable-private.

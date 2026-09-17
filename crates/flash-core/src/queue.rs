@@ -93,7 +93,7 @@ impl Budgets {
 pub const LEARN_AHEAD_MS: i64 = 20 * 60_000;
 
 /// Orders due cards for a session:
-/// 1. Learning/relearning cards whose step timer expired (most urgent —
+/// 1. Learning/relearning cards whose step timer expired (most urgent:
 ///    they're mid-acquisition and short-interval; never capped).
 /// 2. Due review cards, oldest due first (most overdue = most at risk),
 ///    under the per-deck and account review budgets.

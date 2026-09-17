@@ -217,8 +217,8 @@ pub fn urlencode(s: &str) -> String {
 
 /// Mints a web session for `user` inside a store call and returns the
 /// cookie token (the store only ever sees its hash). Pair with
-/// [`with_session_cookie`] on the response. Every login path — password,
-/// passkey, reset, enrollment, Google — ends here.
+/// [`with_session_cookie`] on the response. Every login path (password,
+/// passkey, reset, enrollment, Google) ends here.
 pub fn issue_session(
     store: &flash_store::Store,
     user: UserId,

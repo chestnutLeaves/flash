@@ -1,5 +1,6 @@
-//! Decks: list, create, detail (settings), rename, limits, boost, delete,
-//! the paged card list, quick-add, and the rich editor's create path.
+//! Decks: list, create, detail (settings), rename, limits, boost, archive
+//! and unarchive, delete, the paged card list, quick-add, and the rich
+//! editor's create path.
 
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
@@ -25,6 +26,8 @@ pub fn router() -> Router<AppState> {
         .route("/decks/{id}", get(detail).patch(rename).delete(delete_deck))
         .route("/decks/{id}/limits", axum::routing::put(set_limits))
         .route("/decks/{id}/boost", post(boost))
+        .route("/decks/{id}/archive", post(archive))
+        .route("/decks/{id}/unarchive", post(unarchive))
         .route("/decks/{id}/cards", get(cards).post(quick_add))
         .route("/decks/{id}/notes", post(create_note))
 }
@@ -147,6 +150,32 @@ async fn boost(
     })
     .await?;
     Ok(Json(Boosted { boost_today }))
+}
+
+/// Archive: the deck keeps every card and its history but leaves the
+/// study queue and the due counts. Both calls are idempotent.
+async fn archive(
+    State(state): State<AppState>,
+    user: BearerUser,
+    Path(id): Path<i64>,
+) -> Result<StatusCode, ApiError> {
+    call(state.services.clone(), move |s| {
+        s.archive_deck(user.id, DeckId(id), now_ms())
+    })
+    .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn unarchive(
+    State(state): State<AppState>,
+    user: BearerUser,
+    Path(id): Path<i64>,
+) -> Result<StatusCode, ApiError> {
+    call(state.services.clone(), move |s| {
+        s.unarchive_deck(user.id, DeckId(id))
+    })
+    .await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Serialize)]

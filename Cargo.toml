@@ -8,7 +8,7 @@ members = ["crates/*"]
 exclude = ["fuzz"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 publish = false
 repository = "https://github.com/flash-cards/flash"
@@ -21,6 +21,16 @@ repository = "https://github.com/flash-cards/flash"
 # noise than the copy costs in time on a request path that touches
 # SQLite. Clippy 1.98 started flagging this shape.
 result_large_err = "allow"
+
+# Debug builds carry line tables only, and the dependencies none: a panic
+# still names file and line, while the pdbs and the link step shrink to a
+# fraction of what full debuginfo costs on MSVC. Full debuginfo is a
+# `--config profile.dev.debug=2` away when a debugger is really needed.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = 0
 
 # Fully optimized release builds: what a tagged release and the Docker
 # image are built with.

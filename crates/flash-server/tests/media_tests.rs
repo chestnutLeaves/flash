@@ -364,7 +364,7 @@ async fn presigning_stores_redirect_after_authorizing() {
     let page = send(&t.app, get("/decks", Some(&cookie))).await;
     let csp = page.header("content-security-policy").unwrap();
     assert!(
-        csp.contains(&format!("img-src 'self' data: {PRESIGN_ORIGIN}")),
+        csp.contains(&format!("img-src 'self' data: blob: {PRESIGN_ORIGIN}")),
         "{csp}"
     );
     assert!(
@@ -400,7 +400,7 @@ async fn disk_stores_report_no_direct_url() {
     assert_eq!(location.json()["mime"], "image/png");
     let page = send(&h.app, get("/decks", Some(&h.session_cookie))).await;
     let csp = page.header("content-security-policy").unwrap();
-    assert!(csp.contains("img-src 'self' data:;"), "{csp}");
+    assert!(csp.contains("img-src 'self' data: blob:;"), "{csp}");
     assert!(csp.contains("media-src 'self';"), "{csp}");
     let _ = std::fs::remove_dir_all(&h.data_dir);
 }
@@ -551,7 +551,7 @@ fn export_bundles_media_with_anki_markup() {
     .unwrap();
     let html = format!(r#"<p>A cat <img src="/media/{}" alt="cat.png"></p>"#, id.0);
     let rows = vec![flash_store::import::ImportRow {
-        reviews: vec![],
+        anki_card_id: None,
         media: vec![flash_store::media::MediaRef {
             filename: "cat.png".into(),
             kind: flash_store::media::MediaKind::Image,
@@ -571,7 +571,7 @@ fn export_bundles_media_with_anki_markup() {
         [("cat.png".to_string(), id)].into_iter().collect();
     let _ = deck;
     h.services
-        .import_cards(h.user, "Pics", rows, false, Some(&resolve), now_ms())
+        .import_cards(h.user, "Pics", rows, vec![], Some(&resolve), now_ms())
         .unwrap();
 
     let cards = h.services.export_cards(h.user).unwrap();
@@ -658,7 +658,7 @@ async fn export_streams_from_disk_and_leaves_nothing_behind() {
         })
         .collect();
     h.services
-        .import_cards(h.user, "Pics", vec![row], false, Some(&resolve), now_ms())
+        .import_cards(h.user, "Pics", vec![row], vec![], Some(&resolve), now_ms())
         .unwrap();
 
     let exports = flash_server::flows::export_flow::exports_dir_in(&h.data_dir);
@@ -760,7 +760,7 @@ fn housekeeping_sweeps_abandoned_exports_only() {
 
 fn rich_row(front: &str, back_html: String, media: &str) -> flash_store::import::ImportRow {
     flash_store::import::ImportRow {
-        reviews: vec![],
+        anki_card_id: None,
         media: vec![flash_store::media::MediaRef {
             filename: media.into(),
             kind: flash_store::media::MediaKind::Image,
@@ -848,7 +848,7 @@ async fn study_front_preloads_its_back_and_prefetches_the_next_card() {
                     "b.png",
                 ),
             ],
-            false,
+            vec![],
             Some(&resolve),
             now_ms(),
         )

@@ -66,7 +66,7 @@ pub fn parse_csv(bytes: &[u8]) -> Result<ParsedImport, ImportError> {
             back: back.to_string(),
             tags,
             deck,
-            reviews: Vec::new(),
+            anki_card_id: None,
             media: Vec::new(),
             front_html: None,
             back_html: None,

@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use super::dto::Deck;
 use super::{app_platform, call, ApiError, ApiJson, ApiResult, BearerUser};
 use crate::ext::Surface;
-use crate::service::now_ms;
+use crate::service::{now_ms, ServiceError};
 use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
@@ -85,8 +85,13 @@ async fn today(
         app_platform(&headers),
         None,
     );
+    let tts = state.tts.clone();
     let d = call(state.services.clone(), move |s| {
-        s.dashboard(user.id, now_ms())
+        let d = s.dashboard(user.id, now_ms())?;
+        if let Some(tts) = &tts {
+            crate::tts::prefetch_queue_head(tts, &s, user.id, now_ms());
+        }
+        Ok::<_, ServiceError>(d)
     })
     .await?;
     Ok(Json(Today {

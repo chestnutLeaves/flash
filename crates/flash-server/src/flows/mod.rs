@@ -73,7 +73,9 @@ impl From<crate::service::ServiceError> for Failure {
         use crate::service::ServiceError;
         match e {
             ServiceError::Invalid(msg) => Failure::User(msg),
-            ServiceError::OverCap { message, .. } => Failure::User(message),
+            ServiceError::OverCap { message, .. } | ServiceError::AiDenied { message, .. } => {
+                Failure::User(message)
+            }
             ServiceError::Store(store) => store.into(),
             ServiceError::Scheduler(_) | ServiceError::Internal(_) => Failure::internal(e),
         }

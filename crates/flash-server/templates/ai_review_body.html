@@ -1,0 +1,44 @@
+{# The drafts of one review: the header, the counts, the toolbar and the
+   rows. Rendered inside `#review` on the page and again, out of band,
+   by the thread's poll once a pass has changed them. Expects `review`
+   in context. #}
+<div class="page-head">
+  <h1>Review the cards</h1>
+  <span class="small muted">{{ review.source_name }}</span>
+</div>
+
+{% if let Some(message) = review.notice %}
+<div class="fl-card fl-card-pad" style="border-color:var(--bad)" role="alert">
+  <strong>{{ message }}</strong>
+</div>
+{% endif %}
+
+<p class="muted"><strong>{{ review.pending }}</strong> waiting on you&thinsp;&middot;&thinsp;{{ review.kept }} kept&thinsp;&middot;&thinsp;{{ review.discarded }} discarded.
+Nothing here is in a deck until you keep it.</p>
+
+<div class="fl-card fl-card-pad gen-toolbar">
+  <form class="row" method="post" action="/ai/jobs/{{ review.job_id }}/keep"
+        data-gen-confirm="Keep {{ review.pending }} cards?">
+    <div class="fl-field">
+      <label class="fl-label" for="review-deck">Into deck</label>
+      <select class="fl-input fl-select" id="review-deck" name="deck_id">
+        {% for deck in review.decks %}
+        <option value="{{ deck.id }}"{% if deck.id.0 == review.deck_id %} selected{% endif %}>{{ deck.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <button class="fl-btn fl-btn-primary" type="submit" data-busy-label="Keeping&hellip;"{% if review.pending == 0 %} disabled{% endif %}>Keep all ({{ review.pending }})</button>
+  </form>
+  <form method="post" action="/ai/jobs/{{ review.job_id }}/discard"
+        hx-boost="true" hx-push-url="false" hx-select="#review" hx-target="#review" hx-swap="outerHTML show:none"
+        hx-confirm="Discard {{ review.pending }} cards? They can't be brought back.">
+    <button class="fl-btn fl-btn-danger" type="submit"{% if review.pending == 0 %} disabled{% endif %}>Discard all ({{ review.pending }})</button>
+  </form>
+</div>
+
+{% if review.groups.is_empty() %}
+<p class="muted">This generation wrote no cards. Say what you'd like below and the model will try again.</p>
+{% endif %}
+{% for group in review.groups %}
+{% include "ai_draft_group.html" %}
+{% endfor %}

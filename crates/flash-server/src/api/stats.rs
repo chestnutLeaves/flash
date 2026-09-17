@@ -1,11 +1,12 @@
 //! Stats: everything the web page shows, precomputed by `Services::stats`
-//! (tiles, the year heatmap with its levels and month spans, the 30-day
-//! bars, the next seven days) so the app draws and never counts.
+//! (tiles, the heatmap with its levels and month spans, the 30-day bars,
+//! the next seven days) so the app draws and never counts. `?year=`
+//! picks a past calendar year for the heatmap.
 
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::routing::get;
 use axum::{Json, Router};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::{call, ApiResult, BearerUser};
 use crate::service::{self, now_ms};
@@ -67,14 +68,32 @@ struct Stats {
     days: Vec<DayCount>,
     /// The next 7 days.
     upcoming: Vec<DayCount>,
-    /// 53 week columns of 7 cells (Sunday first), oldest week first.
+    /// Week columns of 7 cells (Sunday first), oldest week first: 53 in
+    /// the trailing view, 53 or 54 for a calendar year.
     heat_weeks: Vec<Vec<HeatCell>>,
     heat_months: Vec<MonthSpan>,
+    /// Every year with reviews through this one, oldest first; empty
+    /// when there is only one.
+    heat_years: Vec<i32>,
+    /// The calendar year shown, null for the trailing view.
+    heat_year: Option<i32>,
 }
 
-async fn stats(State(state): State<AppState>, user: BearerUser) -> ApiResult<Stats> {
+#[derive(Deserialize)]
+struct StatsQuery {
+    year: Option<i32>,
+}
+
+async fn stats(
+    State(state): State<AppState>,
+    user: BearerUser,
+    Query(query): Query<StatsQuery>,
+) -> ApiResult<Stats> {
     let heavy = state.heavy(user.id)?;
-    let s = call(state.services.clone(), move |s| s.stats(&heavy, now_ms())).await?;
+    let s = call(state.services.clone(), move |s| {
+        s.stats(&heavy, now_ms(), query.year)
+    })
+    .await?;
     Ok(Json(Stats {
         reviews_30d: s.reviews_30d,
         retention_pct: s.retention_pct,
@@ -110,5 +129,7 @@ async fn stats(State(state): State<AppState>, user: BearerUser) -> ApiResult<Sta
                 weeks: m.weeks,
             })
             .collect(),
+        heat_years: s.heat_years,
+        heat_year: s.heat_year,
     }))
 }

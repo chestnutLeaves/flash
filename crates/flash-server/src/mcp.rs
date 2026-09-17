@@ -24,7 +24,7 @@ use crate::service::{now_ms, ReviewOrigin, ServiceError, Services};
 const INSTRUCTIONS: &str = "\
 Spaced-repetition flashcard server. Whenever the user asks to study, \
 review, practice, quiz, test, or drill their cards, call \
-start_study_session and follow the tool descriptions and responses — \
+start_study_session and follow the tool descriptions and responses, and \
 never quiz from conversation history, because only submit_review records \
 progress and drives the schedule.";
 
@@ -107,6 +107,13 @@ fn to_mcp_err(err: ServiceError) -> McpError {
     }
 }
 
+/// The user's deck by name, or the error every deck-naming tool shares.
+fn deck_named(s: &Services, user: UserId, name: &str) -> Result<DeckId, ServiceError> {
+    s.store()
+        .find_deck_by_name(user, name)?
+        .ok_or_else(|| ServiceError::Invalid(format!("no deck named '{name}'")))
+}
+
 async fn run<T, F>(services: &Services, f: F) -> Result<T, McpError>
 where
     T: Send + 'static,
@@ -174,12 +181,17 @@ pub struct CardFrontOut {
     pub card_id: i64,
     /// The question side; ask it and wait for the user's answer.
     pub front: String,
+    /// The question as it should be read aloud: a cloze gap is the word
+    /// "blank", a picture is described, a formula is named. Speak this
+    /// rather than `front` when talking.
+    pub spoken_front: String,
 }
 
 fn card_out(card: &crate::service::CardFront) -> CardFrontOut {
     CardFrontOut {
         card_id: card.card_id.0,
         front: card.front.clone(),
+        spoken_front: card.spoken_front.clone(),
     }
 }
 
@@ -213,6 +225,9 @@ pub struct SubmitOut {
 pub struct AnswerOut {
     /// The card's back (the answer).
     pub back: String,
+    /// The answer as it should be read aloud (a cloze card speaks the
+    /// missing word here). Speak this rather than `back` when talking.
+    pub spoken_back: String,
 }
 
 /// Session summary: total reviewed and counts by rating.
@@ -232,6 +247,8 @@ pub struct DeckOut {
     pub due: u32,
     /// New cards available today.
     pub r#new: u32,
+    /// Archived: kept whole but out of study; its counts are zero.
+    pub archived: bool,
 }
 
 #[derive(serde::Serialize, schemars::JsonSchema)]
@@ -583,11 +600,11 @@ impl FlashMcp {
 
     #[tool(
         description = "Start a study session. REQUIRED whenever the user asks \
-        to study, review, practice, quiz, test, or drill their cards — even \
+        to study, review, practice, quiz, test, or drill their cards, even \
         cards created moments ago in this chat. Do not quiz from memory: \
         only sessions record progress. Returns the first card's front \
         (ask it aloud and wait for the user's answer), how many cards are \
-        due, and grading_mode — follow its instruction exactly for the whole \
+        due, and grading_mode. Follow its instruction exactly for the whole \
         session. Internal fields (ids, counts) are never read aloud.",
         annotations(
             title = "Start study session",
@@ -619,12 +636,12 @@ impl FlashMcp {
     #[tool(
         description = "Record the user's result on a card and get the next \
         one. Grade STRICTLY against the card's back: facts, numbers, doses, \
-        and units must match precisely — an imprecise answer is 1 (Again), \
+        and units must match precisely. An imprecise answer is 1 (Again), \
         never 'close enough'; only phrasing may differ. 1=Again (wrong or \
         blank), 2=Hard (incomplete or hesitant), 3=Good (fully correct), \
         4=Easy (instant, perfect). State the exact answer on a miss, then \
         immediately ask next_card's front. A null next_card ends the \
-        session — wrap up briefly.",
+        session. Wrap up briefly.",
         annotations(
             title = "Submit review",
             read_only_hint = false,
@@ -677,11 +694,14 @@ impl FlashMcp {
         ctx: RequestContext<RoleServer>,
     ) -> Result<Json<AnswerOut>, McpError> {
         let user = authed_user(&ctx)?;
-        let back = run(&self.services, move |s| {
-            s.reveal(user, CardId(args.card_id))
+        let reveal = run(&self.services, move |s| {
+            s.reveal_card(user, CardId(args.card_id), None)
         })
         .await?;
-        Ok(Json(AnswerOut { back }))
+        Ok(Json(AnswerOut {
+            back: reveal.back,
+            spoken_back: reveal.spoken_back,
+        }))
     }
 
     #[tool(
@@ -714,7 +734,8 @@ impl FlashMcp {
     }
 
     #[tool(
-        description = "List the user's decks with due and new card counts.",
+        description = "List the user's decks with due and new card counts. \
+        Archived decks come last, with archived: true and zero counts.",
         annotations(
             title = "List decks",
             read_only_hint = true,
@@ -734,6 +755,7 @@ impl FlashMcp {
                 name: d.name.clone(),
                 due: d.due_count,
                 r#new: d.new_count,
+                archived: d.archived_at.is_some(),
             })
             .collect();
         Ok(Json(DecksOut { decks: rows }))
@@ -771,7 +793,7 @@ impl FlashMcp {
         description = "Create flashcards in a deck (created if missing). \
         Ideal for turning pasted notes into cards: batch all cards into one \
         call. Keep fronts a single clear question and backs a concise \
-        answer — cards are asked one at a time in study sessions.",
+        answer. Cards are asked one at a time in study sessions.",
         annotations(
             title = "Create cards",
             read_only_hint = false,
@@ -1061,6 +1083,59 @@ impl FlashMcp {
                     pick(args.reviews_per_day, current.reviews_per_day),
                 )
             }
+        })
+        .await?;
+        Ok(Json(SavedOut { saved: true }))
+    }
+
+    #[tool(
+        description = "Archive a deck the user is done with (an exam passed): \
+        every card, its media and its review history stay, but the deck \
+        leaves the study queue and the due counts, and start_study_session \
+        on it finds nothing. Nothing is deleted, so no confirmation is \
+        needed; unarchive_deck reverses it. Cards can still be added to \
+        an archived deck by name.",
+        annotations(
+            title = "Archive deck",
+            read_only_hint = false,
+            destructive_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn archive_deck(
+        &self,
+        Parameters(args): Parameters<DeckNameArgs>,
+        ctx: RequestContext<RoleServer>,
+    ) -> Result<Json<SavedOut>, McpError> {
+        let user = authed_user(&ctx)?;
+        run(&self.services, move |s| {
+            let id = deck_named(&s, user, &args.deck)?;
+            s.archive_deck(user, id, now_ms())
+        })
+        .await?;
+        Ok(Json(SavedOut { saved: true }))
+    }
+
+    #[tool(
+        description = "Put an archived deck back into study. Its cards come \
+        back with the review history they had, so whatever came due while \
+        it was archived is due now, within the daily limits.",
+        annotations(
+            title = "Unarchive deck",
+            read_only_hint = false,
+            destructive_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn unarchive_deck(
+        &self,
+        Parameters(args): Parameters<DeckNameArgs>,
+        ctx: RequestContext<RoleServer>,
+    ) -> Result<Json<SavedOut>, McpError> {
+        let user = authed_user(&ctx)?;
+        run(&self.services, move |s| {
+            let id = deck_named(&s, user, &args.deck)?;
+            s.unarchive_deck(user, id)
         })
         .await?;
         Ok(Json(SavedOut { saved: true }))

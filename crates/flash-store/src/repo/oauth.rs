@@ -25,7 +25,7 @@ pub struct CodeGrant {
 /// Result of trying to consume an authorization code.
 pub enum CodeConsume {
     Fresh(CodeGrant),
-    /// The code was already used — OAuth 2.1 requires revoking the grant.
+    /// The code was already used. OAuth 2.1 requires revoking the grant.
     Replayed {
         client_id: String,
         user_id: UserId,
@@ -438,7 +438,7 @@ impl Store {
             return Ok(None);
         };
         // Refresh is the one per-device write worth recording as "last
-        // used" — every request would be too chatty for a single
+        // used". Every request would be too chatty for a single
         // SQLite connection.
         tx.execute(
             "UPDATE oauth_tokens
@@ -458,7 +458,7 @@ impl Store {
         Ok(Some(grant))
     }
 
-    /// Revokes every token for a (client, user) grant — used on code replay.
+    /// Revokes every token for a (client, user) grant, used on code replay.
     pub fn revoke_grant(&self, client_id: &str, user: UserId, now_ms: i64) -> Result<usize> {
         Ok(self.conn().execute(
             "UPDATE oauth_tokens SET revoked_at = ?1

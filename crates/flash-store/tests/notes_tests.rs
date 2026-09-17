@@ -47,6 +47,7 @@ fn save<'a>(
         generated,
         tags,
         cap,
+        ai_job_id: None,
         now_ms: NOW,
     }
 }
@@ -194,8 +195,12 @@ fn editing_a_cloze_note_keeps_scheduling_on_surviving_slots() {
     reviewed.due_ms = NOW + 86_400_000;
     reviewed.last_review_ms = Some(NOW);
     reviewed.reps = 3;
-    store.update_card_state(user, ids[0], &reviewed).unwrap();
-    store.update_card_state(user, ids[2], &reviewed).unwrap();
+    store
+        .set_card_states(
+            user,
+            &[(ids[0], reviewed.clone()), (ids[2], reviewed.clone())],
+        )
+        .unwrap();
 
     // Drop c2, reword c1, add c4.
     let text2 = "{{c1::A2}} B {{c3::C}} {{c4::D}}";

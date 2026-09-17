@@ -23,6 +23,26 @@ use flash_server::testing::{send, AppBuilder};
 /// tree that has them).
 const NOT_A_REQUEST: &[(&str, &str)] = &[
     (
+        "HealthReply",
+        "the voice sidecar's own answer, read by the server over a client whose reply body is capped (tts::http REPLY_LIMIT); nothing a user sends",
+    ),
+    (
+        "VoicesReply",
+        "the voice sidecar's voice list, read under the same capped client; the server's static table decides what is offered",
+    ),
+    (
+        "VoiceEntry",
+        "one id in the sidecar's voice list, compared against the static table and never stored",
+    ),
+    (
+        "SynthReply",
+        "the voice sidecar's synthesis: the reply body is capped, and the decoded audio is bounded again (MIN_AUDIO..MAX_AUDIO) before it is stored",
+    ),
+    (
+        "ErrorReply",
+        "the sidecar's refusal sentence, logged at info level from a capped reply body",
+    ),
+    (
         "PendingImport",
         "the parked preview the server wrote itself; its rows come from the parser, whose caps bound them",
     ),
@@ -53,6 +73,29 @@ const NOT_A_REQUEST: &[(&str, &str)] = &[
     (
         "MediaMeta",
         "one media reference of a share snapshot, copied from a media row the media module had already capped",
+    ),
+    // The model's replies: read from a body the provider caps at its
+    // reply limit, never from a client. What is stored from them passes
+    // `ai::validate`, which bounds every field to the editor's limits.
+    (
+        "Extraction",
+        "the model's reading of a source; the provider caps the reply body, and `ai::validate::extraction` bounds the figures before it is stored",
+    ),
+    (
+        "FigureRef",
+        "one figure of the model's reading; its caption is cut to the title bound by `ai::validate::extraction`",
+    ),
+    (
+        "DraftNote",
+        "a card as the model wrote it; `ai::validate::drafts` bounds the sides, the tags and the figure list before anything is stored",
+    ),
+    (
+        "Revision",
+        "the model's answer to a message of the review's thread; `ai::validate::drafts` bounds the cards and `ai::validate::reply_sentence` the sentence before either is stored",
+    ),
+    (
+        "SpokenTurn",
+        "the model's reading of a spoken turn (the verdict or the answer to a question), capped by the provider's reply limit and spoken back once, never stored",
     ),
 ];
 

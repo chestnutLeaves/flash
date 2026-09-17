@@ -8,7 +8,7 @@ pub mod scheduler;
 pub mod settings;
 
 pub use card::{validate_card_text, CardText, MAX_SIDE_LEN};
-pub use ids::{CardId, DeckId, MediaId, NoteId, SessionId, UserId};
+pub use ids::{AiDraftId, AiJobId, AiSourceId, CardId, DeckId, MediaId, NoteId, SessionId, UserId};
 pub use rating::{Phase, Rating};
 pub use scheduler::{CardState, ReviewOutcome, Scheduler, SchedulerError};
-pub use settings::{GradingMode, UserSettings};
+pub use settings::{GradingMode, UserSettings, VoiceApply, VoiceSettings, VoiceSettingsPatch};

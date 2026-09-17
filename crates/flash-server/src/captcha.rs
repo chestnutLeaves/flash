@@ -3,7 +3,7 @@
 //! extension; no verifier means no captcha at all (dev / self-host).
 
 pub trait CaptchaVerifier: Send + Sync {
-    /// True iff the widget token is valid. Transport errors are Err —
+    /// True iff the widget token is valid. Transport errors are Err:
     /// callers fail closed (retrying is cheap; outages are rare).
     fn verify(&self, token: &str, remote_ip: Option<&str>) -> Result<bool, String>;
 }

@@ -11,7 +11,7 @@ basic-and-reversed, rich HTML structure, nested subdecks, tags."""
 import hashlib, json, random, sqlite3, struct, sys, time, zipfile, os, tempfile
 import zstandard
 
-# Two real decks to lift one image and one audio clip from — any .apkg
+# Two real decks to lift one image and one audio clip from: any .apkg
 # you have the right to use. Point the env vars at them.
 SRC_IMAGE_DECK = os.path.expanduser(os.environ.get("TORTURE_IMAGE_DECK", "~/Downloads/image-deck.apkg"))
 SRC_AUDIO_DECK = os.path.expanduser(os.environ.get("TORTURE_AUDIO_DECK", "~/Downloads/audio-deck.apkg"))
@@ -92,7 +92,7 @@ NOTETYPES = {
     NT_HINT: ("Basic (hint)", 0, ["Front", "Back", "Extra"],
               [("Card 1", "{{Front}}",
                 "{{FrontSide}}<hr id=answer>{{Back}}<br>{{hint:Extra}}")]),
-    # Five fields, filters, conditionals, template specials — and a second
+    # Five fields, filters, conditionals, template specials, and a second
     # template whose front renders empty (conditional on a blank field).
     NT_VOCAB: ("Vocab (advanced)", 0, ["Word", "Reading", "Meaning", "Example", "Missing"],
                [("Recognition",
@@ -147,8 +147,8 @@ NOTES = [
       "<li>Bundle of His</li><li>Purkinje fibers</li></ul><img src=\"conduction.jpg\">"],
      " cardio physiology ",
      # History includes junk a real collection can carry: an invalid ease
-     # (9), a cram review (type 3), and a manual reschedule (type 4) —
-     # all must be skipped by the replay, keeping the five real reviews.
+     # (9), a cram review (type 3), and a manual reschedule (type 4). All
+     # must be skipped by the replay, keeping the five real reviews.
      [(0, DECK_CARDIO, 2, [(40, 1, 0), (40, 3, 0), (35, 9, 1), (34, 2, 3),
                            (33, 3, 1), (20, 4, 1), (10, 0, 4), (6, 3, 1)]),
       (1, DECK_CARDIO, 0, [])]),
@@ -194,7 +194,7 @@ NOTES = [
      " pharm renal ",
      [(0, DECK_CARDIO, 0, [])]),
     # ---- hostile / edge content ----
-    # XSS probe: scripts, handlers, javascript: urls, iframes — all must die.
+    # XSS probe: scripts, handlers, javascript: urls, iframes. All must die.
     (NT_BASIC,
      ["XSS probe <script>alert('front')</script><img src=x onerror=\"alert(1)\"> "
       "— visible text survives",
@@ -204,7 +204,7 @@ NOTES = [
      " security ",
      [(0, DECK_CARDIO, 0, [])]),
     # Unicode hell: CJK, RTL Arabic, Cyrillic, emoji, combining marks,
-    # fullwidth chars — in the emoji-named subdeck.
+    # fullwidth chars, in the emoji-named subdeck.
     (NT_BASIC,
      ["心筋梗塞 — الاحتشاء القلبي الحاد — инфаркт миокарда 🫀",
       "étude naïve — ｚｅｎｋａｋｕ — ‏עברית‏ — é combining"],
@@ -255,7 +255,7 @@ NOTES = [
      " media imageonly ",
      [(0, DECK_MURMURS, 0, [])]),
     # 12k-char back (over the 10k side cap) with multi-byte chars near the
-    # boundary — truncation must not panic or split a char.
+    # boundary. Truncation must not panic or split a char.
     (NT_BASIC,
      ["Marathon field: what follows is deliberately oversized",
       ("Pathophysiologie détaillée — très long résumé clinique. " * 220)],
@@ -392,8 +392,8 @@ build_collection(tmp)
 zc = zstandard.ZstdCompressor(level=3)
 
 # "heart sounds.mp3" shares bytes with murmur.mp3 on purpose: two names,
-# one blob — exercises content-addressed dedupe. Its space-in-name form is
-# referenced percent-encoded from the field.
+# one blob, which exercises content-addressed dedupe. Its space-in-name
+# form is referenced percent-encoded from the field.
 media_files = [("conduction.jpg", IMG), ("murmur.mp3", MP3),
                ("heart sounds.mp3", MP3)]
 entries = b""
