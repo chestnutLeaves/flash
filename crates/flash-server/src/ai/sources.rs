@@ -192,13 +192,15 @@ pub fn classify_upload(filename: &str, bytes: &[u8]) -> Result<Classified, Strin
 pub fn decode_text(bytes: &[u8], mime: &str) -> Result<String, String> {
     let text = if bytes.starts_with(&[0xFF, 0xFE]) || bytes.starts_with(&[0xFE, 0xFF]) {
         let big_endian = bytes[0] == 0xFE;
-        let units: Vec<u16> = bytes[2..]
-            .chunks_exact(2)
-            .map(|pair| {
+        // A trailing odd byte is dropped, as chunks_exact dropped it.
+        let (pairs, _) = bytes[2..].as_chunks::<2>();
+        let units: Vec<u16> = pairs
+            .iter()
+            .map(|&pair| {
                 if big_endian {
-                    u16::from_be_bytes([pair[0], pair[1]])
+                    u16::from_be_bytes(pair)
                 } else {
-                    u16::from_le_bytes([pair[0], pair[1]])
+                    u16::from_le_bytes(pair)
                 }
             })
             .collect();
