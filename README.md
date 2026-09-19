@@ -77,10 +77,12 @@ docker run --rm -v flash-data:/data -v "$PWD":/backup debian:bookworm-slim \
 docker compose start flash
 ```
 
-`latest` follows every release. `ghcr.io/flash-cards/flash:0.2` takes
-patch releases only and `:0.2.0` never moves; pin one of those in
+`latest` follows every release. `ghcr.io/flash-cards/flash:0.3` takes
+patch releases only and `:0.3.0` never moves; pin one of those in
 `docker-compose.yml` if you would rather choose when to move. What each
-version changed is in [CHANGELOG.md](CHANGELOG.md). Without Docker the
+version changed is in [CHANGELOG.md](CHANGELOG.md), and a release that
+changes the MCP tools says so there: refresh the connector's tool
+definitions in each AI client after that upgrade. Without Docker the
 same holds for `FLASH_DATA_DIR`: keep the directory, replace the binary,
 start it.
 
@@ -116,7 +118,8 @@ scoped to your account.
 
 Once connected, say "quiz me on my pharmacology deck" and follow along.
 The web app at `/` is where you import decks, edit cards and read your
-stats.
+stats. What the tools take and return, for anyone building a client, is
+in [the MCP contract](crates/flash-server/MCP.md).
 
 ## Configuration
 
