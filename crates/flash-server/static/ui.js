@@ -175,7 +175,11 @@ document.addEventListener("DOMContentLoaded", function () {
 // Delegated: boosted forms are re-rendered by htmx swaps, and a listener
 // bound per form at load would be gone after the first one.
 document.addEventListener("submit", function (e) {
-  var form = e.target.closest("form[method=\"post\"]:not([hx-post])");
+  // A form marked `data-instant` is answered by this page at once, with no
+  // request (the deck lists' fold and "Show archived"): there is nothing
+  // to wait for, so it never reads "Working…", which would also replace
+  // the fold's drawn chevron with a word.
+  var form = e.target.closest("form[method=\"post\"]:not([hx-post]):not([data-instant])");
   if (!form) return;
   var boosted = form.hasAttribute("hx-boost");
   if (!boosted) {
@@ -282,4 +286,145 @@ document.addEventListener("htmx:afterRequest", function (e) {
     }
   });
   document.addEventListener("htmx:afterSwap", function () { toastBadges(); });
+})();
+
+// The theme picker: a theme applies the moment it is picked. The page
+// repaints at once, and the cookie that makes the next load match is set
+// by the same post the form makes, sent in the background with nothing
+// waiting on it (that cookie is the server's alone to write). The Save
+// button is for a browser without script, and is put away here.
+(function () {
+  document.addEventListener("DOMContentLoaded", function () {
+    var form = document.querySelector("[data-theme-form]");
+    if (!form) return;
+    var save = form.querySelector('button[type="submit"]');
+    if (save) save.hidden = true;
+    form.querySelector('select[name="theme"]').addEventListener("change", function (e) {
+      document.documentElement.setAttribute("data-theme", e.target.value);
+      fetch(form.action, {
+        method: "POST",
+        body: new URLSearchParams(new FormData(form)),
+        credentials: "same-origin",
+        redirect: "manual",
+      }).catch(function () { /* the page already changed; the next pick retries */ });
+    });
+  });
+})();
+
+// A deck's page: the "Subdecks" button in the page head opens and closes
+// the panel under it. Closed on every load and never remembered. The head
+// can be swapped in place (unarchiving a subdeck brings the page's own deck
+// back), which brings a fresh button, so the button is told the panel's
+// state again after a swap.
+(function () {
+  function sync() {
+    var panel = document.getElementById("subdecks");
+    var button = document.querySelector("[data-subdecks-toggle]");
+    if (panel && button) button.setAttribute("aria-expanded", panel.hidden ? "false" : "true");
+  }
+  document.addEventListener("click", function (e) {
+    var button = e.target.closest && e.target.closest("[data-subdecks-toggle]");
+    var panel = document.getElementById("subdecks");
+    if (!button || !panel) return;
+    e.preventDefault(); // without script it is a link to the panel
+    panel.hidden = !panel.hidden;
+    sync();
+    if (!panel.hidden) {
+      var field = panel.querySelector('input[name="name"]');
+      if (field && !panel.querySelector("tr[data-deck]")) field.focus();
+    }
+  });
+  // It is a link that acts as a button, so Space presses it as Enter does.
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== " " || !e.target.matches || !e.target.matches("[data-subdecks-toggle]")) return;
+    e.preventDefault();
+    e.target.click();
+  });
+  document.addEventListener("htmx:afterSwap", sync);
+})();
+
+// Deck lists: showing archived decks and folding a deck shut. Neither
+// changes anything on the server, so neither makes a request: every row is
+// already in the page, a click shows or hides rows at once, and the choice
+// goes in a cookie so the server renders the next load, a refresh
+// included, the way it was left (no flash of the other state, which is
+// what keeping it in localStorage would cost). Every deck starts open; the
+// cookie names only the ones folded shut. The forms still post without
+// script. The rules here are `deck_list_rows` in web.rs, and the cookie
+// attributes are `pref_cookie_header` in auth.rs.
+(function () {
+  var FOLDED = "flash-decks-folded";
+  var ARCHIVED = "flash-decks-archived";
+  var MAX_FOLDED = 200;
+
+  function setCookie(name, value) {
+    document.cookie = name + "=" + value + "; Path=/; SameSite=Lax; Max-Age=" +
+      (value ? 31536000 : 0) + (location.protocol === "https:" ? "; Secure" : "");
+  }
+
+  function foldedIds() {
+    var m = document.cookie.match(new RegExp("(?:^|; )" + FOLDED + "=([^;]*)"));
+    return (m && m[1] ? m[1].split(".") : []).filter(function (id) { return /^[1-9]\d*$/.test(id); });
+  }
+
+  // Shows and hides the rows of one table from their depth and state.
+  function lay(tree) {
+    var showArchived = tree.getAttribute("data-show-archived") !== "0";
+    var rows = Array.prototype.slice.call(tree.querySelectorAll("tr[data-deck]"));
+    var showable = rows.filter(function (row) {
+      return showArchived || !row.hasAttribute("data-archived");
+    });
+    rows.forEach(function (row) { row.hidden = true; });
+    var foldedAt = null;
+    showable.forEach(function (row, i) {
+      var depth = Number(row.getAttribute("data-depth"));
+      var next = showable[i + 1];
+      var hasSubdecks = !!next && Number(next.getAttribute("data-depth")) > depth;
+      var shut = row.hasAttribute("data-collapsed");
+      var fold = row.querySelector("[data-deck-fold]");
+      if (fold) {
+        fold.classList.toggle("is-off", !hasSubdecks);
+        var button = fold.querySelector("button");
+        button.setAttribute("aria-expanded", shut ? "false" : "true");
+        button.title = (shut ? "Show" : "Hide") + " subdecks";
+        fold.querySelector('input[name="collapsed"]').value = shut ? "0" : "1";
+      }
+      // A fold ends at the next deck that is not under the folded one.
+      if (foldedAt !== null && depth <= foldedAt) foldedAt = null;
+      if (foldedAt !== null) return;
+      row.hidden = false;
+      if (hasSubdecks && shut) foldedAt = depth;
+    });
+    var none = tree.parentNode.querySelector("[data-all-archived]");
+    if (none) {
+      none.hidden = showable.length > 0;
+      tree.hidden = showable.length === 0;
+    }
+  }
+
+  document.addEventListener("submit", function (e) {
+    var form = e.target;
+    if (form.matches && form.matches("[data-deck-fold]")) {
+      e.preventDefault();
+      var row = form.closest("tr[data-deck]");
+      var id = row.getAttribute("data-deck");
+      var shut = !row.hasAttribute("data-collapsed");
+      row.toggleAttribute("data-collapsed", shut);
+      var ids = foldedIds().filter(function (other) { return other !== id; });
+      if (shut) ids.push(id);
+      ids.sort(function (a, b) { return a - b; });
+      setCookie(FOLDED, ids.slice(0, MAX_FOLDED).join("."));
+      lay(form.closest("[data-deck-tree]"));
+    } else if (form.matches && form.matches("[data-show-archived-form]")) {
+      var tree = document.querySelector("#decks-main [data-deck-tree]");
+      if (!tree) return; // nothing to lay out here: let the form post
+      e.preventDefault();
+      var show = tree.getAttribute("data-show-archived") === "0";
+      tree.setAttribute("data-show-archived", show ? "1" : "0");
+      setCookie(ARCHIVED, show ? "1" : "");
+      form.querySelector('input[name="show"]').value = show ? "0" : "1";
+      form.querySelector("button").textContent = show ? "Hide archived" : "Show archived";
+      lay(tree);
+    }
+  });
 })();

@@ -58,7 +58,19 @@ impl Store {
     ) -> Result<(NoteId, Vec<CardId>)> {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
-        require_deck(&tx, user, deck)?;
+        let result = self.create_note_tx(&tx, user, deck, save)?;
+        tx.commit()?;
+        Ok(result)
+    }
+
+    pub(crate) fn create_note_tx(
+        &self,
+        tx: &rusqlite::Transaction<'_>,
+        user: UserId,
+        deck: DeckId,
+        save: &NoteSave<'_>,
+    ) -> Result<(NoteId, Vec<CardId>)> {
+        require_deck(tx, user, deck)?;
         if let Some(job) = save.ai_job_id {
             let owned: bool = tx.query_row(
                 "SELECT EXISTS(SELECT 1 FROM ai_jobs WHERE id = ?1 AND user_id = ?2)",
@@ -84,8 +96,7 @@ impl Store {
             ],
         )?;
         let note = NoteId(tx.last_insert_rowid());
-        let ids = replace_note_cards(&tx, user, note, deck, save)?;
-        tx.commit()?;
+        let ids = replace_note_cards(tx, user, note, deck, save)?;
         Ok((note, ids))
     }
 
@@ -98,6 +109,18 @@ impl Store {
     ) -> Result<Vec<CardId>> {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
+        let result = self.update_note_tx(&tx, user, note, save)?;
+        tx.commit()?;
+        Ok(result)
+    }
+
+    pub(crate) fn update_note_tx(
+        &self,
+        tx: &rusqlite::Transaction<'_>,
+        user: UserId,
+        note: NoteId,
+        save: &NoteSave<'_>,
+    ) -> Result<Vec<CardId>> {
         let deck: Option<i64> = tx
             .query_row(
                 "SELECT deck_id FROM notes WHERE id = ?1 AND user_id = ?2 AND deleted_at IS NULL",
@@ -120,8 +143,7 @@ impl Store {
                 user.raw(),
             ],
         )?;
-        let ids = replace_note_cards(&tx, user, note, DeckId(deck), save)?;
-        tx.commit()?;
+        let ids = replace_note_cards(tx, user, note, DeckId(deck), save)?;
         Ok(ids)
     }
 
@@ -220,6 +242,23 @@ impl Store {
     ) -> Result<NoteId> {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
+        let result = self
+            .adopt_card_into_note_tx(&tx, user, card, note_type, front_html, back_html, now_ms)?;
+        tx.commit()?;
+        Ok(result)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn adopt_card_into_note_tx(
+        &self,
+        tx: &rusqlite::Transaction<'_>,
+        user: UserId,
+        card: CardId,
+        note_type: NoteType,
+        front_html: &SanitizedHtml,
+        back_html: &SanitizedHtml,
+        now_ms: i64,
+    ) -> Result<NoteId> {
         type SeedRow = (i64, Option<i64>, Option<String>, Option<i64>);
         let row: Option<SeedRow> = tx
             .query_row(
@@ -269,7 +308,6 @@ impl Store {
                 )?;
             }
         }
-        tx.commit()?;
         Ok(NoteId(note))
     }
 }

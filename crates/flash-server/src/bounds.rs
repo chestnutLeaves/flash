@@ -13,8 +13,9 @@
 
 use serde::de::{Deserialize, Deserializer, Error};
 
-/// Per-field byte limits.
-pub const DECK_NAME: usize = 200;
+/// Per-field byte limits. A deck's name is its whole path, so the store
+/// holds a subdeck to the same bound.
+pub const DECK_NAME: usize = flash_core::deck_path::MAX_LEN;
 pub const DECK_DESCRIPTION: usize = 2_000;
 /// The store refuses longer tags and larger lists on every write path;
 /// the edge refuses them first so the sentence names the field.

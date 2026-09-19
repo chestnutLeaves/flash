@@ -331,7 +331,10 @@ mod tests {
             ConvertError::Failed { status, stderr } => {
                 assert!(status.contains('3'), "{status}");
                 assert_eq!(stderr.len(), STDERR_EXCERPT);
-                assert!(stderr.starts_with("eeee"));
+                // Perl can prepend a locale warning on Windows when the
+                // inherited locale is unavailable. The bounded excerpt must
+                // still reach the flood itself, not just a startup error.
+                assert!(stderr.ends_with("eeee"), "excerpt did not reach the flood");
             }
             other => panic!("{other}"),
         }

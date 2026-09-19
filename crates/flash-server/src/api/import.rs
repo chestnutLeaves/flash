@@ -36,8 +36,16 @@ struct Preview {
     total: usize,
     file_name: String,
     file_size_bytes: usize,
+    /// Prefill for the one destination, and the line about decks that
+    /// will merge into it: what a client that does not send `keep_decks`
+    /// shows.
     deck: String,
     deck_note: Option<String>,
+    /// The decks the file names, in its order. More than one, and a client
+    /// can send `keep_decks` to keep them, with `deck` as an optional deck
+    /// to put them under, prefilled from `parent`.
+    file_decks: Vec<FileDeck>,
+    parent: String,
     warnings: u32,
     sample: Vec<SampleRow>,
     messages: Vec<String>,
@@ -45,6 +53,13 @@ struct Preview {
     progress_reviews: usize,
     settings_desc: Option<String>,
     colored_cards: usize,
+}
+
+#[derive(Serialize)]
+struct FileDeck {
+    /// The whole path, as the file names it.
+    name: String,
+    cards: usize,
 }
 
 #[derive(Serialize)]
@@ -118,6 +133,12 @@ async fn preview(
         file_size_bytes: preview.file_size_bytes,
         deck: preview.deck,
         deck_note: preview.deck_note,
+        file_decks: preview
+            .file_decks
+            .into_iter()
+            .map(|(name, cards)| FileDeck { name, cards })
+            .collect(),
+        parent: preview.parent,
         warnings: preview.warnings,
         sample: preview
             .sample
@@ -136,8 +157,15 @@ async fn preview(
 struct CommitBody {
     #[serde(deserialize_with = "crate::bounds::token")]
     token: String,
-    #[serde(deserialize_with = "crate::bounds::deck_name")]
+    /// Where the cards go; with `keep_decks`, the deck to put the file's
+    /// decks under, which may be blank.
+    #[serde(default, deserialize_with = "crate::bounds::deck_name")]
     deck: String,
+    /// Keep the decks a file names instead of merging them into `deck`.
+    /// Absent from a client built before decks nested, which gets the
+    /// merge it was built around.
+    #[serde(default)]
+    keep_decks: bool,
     #[serde(default)]
     progress: bool,
     #[serde(default)]
@@ -166,6 +194,7 @@ async fn commit(
     let opts = import_flow::CommitOptions {
         token: body.token,
         deck: body.deck,
+        keep_decks: body.keep_decks,
         progress: body.progress,
         settings: body.settings,
         clean_colors: body.colors.as_deref() == Some("clean"),

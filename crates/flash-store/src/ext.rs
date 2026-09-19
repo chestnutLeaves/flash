@@ -17,6 +17,15 @@ use crate::Result;
 
 pub use crate::exec_expect_row;
 pub use crate::repo::cards::{attach_tag, card_tags, require_deck, write_card_extras};
+/// A deck's name is its path, so a deck is also the decks under it. An
+/// extension that acts on "a deck" reads the subtree with `deck_subtree`,
+/// looks a path up with `find_deck_path`, and makes decks with
+/// `create_deck_path`, which holds them to the rules every other way of
+/// making a deck meets (and makes the decks on the way, so a path made
+/// after one under it is found, not made twice).
+pub use crate::repo::cards::{
+    find_deck as find_deck_path, insert_deck_path_tx as create_deck_path, subtree as deck_subtree,
+};
 
 /// One schema step: a unique name (recorded once applied) and the SQL
 /// that runs, in its own transaction, the first time the extension opens

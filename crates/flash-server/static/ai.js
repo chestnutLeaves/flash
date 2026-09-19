@@ -34,10 +34,40 @@
     if (!window.confirm(form.dataset.genConfirm)) e.preventDefault();
   });
 
+  // ---- the deck switchers' "new deck" entry ----
+
+  // Deck 0 is "+ New deck…", and the name beside it belongs to that
+  // choice alone: it shows and is required only while 0 is chosen. The
+  // listener sits on the document because the review's toolbar is
+  // re-rendered out of band, and one bound to the select itself would
+  // be gone after the first swap.
+  function syncNewDeck(select, focus) {
+    var parent = select.parentNode;
+    var field = parent ? parent.querySelector("[data-gen-newdeck]") : null;
+    if (!field) return;
+    var input = field.querySelector("[data-gen-deck-name]");
+    var wanted = select.value === "0";
+    field.hidden = !wanted;
+    if (!input) return;
+    input.required = wanted;
+    if (wanted && focus) input.focus();
+  }
+
+  function syncEveryNewDeck() {
+    var selects = document.querySelectorAll("[data-gen-deck]");
+    for (var i = 0; i < selects.length; i++) syncNewDeck(selects[i], false);
+  }
+
+  document.addEventListener("change", function (e) {
+    var select = e.target && e.target.closest && e.target.closest("[data-gen-deck]");
+    if (select) syncNewDeck(select, true);
+  });
+
   document.addEventListener("DOMContentLoaded", function () {
     var form = document.getElementById("gen-form");
     if (form) initComposer(form);
     if (document.getElementById("thread")) initThread();
+    syncEveryNewDeck();
   });
 
   // ---- the review's thread ----
@@ -116,11 +146,14 @@
     // chosen on the toolbar is carried across, and an editor left open
     // over a draft that may no longer exist is closed with a word.
     var deckChoice = null;
+    var deckTyped = null;
     document.addEventListener("htmx:oobBeforeSwap", function (e) {
       var target = e.detail && e.detail.target;
       if (!target || target.id !== "review") return;
       var select = document.getElementById("review-deck");
       deckChoice = select ? select.value : null;
+      var name = document.getElementById("review-deck-name");
+      deckTyped = name ? name.value : null;
     });
     document.addEventListener("htmx:oobAfterSwap", function (e) {
       var target = e.detail && e.detail.target;
@@ -132,6 +165,12 @@
         }
       }
       deckChoice = null;
+      // The fresh markup brings an empty name field: what was typed
+      // goes back in, and the field is opened again if it is the choice.
+      var name = document.getElementById("review-deck-name");
+      if (name && deckTyped) name.value = deckTyped;
+      deckTyped = null;
+      syncEveryNewDeck();
       var dialog = document.getElementById("editor-dialog");
       if (dialog && dialog.firstElementChild) {
         dialog.innerHTML = "";
@@ -188,6 +227,8 @@
       undoBtn: form.querySelector("[data-gen-undo-btn]"),
       btn: document.getElementById("gen-btn"),
       btnHint: form.querySelector("[data-gen-btn-hint]"),
+      deck: form.querySelector("[data-gen-deck]"),
+      deckName: form.querySelector("[data-gen-deck-name]"),
       template: document.getElementById("gen-chip")
     };
     var state = {
@@ -664,6 +705,11 @@
       ui.summary.dataset.allowed = allowed ? "true" : "false";
     }
 
+    // "+ New deck…" with nothing typed has nowhere to put the cards.
+    function deckUnnamed() {
+      return !!(ui.deck && ui.deck.value === "0" && (!ui.deckName || !ui.deckName.value.trim()));
+    }
+
     function syncGenerate() {
       if (!ui.btn) return;
       var ready = 0, pending = 0, refused = 0;
@@ -673,15 +719,17 @@
         else pending++;
       });
       var busy = !!form.dataset.genBusy;
+      var unnamed = deckUnnamed();
       var allowed = ready > 0 && !pending && !refused && state.pf && state.pf.allowed !== false;
-      ui.btn.disabled = !(allowed && !busy);
+      ui.btn.disabled = !(allowed && !busy && !unnamed);
       if (!ui.btnHint) return;
       if (busy) ui.btnHint.textContent = "Wait for the running generation to finish.";
-      else if (!state.items.length) ui.btnHint.textContent = "Attach something to read first. Reading is free; only writing the cards uses a generation.";
+      else if (!state.items.length) ui.btnHint.textContent = "Attach something to read first.";
       else if (pending) ui.btnHint.textContent = "Uploading…";
       else if (refused) ui.btnHint.textContent = "Remove what can't be read, then generate.";
       else if (state.pf && state.pf.allowed === false) ui.btnHint.textContent = state.pf.reason || "";
-      else if (allowed) ui.btnHint.textContent = "Uses 1 generation. You'll see every card before any of it joins the deck.";
+      else if (unnamed) ui.btnHint.textContent = "Name the new deck.";
+      else if (allowed) ui.btnHint.textContent = "You'll see every card before any of it joins the deck.";
       else ui.btnHint.textContent = "Checking…";
     }
 
@@ -719,6 +767,13 @@
     // A drop that misses the composer must not open the file in the tab.
     document.addEventListener("dragover", function (e) { if (hasFiles(e)) e.preventDefault(); });
     document.addEventListener("drop", function (e) { if (hasFiles(e)) e.preventDefault(); });
+
+    // ---- the deck ----
+
+    // Choosing "+ New deck…" or typing its name moves the button
+    // between disabled and ready; the reveal itself is the document's.
+    if (ui.deck) ui.deck.addEventListener("change", syncGenerate);
+    if (ui.deckName) ui.deckName.addEventListener("input", syncGenerate);
 
     // ---- the picker and the link row ----
 

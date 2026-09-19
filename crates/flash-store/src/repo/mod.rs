@@ -1,6 +1,7 @@
 pub mod ai;
 pub mod auth;
 pub mod cards;
+pub mod mcp;
 pub mod media;
 pub mod notes;
 pub mod oauth;

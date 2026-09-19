@@ -163,10 +163,17 @@ async fn the_generate_page_offers_every_input_this_server_reads() {
     let decks = get_page(&p, "/decks").await.text();
     assert!(decks.contains("href=\"/generate\""), "{decks}");
     let deck = get_page(&p, &format!("/decks/{}", p.deck.0)).await.text();
+    // On a deck's page it is a quiet link across from "Add a card", named
+    // as the deck list names it, and not a button in the page head.
     assert!(
-        deck.contains(&format!("/decks/{}/generate", p.deck.0)),
+        deck.contains(&format!(
+            "<a class=\"small muted\" href=\"/decks/{}/generate\">Generate</a>",
+            p.deck.0
+        )),
         "{deck}"
     );
+    let head = &deck[deck.find("page-head").unwrap()..deck.find("Add a card").unwrap()];
+    assert!(!head.contains("/generate"), "{head}");
 }
 
 #[tokio::test]
@@ -195,7 +202,7 @@ async fn a_server_without_a_model_has_no_generation_pages() {
     let decks = send(&t.app, get("/decks", Some(&cookie))).await.text();
     assert!(!decks.contains("/generate"), "{decks}");
     let page = send(&t.app, get(&format!("/decks/{}", deck.0), Some(&cookie))).await;
-    assert!(!page.text().contains("Generate cards"));
+    assert!(!page.text().contains("/generate"), "{}", page.text());
 }
 
 // ---- the source and its reading ----
@@ -288,6 +295,147 @@ async fn the_pages_own_multipart_body_carries_a_file_or_text() {
     assert_eq!(r.json()["filename"], "notes.pdf");
 }
 
+// ---- a deck named on the way in ----
+
+/// Uploads one source and posts the composer with whatever deck fields
+/// are given, so each case below differs only in those.
+async fn generate_into(p: &Pages, deck_fields: &str) -> Reply {
+    let r = post_form(p, "/ai/sources", &format!("text={}", enc(PASSAGE))).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text());
+    let source = source_id(&r.text());
+    post_form(
+        p,
+        "/ai/jobs",
+        &format!("source_ids={source}&{deck_fields}&instruction="),
+    )
+    .await
+}
+
+fn deck_named(p: &Pages, name: &str) -> Option<DeckId> {
+    p.t.store.find_deck_by_name(p.user, name).unwrap()
+}
+
+fn job_deck(p: &Pages, location: &str) -> Option<DeckId> {
+    let job: i64 = location.trim_start_matches("/ai/jobs/").parse().unwrap();
+    p.t.services.ai_job(p.user, AiJobId(job)).unwrap().deck_id
+}
+
+#[tokio::test]
+async fn the_deck_switcher_offers_a_new_deck_and_a_field_to_name_it() {
+    let p = pages("new-deck-markup");
+    let html = get_page(&p, "/generate").await.text();
+    assert!(html.contains("value=\"0\""), "no new-deck entry:\n{html}");
+    assert!(html.contains("name=\"deck_name\""), "{html}");
+    // With a deck to file into, the switcher opens on it and the name
+    // field waits out of the way.
+    assert!(
+        html.contains(&format!("value=\"{}\" selected", p.deck.0)),
+        "{html}"
+    );
+    assert!(html.contains("data-gen-newdeck hidden"), "{html}");
+
+    // The last deck archived, naming one is the only way left, so the
+    // field is open before the script runs.
+    p.t.services.archive_deck(p.user, p.deck, now_ms()).unwrap();
+    let html = get_page(&p, "/generate").await.text();
+    assert!(html.contains("value=\"0\" selected"), "{html}");
+    assert!(!html.contains("data-gen-newdeck hidden"), "{html}");
+    assert!(!html.contains("Make a deck first"), "{html}");
+}
+
+#[tokio::test]
+async fn generating_into_a_new_name_makes_the_deck_and_files_the_job_there() {
+    let p = pages("new-deck");
+    assert!(deck_named(&p, "Physiology").is_none());
+
+    let r = generate_into(&p, "deck_id=0&deck_name=Physiology").await;
+    assert_eq!(r.status, StatusCode::SEE_OTHER, "{}", r.text());
+    let made = deck_named(&p, "Physiology").expect("the name made a deck");
+    assert_eq!(job_deck(&p, r.location()), Some(made));
+    assert_ne!(made, p.deck, "it took the deck that was already there");
+}
+
+#[tokio::test]
+async fn a_name_a_deck_already_has_files_into_that_deck() {
+    let p = pages("new-deck-existing");
+    let r = generate_into(&p, "deck_id=0&deck_name=Anatomy").await;
+    assert_eq!(r.status, StatusCode::SEE_OTHER, "{}", r.text());
+    assert_eq!(job_deck(&p, r.location()), Some(p.deck));
+}
+
+#[tokio::test]
+async fn a_new_deck_with_no_name_is_refused_and_nothing_is_created() {
+    let p = pages("new-deck-blank");
+    let before = p.t.services.list_decks(p.user, now_ms()).unwrap().len();
+    let r = generate_into(&p, "deck_id=0&deck_name=").await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", r.text());
+    assert!(r.text().contains("Name the new deck"), "{}", r.text());
+    assert_eq!(
+        p.t.services.list_decks(p.user, now_ms()).unwrap().len(),
+        before
+    );
+}
+
+#[tokio::test]
+async fn an_archived_deck_is_not_reused_by_its_name() {
+    let p = pages("new-deck-archived");
+    p.t.services.archive_deck(p.user, p.deck, now_ms()).unwrap();
+    let r = generate_into(&p, "deck_id=0&deck_name=Anatomy").await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", r.text());
+    assert!(r.text().contains("archived"), "{}", r.text());
+}
+
+#[tokio::test]
+async fn a_review_kept_row_by_row_into_a_new_name_lands_in_one_deck() {
+    let p = pages("new-deck-keep");
+    let job = generated(&p).await;
+    let rows = drafts(&p, job);
+    assert!(rows.len() >= 2, "the fake wrote too little to tell");
+
+    // The row's keep carries the switcher and the name beside it, or a
+    // new deck could be chosen and never reach the server.
+    let html = get_page(&p, &format!("/ai/jobs/{job}/review")).await.text();
+    assert!(
+        html.contains("hx-include=\"#review-deck, #review-deck-name\""),
+        "{html}"
+    );
+
+    // Each row posts the switcher's choice, which stays "new deck" and
+    // its name: the first row makes the deck, the rest find it.
+    for draft in rows.iter().take(2) {
+        let r = post_form(
+            &p,
+            &format!("/ai/drafts/{}/keep", draft.id.0),
+            "deck_id=0&deck_name=Heart+notes",
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    }
+    let made = deck_named(&p, "Heart notes").expect("the keep made a deck");
+    let total =
+        p.t.services
+            .deck_cards_page(p.user, made, None, 1, 25, now_ms())
+            .unwrap()
+            .total;
+    assert!(total >= 2, "the rows went to different decks: {total}");
+    assert_eq!(cards_in_deck(&p), 0, "the job's own deck took cards");
+}
+
+#[tokio::test]
+async fn keeping_the_whole_review_into_a_new_name_ends_on_that_deck() {
+    let p = pages("new-deck-keep-all");
+    let job = generated(&p).await;
+    let r = post_form(
+        &p,
+        &format!("/ai/jobs/{job}/keep"),
+        "deck_id=0&deck_name=Heart+notes",
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::SEE_OTHER, "{}", r.text());
+    let made = deck_named(&p, "Heart notes").expect("the keep made a deck");
+    assert_eq!(r.location(), format!("/decks/{}", made.0));
+}
+
 // ---- the job ----
 
 #[tokio::test]
@@ -337,7 +485,10 @@ async fn the_review_groups_the_drafts_by_note_type() {
     assert!(html.contains("card-rich"), "{html}");
     assert!(html.contains("Keep all (3)"), "{html}");
     assert!(html.contains("Discard all (3)"), "{html}");
-    assert!(html.contains("Uses 1 generation"), "{html}");
+    // No count of "generations": the open core has no such quota, and a
+    // downstream extension that meters use says so in its own words.
+    assert!(!html.contains("generation."), "{html}");
+    assert!(html.contains("Enter sends"), "{html}");
     assert!(html.contains("Nothing here is in a deck until you keep it"));
 }
 

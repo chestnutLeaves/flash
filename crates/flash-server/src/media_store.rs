@@ -340,8 +340,11 @@ impl R2Store {
 impl MediaStore for R2Store {
     fn put(&self, sha256: &str, mime: &str, bytes: &[u8]) -> Result<(), MediaStoreError> {
         let key = object_key(sha256)?;
-        // The hash was computed at validation from these very bytes.
-        let payload_hash = sha256.to_ascii_lowercase();
+        // The key is the bytes' own sha256 for media, but a voice clip is
+        // keyed by what it says, not by its bytes, so the signed content
+        // hash is computed here from the bytes themselves. S3-style
+        // stores refuse a PUT whose declared hash is not the body's.
+        let payload_hash = hex(&Sha256::digest(bytes));
         let amz_date = Self::amz_date_now();
         let uri = self.uri(&key);
         let headers = [
@@ -905,6 +908,81 @@ mod tests {
         assert!(url.contains("X-Amz-Expires=900"));
         assert!(url.contains("response-content-type=image%2Fpng"));
         assert_eq!(store.origin().as_deref(), Some("https://acct.r2.example"));
+    }
+
+    /// A PUT declares the body's own hash even when the object key is not
+    /// that hash (a voice clip is keyed by what it says). A loopback
+    /// listener plays the bucket and records the request.
+    #[test]
+    fn r2_put_signs_the_body_hash_not_the_key() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            let mut raw = Vec::new();
+            let mut buf = [0u8; 4096];
+            loop {
+                let n = socket.read(&mut buf).unwrap();
+                raw.extend_from_slice(&buf[..n]);
+                if n == 0 || raw.windows(4).any(|w| w == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            let head = String::from_utf8_lossy(&raw).into_owned();
+            let want: usize = head
+                .lines()
+                .find_map(|l| l.strip_prefix("Content-Length: "))
+                .or_else(|| {
+                    head.lines()
+                        .find_map(|l| l.strip_prefix("content-length: "))
+                })
+                .and_then(|v| v.trim().parse().ok())
+                .unwrap_or(0);
+            let body_start = raw.windows(4).position(|w| w == b"\r\n\r\n").unwrap() + 4;
+            let mut body = raw[body_start..].to_vec();
+            while body.len() < want {
+                let n = socket.read(&mut buf).unwrap();
+                if n == 0 {
+                    break;
+                }
+                body.extend_from_slice(&buf[..n]);
+            }
+            socket
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .unwrap();
+            (head, body)
+        });
+        let store = R2Store::new(
+            &MediaR2Config {
+                endpoint: format!("http://127.0.0.1:{port}"),
+                bucket: "flash-media".into(),
+                access_key_id: "AKIDEXAMPLE".into(),
+                secret_access_key: "secret".into(),
+            },
+            1024,
+        )
+        .unwrap();
+        let key = "ab".repeat(32);
+        let bytes = b"not the bytes the key names";
+        store.put(&key, "audio/mp4", bytes).unwrap();
+        let (head, body) = server.join().unwrap();
+        let expected = hex(&Sha256::digest(bytes));
+        let declared = head
+            .lines()
+            .find_map(|l| {
+                l.strip_prefix("x-amz-content-sha256: ")
+                    .or_else(|| l.strip_prefix("X-Amz-Content-Sha256: "))
+            })
+            .map(str::trim)
+            .unwrap_or("");
+        assert_eq!(declared, expected, "{head}");
+        assert_ne!(declared, key);
+        assert!(
+            head.starts_with(&format!("PUT /flash-media/ab/{key} HTTP/1.1")),
+            "{head}"
+        );
+        assert_eq!(body, bytes);
     }
 
     /// Runs only against a real bucket: set FLASH_MEDIA_R2_* and

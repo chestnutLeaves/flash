@@ -16,7 +16,9 @@ use flash_server::ai::fake::FakeProvider;
 use flash_server::ai::provider::DialogState;
 use flash_server::api::MOBILE_CLIENT_ID;
 use flash_server::auth::hash_token;
-use flash_server::service::{now_ms, CardFront, NoteInput, ReviewOrigin, Services, SpokenPayload};
+use flash_server::service::{
+    now_ms, CardFront, DeckTarget, NoteInput, ReviewOrigin, Services, SpokenPayload,
+};
 use flash_server::testing::{
     api_bearer, fake_ai, json_delete, json_get, json_post, member, send, AppBuilder,
 };
@@ -28,6 +30,9 @@ const COVERED: &[&str] = &[
     "deck_limits",
     "set_deck_limits",
     "rename_deck",
+    "rename_deck_leaf",
+    "move_deck",
+    "create_subdeck",
     "archive_deck",
     "unarchive_deck",
     "boost_new_today",
@@ -48,6 +53,7 @@ const COVERED: &[&str] = &[
     "card",
     "import_cards",
     "update_card",
+    "update_mcp_sources",
     "delete_card",
     "create_note",
     "save_card_editor",
@@ -79,6 +85,7 @@ const COVERED: &[&str] = &[
 const ID_TYPES: &[&str] = &[
     "DeckId",
     "CardId",
+    "McpSourcePatch",
     "NoteId",
     "MediaId",
     "SessionId",
@@ -214,6 +221,21 @@ async fn another_user_cannot_touch_owned_resources_through_services() {
     assert!(s.deck_limits(b, owned.deck).is_err());
     assert!(s.set_deck_limits(b, owned.deck, Some(1), Some(1)).is_err());
     assert!(s.rename_deck(b, owned.deck, "stolen").is_err());
+    assert!(s.rename_deck_leaf(b, owned.deck, "stolen").is_err());
+    // A deck is no more a place to put things than a thing to take: not
+    // moved, not moved into, and no subdeck made inside it.
+    let theirs = s.create_deck(b, "Theirs", "", now).unwrap();
+    assert!(s.move_deck(b, owned.deck, None).is_err());
+    assert!(s.move_deck(b, owned.deck, Some(theirs)).is_err());
+    assert!(s.move_deck(b, theirs, Some(owned.deck)).is_err());
+    assert!(s.create_subdeck(b, owned.deck, "inside", "", now).is_err());
+    let names: Vec<String> = s
+        .list_decks(b, now)
+        .unwrap()
+        .into_iter()
+        .map(|d| d.name)
+        .collect();
+    assert_eq!(names, vec!["Theirs"], "nothing moved or was made");
     assert!(s.archive_deck(b, owned.deck, now).is_err());
     assert!(s.unarchive_deck(b, owned.deck).is_err());
     assert!(s.boost_new_today(b, Some(owned.deck), 5, now).is_err());
@@ -265,6 +287,19 @@ async fn another_user_cannot_touch_owned_resources_through_services() {
         .is_err());
     assert!(s.editor_seed(b, owned.card).is_err());
     assert!(s.delete_card(b, owned.card, now).is_err());
+    assert!(s
+        .update_mcp_sources(
+            b,
+            &[flash_server::service::McpSourcePatch {
+                card_id: owned.card,
+                front_html: None,
+                back_html: Some("foreign rewrite".into()),
+                tags: None,
+                sibling_card_ids: vec![],
+            }],
+            now
+        )
+        .is_err());
 
     // Sessions and reviews.
     assert!(s.session_scope(b, owned.session).is_err());
@@ -302,8 +337,9 @@ async fn another_user_cannot_touch_owned_resources_through_services() {
         .ai_source_from_text(a, "The heart has four chambers.", "", "text/plain", now)
         .unwrap();
     let job = s
-        .ai_create_job(a, &[source], owned.deck, "", &ai, now)
-        .unwrap();
+        .ai_create_job(a, &[source], DeckTarget::Existing(owned.deck), "", &ai, now)
+        .unwrap()
+        .job;
     // The runner needs the app's own runtime, so A's job is run there.
     assert_eq!(flash_server::ai::runner::run_once(&t.state).await, 1);
     let draft = s.ai_drafts(a, job).unwrap()[0].id;
@@ -313,7 +349,7 @@ async fn another_user_cannot_touch_owned_resources_through_services() {
         .ai_delete_source(b, source, t.state.media.as_ref())
         .is_err());
     assert!(s
-        .ai_create_job(b, &[source], owned.deck, "", &ai, now)
+        .ai_create_job(b, &[source], DeckTarget::Existing(owned.deck), "", &ai, now)
         .is_err());
     assert!(s.ai_revise_job(b, job, "", now).is_err());
     assert!(s.ai_more_job(b, job, "", now).is_err());
@@ -329,7 +365,7 @@ async fn another_user_cannot_touch_owned_resources_through_services() {
     assert!(s.ai_discard_draft(b, draft, now).is_err());
     assert!(s.ai_discard_job(b, job, now).is_err());
     assert!(s
-        .ai_keep_drafts(b, job, None, Some(owned.deck), now)
+        .ai_keep_drafts(b, job, None, Some(DeckTarget::Existing(owned.deck)), now)
         .is_err());
     assert!(s
         .create_note_from(b, owned.deck, &note_input(), Some(job), now)

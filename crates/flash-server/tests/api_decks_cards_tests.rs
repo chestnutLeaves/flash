@@ -15,6 +15,157 @@ fn signed_up(t: &TestApp, name: &str) -> (UserId, String) {
     (user, api_bearer(&t.store, user))
 }
 
+/// Subdecks over the API: made by path or by `parent_id`, listed in tree
+/// order with `leaf`, `depth` and `parent_id` and with counts that hold
+/// the decks under them, moved by id, and counted by the detail.
+#[tokio::test]
+async fn subdecks_nest_by_path_or_parent_and_move_by_id() {
+    let t = AppBuilder::new("api-subdecks").build();
+    let (user, bearer) = signed_up(&t, "flashtester");
+    let create = |body: serde_json::Value| {
+        let (app, bearer) = (t.app.clone(), bearer.clone());
+        async move { send(&app, json_post("/api/v1/decks", Some(&bearer), &body)).await }
+    };
+
+    // A path makes the decks on the way; a parent id says the same thing
+    // for a client that shows a picker.
+    let arrhythmias = create(json!({ "name": "Pharm::Cardio::Arrhythmias" })).await;
+    assert_eq!(
+        arrhythmias.status,
+        StatusCode::CREATED,
+        "{}",
+        arrhythmias.text()
+    );
+    let arrhythmias = arrhythmias.json();
+    assert_eq!(arrhythmias["leaf"], "Arrhythmias");
+    assert_eq!(arrhythmias["depth"], 2);
+    let pharm = t.store.find_deck_by_name(user, "Pharm").unwrap().unwrap();
+    let renal = create(json!({ "name": "Renal", "parent_id": pharm.0 })).await;
+    assert_eq!(renal.status, StatusCode::CREATED, "{}", renal.text());
+    let renal = renal.json();
+    assert_eq!(renal["name"], "Pharm::Renal");
+    assert_eq!(renal["parent_id"], pharm.0);
+    let zebra = create(json!({ "name": "Zebra" })).await.json();
+
+    let card = flash_core::validate_card_text("f", "b").unwrap();
+    for deck in [
+        arrhythmias["id"].as_i64().unwrap(),
+        renal["id"].as_i64().unwrap(),
+    ] {
+        t.store
+            .create_cards(
+                user,
+                flash_core::DeckId(deck),
+                &[(card.clone(), Vec::new())],
+                None,
+                now_ms(),
+            )
+            .unwrap();
+    }
+
+    let list = send(&t.app, json_get("/api/v1/decks", Some(&bearer)))
+        .await
+        .json();
+    let rows: Vec<(String, u64, u64)> = list["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| {
+            (
+                d["leaf"].as_str().unwrap().to_string(),
+                d["depth"].as_u64().unwrap(),
+                d["new"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    let row = |leaf: &str, depth, new| (leaf.to_string(), depth, new);
+    assert_eq!(
+        rows,
+        vec![
+            row("Pharm", 0, 2),
+            row("Cardio", 1, 1),
+            row("Arrhythmias", 2, 1),
+            row("Renal", 1, 1),
+            row("Zebra", 0, 0),
+        ],
+        "tree order, and a deck's count holds the decks under it"
+    );
+    assert!(list["items"][0]["parent_id"].is_null());
+
+    let detail = send(
+        &t.app,
+        json_get(&format!("/api/v1/decks/{}", pharm.0), Some(&bearer)),
+    )
+    .await
+    .json();
+    assert_eq!(detail["subdeck_count"], 3);
+    assert_eq!(detail["card_count"], 2);
+
+    // A move keeps the deck's name and carries what is under it.
+    let cardio = t
+        .store
+        .find_deck_by_name(user, "Pharm::Cardio")
+        .unwrap()
+        .unwrap();
+    let moved = send(
+        &t.app,
+        json_post(
+            &format!("/api/v1/decks/{}/move", cardio.0),
+            Some(&bearer),
+            &json!({ "parent_id": zebra["id"] }),
+        ),
+    )
+    .await;
+    assert_eq!(moved.status, StatusCode::OK, "{}", moved.text());
+    assert_eq!(moved.json()["name"], "Zebra::Cardio");
+    assert!(t
+        .store
+        .find_deck_by_name(user, "Zebra::Cardio::Arrhythmias")
+        .unwrap()
+        .is_some());
+    let out = send(
+        &t.app,
+        json_post(
+            &format!("/api/v1/decks/{}/move", cardio.0),
+            Some(&bearer),
+            &json!({ "parent_id": null }),
+        ),
+    )
+    .await
+    .json();
+    assert_eq!((&out["name"], &out["depth"]), (&json!("Cardio"), &json!(0)));
+
+    // Into itself, or into someone else's deck: refused, nothing moves.
+    let inside = send(
+        &t.app,
+        json_post(
+            &format!("/api/v1/decks/{}/move", cardio.0),
+            Some(&bearer),
+            &json!({ "parent_id": arrhythmias["id"] }),
+        ),
+    )
+    .await;
+    // A store refusal is a conflict carrying its sentence, which is what
+    // the app shows.
+    assert_eq!(inside.status, StatusCode::CONFLICT, "{}", inside.text());
+    assert!(inside.text().contains("into itself"), "{}", inside.text());
+    let (stranger, _) = signed_up(&t, "other");
+    let theirs = t
+        .store
+        .create_deck(stranger, "Theirs", "", now_ms())
+        .unwrap();
+    let foreign = send(
+        &t.app,
+        json_post(
+            &format!("/api/v1/decks/{}/move", cardio.0),
+            Some(&bearer),
+            &json!({ "parent_id": theirs.0 }),
+        ),
+    )
+    .await;
+    assert_eq!(foreign.status, StatusCode::NOT_FOUND);
+}
+
 #[tokio::test]
 async fn deck_lifecycle_create_detail_rename_limits_delete() {
     let t = AppBuilder::new("api-decks").build();

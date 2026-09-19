@@ -210,10 +210,22 @@ select.fl-select option{background:var(--surface-card);color:var(--text-body)}
 /* ---- app layer ---- */
 html,body{height:100%}
 .shell{display:flex;height:100vh}
-.shell>main{flex:1;overflow-y:auto}
+/* position:relative keeps the visually hidden elements inside the scroller.
+   Absolutely positioned with no positioned ancestor, they land at their
+   static position in the document instead, and a long page (the review's
+   card list) then stretches the window's own scrollbar far past the app. */
+.shell>main{flex:1;overflow-y:auto;position:relative}
 .page{max-width:880px;margin:0 auto;padding:44px 40px;display:flex;flex-direction:column;gap:var(--sp-6)}
 .page-wide{max-width:fit-content;min-width:min(100%,520px)}
-.page-head{display:flex;align-items:baseline;justify-content:space-between;gap:var(--sp-4)}
+/* A page's title with what sits across from it: buttons, or a quiet link.
+   Each side centres itself in a row one control high and the two rows line
+   up at the top, so the title and the buttons share a centre. (Lining them
+   up on their text baselines left a 26px title some 3px high of a 34px
+   button.) A hint under the title hangs below its row and moves nothing. */
+.page-head{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--sp-4)}
+.page-head h1{display:flex;align-items:center;min-height:var(--control-h-md)}
+.page-head>.row{min-height:var(--control-h-md)}
+.page-head>.small{line-height:var(--control-h-md)}
 .page section{display:flex;flex-direction:column;gap:var(--sp-3)}
 .page section>h2{font-size:var(--text-md)}
 .stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--sp-4)}
@@ -241,8 +253,49 @@ html,body{height:100%}
 .mono{font-family:var(--font-mono)}
 .muted{color:var(--text-secondary)}
 .small{font-size:var(--text-sm)}
-/* The archived decks, shown under the deck list on request. */
-.fl-archived{margin-top:22px}
+/* An archived deck in the deck list: in its place, stepped back. */
+.fl-table tr.is-archived a,.archived-note{color:var(--text-muted)}
+/* A subdeck sits under its deck, one step in per level; past six levels
+   the steps stop so a deep tree still fits a phone. */
+.fl-table td.deck-name{padding-left:calc(12px + min(var(--depth,0),6)*18px)}
+/* The fold beside a deck that has subdecks: a drawn chevron, the line
+   weight of the app's other icons, that points down while the deck is open
+   and turns to point at it when shut. Its width is left free on the rows
+   without one, so every name in a list that folds starts in one column,
+   and a fold with nothing showing under it (`is-off`) keeps its place. */
+.deck-fold{display:inline-flex;width:20px;height:20px;margin:-2px 4px -2px -4px;vertical-align:middle}
+.deck-fold.is-off{visibility:hidden}
+.deck-fold button{all:unset;box-sizing:border-box;display:grid;place-items:center;width:20px;height:20px;cursor:pointer;color:var(--text-muted);transition:color var(--dur-1) var(--ease)}
+.deck-fold button:hover{color:var(--text-body)}
+.deck-fold button:focus-visible{outline:2px solid var(--focus);outline-offset:1px;border-radius:var(--r-sm)}
+.deck-fold svg{display:block;transition:transform var(--dur-2) var(--ease)}
+.deck-fold button[aria-expanded="false"] svg{transform:rotate(-90deg)}
+@media (prefers-reduced-motion:reduce){.deck-fold svg{transition:none}}
+/* Rows and tables the deck lists put away (`static/ui.js`). Said outright
+   because a table is display:block at phone width, which beats `hidden`. */
+.fl-table[hidden],.fl-table tr[hidden]{display:none}
+/* The decks an import's file names, with their card counts. */
+.import-decks{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px;font-size:var(--text-sm)}
+.import-decks li{display:flex;justify-content:space-between;gap:12px}
+/* A section heading with a quiet link across from it. */
+.section-head{display:flex;align-items:baseline;justify-content:space-between;gap:var(--sp-4)}
+.page section>.section-head>h2{font-size:var(--text-md)}
+/* A deck's subdecks: a panel under the page head that the "Subdecks"
+   button there opens and closes, closed as the page loads. Without script
+   the button is a link to it and the panel shows as its target. The button
+   is a quiet text link, as "Show archived" is on the deck list, and reads
+   at full strength while the panel is open. */
+.deck-subdecks[hidden]{display:none}
+.page section.deck-subdecks:target{display:flex}
+.deck-subdecks-body{display:flex;flex-direction:column;gap:var(--sp-3)}
+.deck-subdecks-toggle{margin-right:6px}
+.deck-subdecks-toggle[aria-expanded="true"]{color:var(--text-body)}
+/* The decks a deck sits in, as links above its title row. They sit above
+   the row and not inside it, so the row's first line is the title and the
+   buttons across from it line up with the title, not with these. */
+.deck-title{display:flex;flex-direction:column;gap:4px}
+.deck-crumbs{font-size:var(--text-sm);color:var(--text-muted)}
+.deck-crumbs a{color:inherit}
 /* A button that reads as one of the small links beside it. */
 .fl-linkbtn{background:none;border:0;padding:0;font:inherit;text-decoration:underline;cursor:pointer}
 .fl-linkbtn:hover{color:var(--text-body)}
@@ -719,6 +772,10 @@ body[data-voice="on"] .grade-row .is-pending kbd{color:var(--accent-fg);opacity:
 .gen-link{display:flex;gap:8px;align-items:center}
 .gen-link[hidden]{display:none}
 .gen-link .fl-input{flex:1}
+/* The name that belongs to the deck switcher's "new deck" entry: it sits
+   under the select and is shown only while that entry is the choice. */
+.gen-newdeck{margin-top:8px}
+.gen-newdeck[hidden]{display:none}
 /* Chips: what has been attached, each with its own reading or refusal. */
 .gen-chips{display:flex;flex-wrap:wrap;gap:8px;margin:0;padding:0;list-style:none}
 .gen-chips:empty{display:none}

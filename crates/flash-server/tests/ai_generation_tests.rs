@@ -1202,6 +1202,73 @@ async fn an_input_this_server_does_not_read_is_refused_with_a_code() {
 }
 
 #[tokio::test]
+async fn a_job_can_name_its_deck_instead_of_numbering_it() {
+    let g = generation_app("ai-gen-deck-name", Arc::new(FakeProvider::default()));
+    let source = text_source(&g, PASSAGE).await["id"].as_i64().unwrap();
+
+    // A name no deck has yet makes one, and the answer says which.
+    let r = post(
+        &g,
+        "/api/v1/ai/jobs",
+        json!({ "source_ids": [source], "deck_name": "Physiology" }),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text());
+    let made =
+        g.t.store
+            .find_deck_by_name(g.user, "Physiology")
+            .unwrap()
+            .expect("the name made a deck");
+    assert_eq!(r.json()["deck_id"], made.0);
+    assert_ne!(made, g.deck);
+    assert_eq!(
+        job_json(&g, r.json()["job_id"].as_i64().unwrap()).await["deck_id"],
+        made.0
+    );
+
+    // One way of saying it, or the other, but not both and not neither.
+    for body in [
+        json!({ "source_ids": [source], "deck_id": g.deck.0, "deck_name": "Physiology" }),
+        json!({ "source_ids": [source] }),
+    ] {
+        let r = post(&g, "/api/v1/ai/jobs", body).await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{}", r.text());
+        assert!(r.text().contains("deck_name"), "{}", r.text());
+    }
+}
+
+#[tokio::test]
+async fn a_keep_can_name_the_deck_it_files_into() {
+    let g = generation_app("ai-gen-keep-name", Arc::new(FakeProvider::default()));
+    let source = text_source(&g, PASSAGE).await["id"].as_i64().unwrap();
+    let job = queue_job(&g, source, "").await;
+    run_to_end(&g, job).await;
+
+    let r = post(
+        &g,
+        &format!("/api/v1/ai/jobs/{job}/keep"),
+        json!({ "deck_name": "Heart notes" }),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    let made =
+        g.t.store
+            .find_deck_by_name(g.user, "Heart notes")
+            .unwrap()
+            .expect("the keep made a deck");
+    assert!(r.json()["kept"].as_u64().unwrap() >= 1);
+    assert_eq!(r.json()["deck_id"], made.0);
+    // The job's own deck is untouched: the keep sent them elsewhere.
+    assert_eq!(
+        g.t.services
+            .deck_cards_page(g.user, g.deck, None, 1, 25, now_ms())
+            .unwrap()
+            .total,
+        0
+    );
+}
+
+#[tokio::test]
 async fn another_users_ids_are_not_found() {
     let g = generation_app("ai-gen-isolation", Arc::new(FakeProvider::default()));
     let source = text_source(&g, PASSAGE).await["id"].as_i64().unwrap();

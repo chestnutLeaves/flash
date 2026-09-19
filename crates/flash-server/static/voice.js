@@ -70,7 +70,7 @@
 
   var OFFLINE = "Can't reach Flash.";
   // What a refusal without a sentence of its own reads as.
-  var ALLOWANCE_USED = "This month's AI allowance is used up, so voice grading stopped.";
+  var ALLOWANCE_USED = "This month's AI usage is used up, so voice grading stopped.";
   var MIC_COPY = "Voice study needs the microphone. Allow it in the browser and try again.";
   var STT_COPY = "Speech recognition isn't available right now, so voice study stopped.";
 

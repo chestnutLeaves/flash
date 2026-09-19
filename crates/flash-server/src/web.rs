@@ -12,14 +12,14 @@ use axum::{Form, Router};
 use flash_core::queue::StudyScope;
 use flash_core::{CardId, DeckId, Rating, SessionId, UserId};
 use flash_store::notes::NoteType;
-use flash_store::{CardRow, DeckSummary};
+use flash_store::CardRow;
 use serde::Deserialize;
 
 use crate::auth::{self, hash_token, AdminUser, ApiUser, AuthUser, OptionalUser, Theme};
 use crate::ext::{NavSection, Slot, Surface};
 use crate::flows::{enroll, import_flow, Failure};
 use crate::service::{
-    now_ms, DayCount, DiffSpan, EditorSeed, HeatCell, MonthSpan, NoteInput, ReviewOrigin,
+    now_ms, DayCount, DeckRow, DiffSpan, EditorSeed, HeatCell, MonthSpan, NoteInput, ReviewOrigin,
     ServiceError, Services, StudyCard,
 };
 use crate::state::{AppState, Site};
@@ -64,6 +64,7 @@ pub fn router() -> Router<AppState> {
             post(crate::password::settings_remove_password),
         )
         .route("/decks", get(decks_page).post(create_deck))
+        .route("/decks/archived", post(set_show_archived))
         .route("/decks/{id}", get(deck_page))
         .route("/decks/{id}/cards", get(card_rows).post(create_card))
         .route("/decks/{id}/notes", post(create_note))
@@ -105,6 +106,9 @@ pub fn router() -> Router<AppState> {
         )
         .route("/decks/{id}/settings", get(deck_settings_page))
         .route("/decks/{id}/rename", post(rename_deck))
+        .route("/decks/{id}/fold", post(fold_deck))
+        .route("/decks/{id}/move", post(move_deck))
+        .route("/decks/{id}/subdecks", post(create_subdeck))
         .route("/decks/{id}/limits", post(save_deck_limits))
         .route("/decks/{id}/boost", post(boost_deck))
         .route("/decks/{id}/archive", post(archive_deck))
@@ -1011,7 +1015,8 @@ struct DashboardPage {
     reviewed_today: u32,
     /// Account-wide "more new cards today" already granted.
     boost_today: u32,
-    decks: Vec<DeckSummary>,
+    decks: Vec<DeckListRow>,
+    rows: DeckRowsCtx,
     /// The "Connect your AI" card, until the user dismisses it.
     show_connect_cta: bool,
 }
@@ -1022,9 +1027,10 @@ async fn home(
     State(state): State<AppState>,
     OptionalUser(session): OptionalUser,
     theme: Theme,
+    collapsed: auth::CollapsedDecks,
 ) -> Response {
     match session {
-        Some((user, is_admin)) => dashboard_for(&state, user, is_admin, theme).await,
+        Some((user, is_admin)) => dashboard_for(&state, user, is_admin, theme, collapsed).await,
         None => Redirect::to("/login").into_response(),
     }
 }
@@ -1035,6 +1041,7 @@ pub async fn dashboard_for(
     user: UserId,
     is_admin: bool,
     theme: Theme,
+    collapsed: auth::CollapsedDecks,
 ) -> Response {
     let shell = Shell::new(state, theme, "today", is_admin);
     account_event(state, user, "view", Some("today"), None);
@@ -1044,13 +1051,15 @@ pub async fn dashboard_for(
         if let Some(tts) = &tts {
             crate::tts::prefetch_queue_head(tts, &s, user, now_ms());
         }
+        let decks = deck_list_rows(d.decks, &collapsed, true);
         Ok(DashboardPage {
             shell,
             due_now: d.counts.due,
             new_available: d.counts.new_available,
             reviewed_today: d.counts.reviewed_today,
             boost_today: d.boost_today,
-            decks: d.decks,
+            rows: DeckRowsCtx::today(&decks),
+            decks,
             show_connect_cta: d.show_connect_cta,
         })
     })
@@ -1073,10 +1082,16 @@ async fn dismiss_connect_cta(
 #[template(path = "decks.html")]
 struct DecksPage {
     shell: Shell,
-    /// The decks in study, and the archived ones, listed below them only
-    /// when asked for (`?archived=1`, the Archived link in the page head).
-    active: Vec<DeckSummary>,
-    archived: Vec<DeckSummary>,
+    /// The decks to list, in one order. An archived deck keeps its place
+    /// among the others and is left out unless this browser asked to see
+    /// them (`auth::ShowArchived`, set by the button in the page head,
+    /// which is offered while `any_archived`).
+    decks: Vec<DeckListRow>,
+    rows: DeckRowsCtx,
+    any_archived: bool,
+    /// Whether any deck is not archived: when none is and archived decks
+    /// are hidden, the page says so in place of an empty table.
+    any_active: bool,
     show_archived: bool,
     /// Whether this server has a model behind it, so the page offers
     /// generation beside import.
@@ -1084,30 +1099,92 @@ struct DecksPage {
 }
 
 #[derive(Deserialize)]
-struct DecksQuery {
+struct ShowArchivedForm {
+    /// "1" to list archived decks, anything else to leave them out.
+    #[serde(default, deserialize_with = "crate::bounds::keyword")]
+    show: String,
+}
+
+/// "Show archived" and "Hide archived" on the deck list. The choice is
+/// how this browser likes the page, so it goes in a cookie beside the
+/// theme: a refresh keeps it, and it stays until it is turned off.
+async fn set_show_archived(_user: AuthUser, Form(form): Form<ShowArchivedForm>) -> Response {
+    let mut response = Redirect::to("/decks").into_response();
+    let cookie = auth::pref_cookie_header(
+        auth::SHOW_ARCHIVED_COOKIE,
+        (form.show == "1").then_some("1"),
+    );
+    if let Ok(value) = cookie.parse() {
+        response.headers_mut().append(header::SET_COOKIE, value);
+    }
+    response
+}
+
+#[derive(Deserialize)]
+struct FoldForm {
+    /// "1" to fold the deck shut, anything else to open it.
+    #[serde(default, deserialize_with = "crate::bounds::keyword")]
+    collapsed: String,
+    /// Where the row was (`DeckRowsCtx`), to come back to.
     #[serde(default, deserialize_with = "crate::bounds::opt_keyword")]
-    archived: Option<String>,
+    back: Option<String>,
+    #[serde(default)]
+    from: Option<i64>,
+}
+
+/// The fold beside a deck that has subdecks. Every deck starts open; one
+/// that is folded shut stays shut in this browser until it is opened
+/// again, kept the way "Show archived" is. The ids kept are held to the
+/// decks the caller has, so a deleted deck's fold is forgotten and a
+/// stranger's id is never stored.
+async fn fold_deck(
+    State(state): State<AppState>,
+    AuthUser { id: user, .. }: AuthUser,
+    Path(id): Path<i64>,
+    collapsed: auth::CollapsedDecks,
+    Form(form): Form<FoldForm>,
+) -> Response {
+    let existing = match act(state.services.clone(), move |s| {
+        Ok(s.list_decks(user, now_ms())?
+            .into_iter()
+            .map(|d| d.id.0)
+            .collect::<Vec<i64>>())
+    })
+    .await
+    {
+        Ok(ids) => ids,
+        Err(response) => return response,
+    };
+    let folded = collapsed.with(id, form.collapsed == "1", &existing);
+    let mut response =
+        Redirect::to(&rows_destination(form.back.as_deref(), form.from)).into_response();
+    if let Ok(value) = folded.cookie().parse() {
+        response.headers_mut().append(header::SET_COOKIE, value);
+    }
+    response
 }
 
 async fn decks_page(
     State(state): State<AppState>,
     AuthUser { id: user, is_admin }: AuthUser,
     theme: Theme,
-    Query(query): Query<DecksQuery>,
+    auth::ShowArchived(show_archived): auth::ShowArchived,
+    collapsed: auth::CollapsedDecks,
 ) -> Response {
     let shell = Shell::new(&state, theme, "decks", is_admin);
     let ai_enabled = state.ai.is_some();
-    let show_archived = query.archived.as_deref() == Some("1");
     account_event(&state, user, "view", Some("decks"), None);
     respond(state.services.clone(), move |s| {
-        let (active, archived) = s
-            .list_decks(user, now_ms())?
-            .into_iter()
-            .partition(|d| d.archived_at.is_none());
+        let decks = s.list_decks(user, now_ms())?;
+        let any_archived = decks.iter().any(|d| d.archived_at.is_some());
+        let any_active = decks.iter().any(|d| d.archived_at.is_none());
+        let decks = deck_list_rows(decks, &collapsed, show_archived);
         Ok(DecksPage {
             shell,
-            active,
-            archived,
+            rows: DeckRowsCtx::decks(&decks),
+            decks,
+            any_archived,
+            any_active,
             show_archived,
             ai_enabled,
         })
@@ -1330,12 +1407,203 @@ struct DeckLimitsView {
     boost_today: u32,
 }
 
+/// One row of a deck table (`deck_rows.html`): a deck as the lists show
+/// it, with whether it has rows under it here and whether this browser
+/// has folded it shut.
+struct DeckListRow {
+    id: i64,
+    /// The whole path as a person reads it (`Bio › Cells`), for the hover.
+    path: String,
+    leaf: String,
+    depth: u32,
+    due_count: u32,
+    new_count: u32,
+    archived_at: Option<i64>,
+    /// Whether the page shows this row as it loads. Every row is in the
+    /// page, shown or not: showing archived decks and folding a deck are
+    /// then a matter for the page's script, at once and with no request
+    /// (`static/ui.js`, which works out the same three things from the
+    /// rows' depth and state), and the page still loads as it was left.
+    hidden: bool,
+    /// Whether a deck sits under it at all, so it carries a fold; and
+    /// whether one that is showing does, so the fold is offered. A deck
+    /// whose only subdecks are archived and out of sight has one and does
+    /// not offer it.
+    foldable: bool,
+    has_subdecks: bool,
+    /// Whether this browser folded it shut, whatever is showing under it.
+    collapsed: bool,
+}
+
+/// Where a deck table sits, which is where its rows' buttons (fold,
+/// unarchive) come back to: `decks` is the deck list, which swaps itself
+/// in place; `today` and `deck` (a deck's own page, `from` being that
+/// deck) reload. Every page that includes `deck_rows.html` carries one as
+/// `rows`.
+struct DeckRowsCtx {
+    back: &'static str,
+    from: i64,
+    /// Whether an archived row offers to unarchive. Today lists none.
+    unarchive: bool,
+    /// Whether any row has a fold, so the rows without one leave its
+    /// width free and every name starts in the same column. A list with
+    /// no subdecks in it looks as it always did.
+    folds: bool,
+}
+
+impl DeckRowsCtx {
+    fn decks(rows: &[DeckListRow]) -> Self {
+        Self::at("decks", 0, true, rows)
+    }
+    fn today(rows: &[DeckListRow]) -> Self {
+        Self::at("today", 0, false, rows)
+    }
+    fn deck(id: i64, rows: &[DeckListRow]) -> Self {
+        Self::at("deck", id, true, rows)
+    }
+    fn at(back: &'static str, from: i64, unarchive: bool, rows: &[DeckListRow]) -> Self {
+        Self {
+            back,
+            from,
+            unarchive,
+            folds: rows.iter().any(|r| r.foldable),
+        }
+    }
+}
+
+/// Where a row's button returns to, from the `back` and `from` its form
+/// sent. `from` only names a page; one that is not the caller's is not
+/// found when it gets there.
+fn rows_destination(back: Option<&str>, from: Option<i64>) -> String {
+    match (back, from) {
+        (Some("today"), _) => "/".to_string(),
+        (Some("deck"), Some(deck)) => format!("/decks/{deck}"),
+        _ => "/decks".to_string(),
+    }
+}
+
+/// A row for every one of `decks` (in tree order), each marked with how
+/// the page shows it as it loads. Every deck starts open. An archived
+/// deck is hidden unless `show_archived`, and so is what sits under a
+/// deck this browser folded shut, whose counts already hold what it
+/// hides.
+fn deck_list_rows(
+    decks: Vec<DeckRow>,
+    collapsed: &auth::CollapsedDecks,
+    show_archived: bool,
+) -> Vec<DeckListRow> {
+    // What the page may show: everything, or everything not archived.
+    let showable: Vec<bool> = decks
+        .iter()
+        .map(|d| show_archived || d.archived_at.is_none())
+        .collect();
+    let depths: Vec<u32> = decks.iter().map(|d| d.depth).collect();
+    let mut rows = Vec::with_capacity(decks.len());
+    // While set, rows deeper than this are inside a folded deck.
+    let mut folded_at: Option<u32> = None;
+    for (i, deck) in decks.into_iter().enumerate() {
+        let foldable = depths.get(i + 1).is_some_and(|next| *next > deck.depth);
+        let next_showable = (i + 1..depths.len()).find(|j| showable[*j]);
+        let has_subdecks = next_showable.is_some_and(|j| depths[j] > deck.depth);
+        let is_collapsed = collapsed.contains(deck.id.0);
+        // A fold ends at the next deck that is not under the folded one.
+        if folded_at.is_some_and(|depth| deck.depth <= depth) {
+            folded_at = None;
+        }
+        let inside_fold = folded_at.is_some();
+        if showable[i] && !inside_fold && has_subdecks && is_collapsed {
+            folded_at = Some(deck.depth);
+        }
+        rows.push(DeckListRow {
+            id: deck.id.0,
+            path: deck.path,
+            leaf: deck.leaf,
+            depth: deck.depth,
+            due_count: deck.due_count,
+            new_count: deck.new_count,
+            archived_at: deck.archived_at,
+            hidden: !showable[i] || inside_fold,
+            foldable,
+            has_subdecks,
+            collapsed: is_collapsed,
+        });
+    }
+    rows
+}
+
+/// One deck a deck sits in, as a link above its heading.
+struct Crumb {
+    id: i64,
+    leaf: String,
+}
+
+/// A deck among the user's decks: the decks it sits in, itself, and the
+/// decks under it. Both deck pages read the one list this way.
+struct DeckFamily {
+    crumbs: Vec<Crumb>,
+    deck: DeckRow,
+    /// In tree order, `depth` counted from the deck (its children are 0).
+    subdecks: Vec<DeckRow>,
+    /// Every other deck that is not under it: where it could move to.
+    others: Vec<DeckRow>,
+}
+
+impl DeckFamily {
+    fn of(decks: Vec<DeckRow>, id: DeckId) -> Result<Self, ServiceError> {
+        let deck = decks
+            .iter()
+            .find(|d| d.id == id)
+            .cloned()
+            .ok_or(ServiceError::Store(flash_store::StoreError::NotFound(
+                "deck",
+            )))?;
+        let mut crumbs = Vec::new();
+        let mut up = deck.parent_id;
+        while let Some(parent) = up.and_then(|p| decks.iter().find(|d| d.id == p)) {
+            crumbs.push(Crumb {
+                id: parent.id.0,
+                leaf: parent.leaf.clone(),
+            });
+            up = parent.parent_id;
+        }
+        crumbs.reverse();
+        let (subdecks, others): (Vec<DeckRow>, Vec<DeckRow>) = decks
+            .into_iter()
+            .filter(|d| d.id != id)
+            .partition(|d| flash_core::deck_path::is_descendant(&d.name, &deck.name));
+        let subdecks = subdecks
+            .into_iter()
+            .map(|mut d| {
+                d.depth = d.depth.saturating_sub(deck.depth + 1);
+                d
+            })
+            .collect();
+        Ok(Self {
+            crumbs,
+            deck,
+            subdecks,
+            others,
+        })
+    }
+}
+
 #[derive(Template)]
 #[template(path = "deck.html")]
 struct DeckPage {
     shell: Shell,
     deck_id: i64,
+    /// The whole path, for the page title.
     deck_name: String,
+    /// The deck's own name, for the heading; the decks it sits in are the
+    /// crumbs above it, outermost first.
+    deck_leaf: String,
+    crumbs: Vec<Crumb>,
+    /// The decks under this one, in tree order, depth counted from here.
+    decks: Vec<DeckListRow>,
+    /// How many decks sit under this one, folded away or not: the count
+    /// on the fold.
+    subdeck_count: usize,
+    rows: DeckRowsCtx,
     cards: Vec<CardView>,
     page: u32,
     pages: u32,
@@ -1364,18 +1632,27 @@ async fn deck_page(
     theme: Theme,
     Path(id): Path<i64>,
     Query(query): Query<DeckPageQuery>,
+    collapsed: auth::CollapsedDecks,
 ) -> Response {
     let shell = Shell::new(&state, theme, "decks", is_admin);
     let editor_error = query.err.as_deref().and_then(editor_error_copy);
     let ai_enabled = state.ai.is_some();
     respond(state.services.clone(), move |s| {
         let deck = DeckId(id);
-        let summary = s.deck_by_id(user, deck, now_ms())?;
+        let family = DeckFamily::of(s.list_decks(user, now_ms())?, deck)?;
+        let summary = family.deck;
         let view = cards_view(&s, user, deck, None, query.page)?;
+        let subdeck_count = family.subdecks.len();
+        let decks = deck_list_rows(family.subdecks, &collapsed, true);
         Ok(DeckPage {
             shell,
             deck_id: id,
-            deck_name: summary.name,
+            deck_name: summary.path,
+            deck_leaf: summary.leaf,
+            crumbs: family.crumbs,
+            subdeck_count,
+            rows: DeckRowsCtx::deck(id, &decks),
+            decks,
             cards: view.cards,
             page: view.page,
             pages: view.pages,
@@ -1395,12 +1672,23 @@ async fn deck_page(
 struct DeckSettingsPage {
     shell: Shell,
     deck_id: i64,
+    /// The whole path, for the page title and under the heading.
     deck_name: String,
+    /// The deck's own name: what the rename field edits.
+    deck_leaf: String,
+    /// Where the deck could sit: every deck that is not under it. The one
+    /// it sits in now is `selected`; none selected is the top level.
+    parents: Vec<ParentOption>,
+    /// Decks under it and live cards in the lot: what archiving takes
+    /// along and what deleting removes.
+    subdeck_count: u32,
+    card_count: u32,
     limits: DeckLimitsView,
-    /// Which form just saved: "name" | "limits" | "archive" | "".
+    /// Which form just saved: "name" | "parent" | "limits" | "archive" | "".
     saved: String,
-    /// Why the last rename was refused, if it was.
-    name_error: Option<String>,
+    /// Why the last rename or move was refused, if it was.
+    name_error: Option<&'static str>,
+    parent_error: Option<&'static str>,
     /// The extension's sharing card.
     sharing_html: String,
     /// Whether the deck is archived, which flips the archive card.
@@ -1411,8 +1699,52 @@ struct DeckSettingsPage {
 struct DeckSettingsQuery {
     #[serde(default, deserialize_with = "crate::bounds::opt_keyword")]
     saved: Option<String>,
+    /// Why a rename was refused, and why a move was: each shows on its
+    /// own card.
     #[serde(default, deserialize_with = "crate::bounds::opt_keyword")]
     err: Option<String>,
+    #[serde(default, deserialize_with = "crate::bounds::opt_keyword")]
+    moverr: Option<String>,
+}
+
+/// One entry of the "Parent deck" select, named by its whole path.
+struct ParentOption {
+    id: i64,
+    name: String,
+    selected: bool,
+}
+
+/// Short query-string code for a refused rename or move, so the settings
+/// page can say why after the redirect.
+fn deck_path_error_code(err: &ServiceError) -> Option<&'static str> {
+    let (ServiceError::Invalid(m) | ServiceError::Store(flash_store::StoreError::Invalid(m))) = err
+    else {
+        return None;
+    };
+    Some(match m {
+        m if m.contains("cannot contain") => "nest",
+        m if m.contains("is empty") => "empty",
+        m if m.contains("already exists") => "taken",
+        m if m.contains("into itself") => "self",
+        m if m.contains("longer than") => "long",
+        m if m.contains("is archived") => "archived",
+        m if m.contains("at most") => "cap",
+        _ => "invalid",
+    })
+}
+
+fn deck_path_error_copy(code: &str) -> Option<&'static str> {
+    Some(match code {
+        "nest" => "a name can't contain \"::\"; use Parent deck to nest this deck",
+        "empty" => "the name can't be blank",
+        "taken" => "you already have a deck with that name",
+        "self" => "a deck can't move into itself",
+        "long" => "that would make a deck's full name too long",
+        "archived" => "that deck is archived; unarchive it first",
+        "cap" => "this account has as many decks as it can hold",
+        "invalid" => "that didn't work",
+        _ => return None,
+    })
 }
 
 async fn deck_settings_page(
@@ -1426,22 +1758,38 @@ async fn deck_settings_page(
     let shell = Shell::new(&state, theme, "decks", is_admin);
     let saved = query
         .saved
-        .filter(|v| matches!(v.as_str(), "name" | "limits" | "archive"))
+        .filter(|v| matches!(v.as_str(), "name" | "parent" | "limits" | "archive"))
         .unwrap_or_default();
-    let name_error = match query.err.as_deref() {
-        Some("empty") => Some("the name can't be blank".to_string()),
-        Some("taken") => Some("you already have a deck with that name".to_string()),
-        _ => None,
-    };
+    let name_error = query.err.as_deref().and_then(deck_path_error_copy);
+    let parent_error = query.moverr.as_deref().and_then(deck_path_error_copy);
     let app = state.clone();
     respond(state.services.clone(), move |s| {
         let deck = DeckId(id);
         let d = s.deck_detail(user, deck, now_ms())?;
+        let family = DeckFamily::of(s.list_decks(user, now_ms())?, deck)?;
+        let archived = d.deck.archived_at.is_some();
+        // An active deck is never put inside an archived one, so an
+        // archived deck is offered only to a deck that is archived too.
+        let parents = family
+            .others
+            .into_iter()
+            .filter(|p| archived || p.archived_at.is_none())
+            .map(|p| ParentOption {
+                id: p.id.0,
+                selected: Some(p.id) == d.deck.parent_id,
+                name: p.path,
+            })
+            .collect();
         Ok(DeckSettingsPage {
             shell,
             deck_id: id,
-            archived: d.deck.archived_at.is_some(),
-            deck_name: d.deck.name,
+            archived,
+            deck_leaf: d.deck.leaf,
+            parents,
+            subdeck_count: d.subdeck_count,
+            card_count: d.card_count,
+            parent_error,
+            deck_name: d.deck.path,
             limits: DeckLimitsView {
                 new_override: d.limits.new_per_day,
                 reviews_override: d.limits.reviews_per_day,
@@ -1479,21 +1827,89 @@ async fn rename_deck(
     if form.name.trim().is_empty() {
         return Redirect::to(&format!("/decks/{id}/settings?err=empty")).into_response();
     }
-    match tokio::task::spawn_blocking({
-        let services = state.services.clone();
-        move || services.rename_deck(user, DeckId(id), &form.name)
+    // The field holds the deck's own name; where the deck sits is the
+    // Parent deck card's business.
+    deck_path_change(&state, id, "name", "err", move |s| {
+        s.rename_deck_leaf(user, DeckId(id), &form.name)
     })
     .await
-    {
-        Ok(Ok(())) => Redirect::to(&format!("/decks/{id}/settings?saved=name")).into_response(),
-        Ok(Err(ServiceError::Store(flash_store::StoreError::Invalid(_)))) => {
-            Redirect::to(&format!("/decks/{id}/settings?err=taken")).into_response()
-        }
-        Ok(Err(err)) => err_response(err),
+}
+
+#[derive(Deserialize)]
+struct MoveDeckForm {
+    /// The deck to move into; blank for the top level.
+    #[serde(default, deserialize_with = "crate::bounds::keyword")]
+    parent: String,
+}
+
+async fn move_deck(
+    State(state): State<AppState>,
+    AuthUser { id: user, .. }: AuthUser,
+    Path(id): Path<i64>,
+    Form(form): Form<MoveDeckForm>,
+) -> Response {
+    let parent = match form.parent.trim() {
+        "" => None,
+        raw => match raw.parse::<i64>() {
+            Ok(parent) => Some(DeckId(parent)),
+            Err(_) => return err_response(ServiceError::Invalid("no such deck".into())),
+        },
+    };
+    deck_path_change(&state, id, "parent", "moverr", move |s| {
+        s.move_deck(user, DeckId(id), parent)
+    })
+    .await
+}
+
+/// Runs a rename or a move and returns to the settings page: `saved` names
+/// the card that shows "Saved", and a refusal the page has words for goes
+/// back as a code under `err_key`, to show on that card.
+async fn deck_path_change(
+    state: &AppState,
+    id: i64,
+    saved: &'static str,
+    err_key: &'static str,
+    change: impl FnOnce(Services) -> Result<(), ServiceError> + Send + 'static,
+) -> Response {
+    let services = state.services.clone();
+    match tokio::task::spawn_blocking(move || change(services)).await {
+        Ok(Ok(())) => Redirect::to(&format!("/decks/{id}/settings?saved={saved}")).into_response(),
+        Ok(Err(err)) => match deck_path_error_code(&err) {
+            Some(code) => {
+                Redirect::to(&format!("/decks/{id}/settings?{err_key}={code}")).into_response()
+            }
+            None => err_response(err),
+        },
         Err(e) => {
             tracing::error!("join: {e}");
             (StatusCode::INTERNAL_SERVER_ERROR, "internal error").into_response()
         }
+    }
+}
+
+#[derive(Deserialize)]
+struct SubdeckForm {
+    #[serde(deserialize_with = "crate::bounds::deck_name")]
+    name: String,
+}
+
+/// "Add subdeck" on a deck's page: makes the deck inside it and opens it.
+async fn create_subdeck(
+    State(state): State<AppState>,
+    AuthUser { id: user, .. }: AuthUser,
+    Path(id): Path<i64>,
+    Form(form): Form<SubdeckForm>,
+) -> Response {
+    match act(state.services.clone(), move |s| {
+        s.create_subdeck(user, DeckId(id), &form.name, "", now_ms())
+    })
+    .await
+    {
+        Ok(deck) => {
+            account_event(&state, user, "deck_created", None, None);
+            Redirect::to(&format!("/decks/{deck}")).into_response()
+        }
+        Err(response) => response,
     }
 }
 
@@ -1566,19 +1982,24 @@ async fn boost_deck(
 
 #[derive(Deserialize)]
 struct ArchiveForm {
-    /// Where the button lived: `decks` returns to the list, `archived`
-    /// to the list with its archived rows shown, `deck` to the deck
-    /// page; the settings page otherwise, with its saved note.
+    /// Where the button lived: `decks` returns to the list (which shows
+    /// its archived rows or not as the browser last asked), `deck` to the
+    /// deck page; the settings page otherwise, with its saved note.
     #[serde(default, deserialize_with = "crate::bounds::opt_keyword")]
     back: Option<String>,
+    /// With `deck`: the deck whose page the button was on, when that is
+    /// not the deck acted on (a subdeck's row on its parent's page). It
+    /// only names a page to go back to; a page that is not the caller's
+    /// is not found when it gets there.
+    #[serde(default)]
+    from: Option<i64>,
 }
 
 impl ArchiveForm {
     fn destination(&self, id: i64) -> String {
         match self.back.as_deref() {
             Some("decks") => "/decks".to_string(),
-            Some("archived") => "/decks?archived=1".to_string(),
-            Some("deck") => format!("/decks/{id}"),
+            Some("deck") => format!("/decks/{}", self.from.unwrap_or(id)),
             _ => format!("/decks/{id}/settings?saved=archive"),
         }
     }
@@ -2833,8 +3254,14 @@ struct ImportPreview {
     file_size: String,
     /// Prefill for the required destination field (may be empty).
     deck: String,
-    /// Extra line when the file names several decks that will merge.
-    deck_note: Option<String>,
+    /// A file that names several decks keeps them, so the field asks for
+    /// an optional deck to put them under (prefilled with `parent`) and
+    /// the page lists the first of them, `more_decks` standing for the
+    /// rest.
+    keeps_decks: bool,
+    parent: String,
+    file_decks: Vec<(String, usize)>,
+    more_decks: usize,
     warnings: u32,
     sample: Vec<(String, String)>,
     messages: Vec<String>,
@@ -2872,14 +3299,29 @@ async fn import_page(
     .await
 }
 
+/// How many of a file's decks the preview names before "+N more".
+const PREVIEW_DECKS: usize = 12;
+
 impl From<import_flow::ImportPreview> for ImportPreview {
     fn from(p: import_flow::ImportPreview) -> Self {
+        // Read as a person reads a path, not as the file spells it.
+        let mut file_decks: Vec<(String, usize)> = p
+            .file_decks
+            .into_iter()
+            .map(|(name, cards)| (flash_core::deck_path::display(&name), cards))
+            .collect();
+        let more_decks = file_decks.len().saturating_sub(PREVIEW_DECKS);
+        let keeps_decks = file_decks.len() > 1;
+        file_decks.truncate(PREVIEW_DECKS);
         ImportPreview {
             total: p.total,
             file_name: p.file_name,
             file_size: human_size(p.file_size_bytes),
             deck: p.deck,
-            deck_note: p.deck_note,
+            keeps_decks,
+            parent: p.parent,
+            file_decks,
+            more_decks,
             warnings: p.warnings,
             sample: p.sample,
             messages: p.messages,
@@ -3012,9 +3454,13 @@ async fn import_preview(
 struct CommitForm {
     #[serde(deserialize_with = "crate::bounds::token")]
     token: String,
-    /// Destination deck, as edited on the preview. Required.
+    /// The deck named on the preview: where the cards go, or, with
+    /// `keep_decks`, the optional deck to put the file's decks under.
     #[serde(default, deserialize_with = "crate::bounds::deck_name")]
     deck: String,
+    /// "on" from a preview of a file that names several decks.
+    #[serde(default, deserialize_with = "crate::bounds::opt_keyword")]
+    keep_decks: Option<String>,
     /// "on" when the user chose to bring their Anki study progress.
     #[serde(default, deserialize_with = "crate::bounds::opt_keyword")]
     progress: Option<String>,
@@ -3049,6 +3495,7 @@ async fn import_commit(
     let opts = import_flow::CommitOptions {
         token: form.token,
         deck: form.deck,
+        keep_decks: form.keep_decks.is_some(),
         progress: form.progress.is_some(),
         settings: form.settings.is_some(),
         clean_colors: form.colors.as_deref() == Some("clean"),

@@ -15,7 +15,7 @@ use flash_store::notes::{generate_cards, GeneratedCard, NoteType, MAX_FIELD_HTML
 use flash_store::{
     richtext, AiCallStep, AiDraftCounts, AiDraftRow, AiDraftStatus, AiJobNew, AiJobOp, AiJobRow,
     AiJobState, AiSourceKind, AiSourceNew, AiSourceRow, AiTurnNew, AiTurnRole, AiTurnRow, CardRow,
-    DeckSummary, GrantRow, ImportedReview, NoteSave, SessionStats, Store, StoreError,
+    GrantRow, ImportedReview, NoteSave, SessionStats, Store, StoreError,
 };
 use jiff::{tz::TimeZone, Timestamp, Zoned};
 use sha2::{Digest, Sha256};
@@ -155,13 +155,40 @@ pub struct Reveal {
     pub typed_diff: Option<Vec<DiffSpan>>,
 }
 
+/// A deck as every list shows it. `Services::list_decks` hands these out
+/// in tree order: each deck followed by the decks under it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DeckRow {
+    pub id: DeckId,
+    /// The whole path, `Bio::Cells`: what a deck is called wherever it is
+    /// named by a program (a connector, an export, the API).
+    pub name: String,
+    /// The same path as a person reads it, `Bio › Cells`: what a page
+    /// shows wherever a deck is named without its surroundings (a picker,
+    /// a title). `::` is for storing and for programs, never for reading.
+    pub path: String,
+    /// The name to show under its parent: the last segment of the path,
+    /// or the rest of it when the deck it would sit in does not exist.
+    pub leaf: String,
+    /// How many decks it sits inside, among the decks that exist.
+    pub depth: u32,
+    pub parent_id: Option<DeckId>,
+    pub description: String,
+    /// Today's budgeted counts, the decks under it included: what studying
+    /// this deck would serve. Zero for an archived deck.
+    pub due_count: u32,
+    pub new_count: u32,
+    /// When the deck was archived; None while it is active.
+    pub archived_at: Option<i64>,
+}
+
 /// The Today page in one read.
 #[derive(Debug, Clone)]
 pub struct Dashboard {
     pub counts: QueueCounts,
     /// Account-wide "more new cards today" already granted.
     pub boost_today: u32,
-    pub decks: Vec<DeckSummary>,
+    pub decks: Vec<DeckRow>,
     /// The "Connect your AI" card, until the user dismisses it.
     pub show_connect_cta: bool,
 }
@@ -177,15 +204,19 @@ pub struct CardsPage {
 
 /// A deck's settings in one read: the deck, its limit overrides beside
 /// the account defaults they would inherit, today's boost, and the live
-/// card count (sharing is refused at zero).
+/// card count.
 #[derive(Debug, Clone)]
 pub struct DeckDetail {
-    pub deck: DeckSummary,
+    pub deck: DeckRow,
     pub limits: flash_store::DeckLimits,
     pub default_new: u32,
     pub default_reviews: u32,
     pub boost_today: u32,
+    /// Live cards in the deck and the decks under it: what its page lists
+    /// and what deleting it removes.
     pub card_count: u32,
+    /// How many decks sit under it, at any depth.
+    pub subdeck_count: u32,
 }
 
 /// The cap the store must re-check (None = unlimited) plus the validated
@@ -563,8 +594,49 @@ impl Services {
             .set_deck_limits(user, deck, new_per_day, reviews_per_day)?)
     }
 
+    /// `name` is the deck's whole path, so this renames it, moves it, or
+    /// both; the decks under it follow.
     pub fn rename_deck(&self, user: UserId, deck: DeckId, name: &str) -> Result<()> {
-        Ok(self.store.rename_deck(user, deck, name)?)
+        Ok(self.store.rename_deck(user, deck, name, now_ms())?)
+    }
+
+    /// Gives the deck a new name where it is: the last segment of its path
+    /// changes and the decks it sits in do not. A `::` in the name would be
+    /// a move in disguise, and the page this serves has "Parent deck" for
+    /// that.
+    pub fn rename_deck_leaf(&self, user: UserId, deck: DeckId, leaf: &str) -> Result<()> {
+        if leaf.contains(flash_core::deck_path::SEP) {
+            return Err(ServiceError::Invalid(
+                "A name cannot contain \"::\". Use Parent deck to nest this deck.".into(),
+            ));
+        }
+        let current = self.deck_by_id(user, deck, now_ms())?;
+        let parent = flash_core::deck_path::parent(&current.name).unwrap_or_default();
+        let path = format!("{parent}{}{leaf}", flash_core::deck_path::SEP);
+        self.rename_deck(user, deck, &path)
+    }
+
+    /// Moves the deck, with the decks under it, into `parent`, or to the
+    /// top level.
+    pub fn move_deck(&self, user: UserId, deck: DeckId, parent: Option<DeckId>) -> Result<()> {
+        Ok(self.store.move_deck(user, deck, parent, now_ms())?)
+    }
+
+    /// A new deck inside `parent`.
+    pub fn create_subdeck(
+        &self,
+        user: UserId,
+        parent: DeckId,
+        name: &str,
+        description: &str,
+        now_ms: i64,
+    ) -> Result<DeckId> {
+        if name.trim().is_empty() {
+            return Err(ServiceError::Invalid("Name the new deck.".into()));
+        }
+        let parent = self.deck_by_id(user, parent, now_ms)?;
+        let path = format!("{}{}{name}", parent.name, flash_core::deck_path::SEP);
+        self.create_deck(user, &path, description, now_ms)
     }
 
     /// Archives a deck: every card, its media and its review history stay,
@@ -1187,30 +1259,81 @@ impl Services {
         Ok(self.store.create_deck(user, name, description, now_ms)?)
     }
 
-    /// Decks with today's *budgeted* due/new counts (what studying that
-    /// deck would actually serve), not raw totals.
-    pub fn list_decks(&self, user: UserId, now_ms: i64) -> Result<Vec<DeckSummary>> {
+    /// The deck a typed name asks for: the one already carrying it, or a
+    /// new one. The bool says which, so a caller can report a deck it
+    /// just made. An archived deck is refused instead of reused: the
+    /// pickers that take a name never list one, so filing into it would
+    /// contradict the page the name was typed on.
+    pub fn deck_named(&self, user: UserId, name: &str, now_ms: i64) -> Result<(DeckId, bool)> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(ServiceError::Invalid("Name the new deck.".into()));
+        }
+        match self.store.find_deck_by_name(user, name)? {
+            Some(deck) => {
+                if self.deck_by_id(user, deck, now_ms)?.archived_at.is_some() {
+                    return Err(ServiceError::Invalid(format!(
+                        "Your deck \"{name}\" is archived. Unarchive it, or pick another name."
+                    )));
+                }
+                Ok((deck, false))
+            }
+            None => Ok((self.store.create_deck(user, name, "", now_ms)?, true)),
+        }
+    }
+
+    /// Decks in tree order with today's *budgeted* due/new counts (what
+    /// studying that deck would actually serve), not raw totals.
+    ///
+    /// Each deck's own cards are held to its own budget first; a deck's
+    /// row then adds the decks under it and holds the sum to the account's
+    /// budget. That is what a session over the deck does: every card
+    /// spends the budget of the deck it lives in, and the account's budget
+    /// caps the lot.
+    pub fn list_decks(&self, user: UserId, now_ms: i64) -> Result<Vec<DeckRow>> {
         let settings = self.store.get_settings(user)?;
         let budgets = self.budgets(user, &settings, now_ms)?;
-        let mut decks = self.store.list_decks(user, now_ms)?;
-        for d in &mut decks {
-            let own =
-                budgets
-                    .per_deck
-                    .get(&d.id)
-                    .copied()
-                    .unwrap_or(flash_core::queue::DeckBudget {
-                        new: u32::MAX,
-                        reviews: u32::MAX,
-                    });
-            d.new_count = d.new_count.min(own.new).min(budgets.new_total);
-            d.due_count = d.due_count.min(own.reviews).min(budgets.review_total);
-        }
-        Ok(decks)
+        let decks = self.store.list_decks(user, now_ms)?;
+        let nodes: Vec<flash_core::deck_tree::Node<'_>> =
+            decks
+                .iter()
+                .map(|d| {
+                    let own = budgets.per_deck.get(&d.id).copied().unwrap_or(
+                        flash_core::queue::DeckBudget {
+                            new: u32::MAX,
+                            reviews: u32::MAX,
+                        },
+                    );
+                    flash_core::deck_tree::Node {
+                        name: &d.name,
+                        due: d.due_count.min(own.reviews),
+                        new: d.new_count.min(own.new),
+                    }
+                })
+                .collect();
+        let rows = flash_core::deck_tree::build(&nodes, budgets.new_total, budgets.review_total);
+        Ok(rows
+            .into_iter()
+            .map(|row| {
+                let deck = &decks[row.index];
+                DeckRow {
+                    id: deck.id,
+                    path: flash_core::deck_path::display(&deck.name),
+                    name: deck.name.clone(),
+                    leaf: row.leaf,
+                    depth: row.depth,
+                    parent_id: row.parent.map(|p| decks[p].id),
+                    description: deck.description.clone(),
+                    due_count: row.due,
+                    new_count: row.new,
+                    archived_at: deck.archived_at,
+                }
+            })
+            .collect())
     }
 
     /// One of the user's decks by id, with today's budgeted counts.
-    pub fn deck_by_id(&self, user: UserId, deck: DeckId, now_ms: i64) -> Result<DeckSummary> {
+    pub fn deck_by_id(&self, user: UserId, deck: DeckId, now_ms: i64) -> Result<DeckRow> {
         self.list_decks(user, now_ms)?
             .into_iter()
             .find(|d| d.id == deck)
@@ -1219,9 +1342,19 @@ impl Services {
 
     /// The deck settings page in one read.
     pub fn deck_detail(&self, user: UserId, deck: DeckId, now_ms: i64) -> Result<DeckDetail> {
-        let summary = self.deck_by_id(user, deck, now_ms)?;
+        let decks = self.list_decks(user, now_ms)?;
+        let summary = decks
+            .iter()
+            .find(|d| d.id == deck)
+            .cloned()
+            .ok_or(ServiceError::Store(StoreError::NotFound("deck")))?;
+        let subdeck_count = decks
+            .iter()
+            .filter(|d| flash_core::deck_path::is_descendant(&d.name, &summary.name))
+            .count() as u32;
         let settings = self.store.get_settings(user)?;
         Ok(DeckDetail {
+            subdeck_count,
             limits: self.store.get_deck_limits(user, deck)?,
             default_new: settings.new_per_day,
             default_reviews: settings.reviews_per_day,
@@ -1366,6 +1499,12 @@ impl Services {
                 .unwrap_or_else(|| default_deck.to_string());
             by_deck.entry(deck).or_default().push(row);
         }
+        // The decks are filled one after another, not in one transaction,
+        // so a name that cannot be made (too long, inside an archived
+        // deck, past the deck cap) has to stop the import here, before the
+        // first card, and not after half of them.
+        let targets: Vec<String> = by_deck.keys().cloned().collect();
+        self.store.check_deck_paths(user, &targets)?;
         let mut created = 0usize;
         for (deck_name, batch) in by_deck {
             let validated = batch
@@ -1734,6 +1873,136 @@ impl Services {
     }
 
     // ---- notes (the advanced editor) ----
+
+    pub fn create_mcp_notes(
+        &self,
+        user: UserId,
+        deck: &str,
+        inputs: &[NoteInput],
+        now: i64,
+    ) -> Result<flash_store::McpMutationReceipt> {
+        let prepared = inputs
+            .iter()
+            .map(|input| self.prepare_note(user, input))
+            .collect::<Result<Vec<_>>>()?;
+        let inserts = prepared.iter().map(|p| p.generated.len() as u32).sum();
+        let cap = self.note_cap(user, inserts, now)?;
+        let saves = prepared
+            .iter()
+            .zip(inputs)
+            .map(|(p, input)| p.save(input.note_type, cap, None, now))
+            .collect::<Vec<_>>();
+        self.store
+            .create_notes_batch(user, deck, &saves, now)
+            .map_err(|e| self.cap_error(e))
+    }
+
+    pub fn update_mcp_sources(
+        &self,
+        user: UserId,
+        patches: &[McpSourcePatch],
+        now: i64,
+    ) -> Result<flash_store::McpMutationReceipt> {
+        let mut inputs = Vec::new();
+        let mut states = Vec::new();
+        for patch in patches {
+            let state = self.store.mcp_source_state(user, patch.card_id)?;
+            let seed = self.editor_seed(user, patch.card_id)?;
+            let mut expected = patch.sibling_card_ids.clone();
+            expected.sort_by_key(|id| id.0);
+            if (state.1.len() > 1 || !expected.is_empty()) && expected != state.1 {
+                return Err(ServiceError::Invalid(
+                    "sibling_card_ids must match the source's current cards; read list_cards again"
+                        .into(),
+                ));
+            }
+            if let Some(reason) = self.mcp_source_warning(user, &seed, &state.1)? {
+                return Err(ServiceError::Invalid(reason));
+            }
+            if patch.front_html.is_none() && patch.back_html.is_none() && patch.tags.is_none() {
+                return Err(ServiceError::Invalid(
+                    "an update must supply at least one field".into(),
+                ));
+            }
+            inputs.push(NoteInput {
+                note_type: seed.note_type,
+                front_html: patch.front_html.clone().unwrap_or(seed.front_html),
+                back_html: patch.back_html.clone().unwrap_or(seed.back_html),
+                tags: patch.tags.clone().unwrap_or(seed.tags),
+            });
+            states.push(state);
+        }
+        let prepared = inputs
+            .iter()
+            .map(|input| self.prepare_note(user, input))
+            .collect::<Result<Vec<_>>>()?;
+        let inserts = prepared
+            .iter()
+            .zip(&states)
+            .map(|(p, (_, ids))| p.generated.len().saturating_sub(ids.len()) as u32)
+            .sum();
+        let cap = self.note_cap(user, inserts, now)?;
+        let edits = prepared
+            .iter()
+            .zip(&inputs)
+            .zip(patches)
+            .zip(states)
+            .map(
+                |(((p, input), patch), (snapshot, siblings))| flash_store::SourceEdit {
+                    card: patch.card_id,
+                    snapshot,
+                    siblings,
+                    save: p.save(input.note_type, cap, None, now),
+                },
+            )
+            .collect::<Vec<_>>();
+        self.store
+            .update_sources_batch(user, &edits)
+            .map_err(|e| self.cap_error(e))
+    }
+
+    /// Some old imports have only rendered HTML and a stripped source.
+    /// Expose that limitation on reads, and refuse destructive reconstruction.
+    pub(crate) fn mcp_source_warning(
+        &self,
+        user: UserId,
+        seed: &EditorSeed,
+        siblings: &[CardId],
+    ) -> Result<Option<String>> {
+        if seed.note_id.is_some()
+            || !matches!(seed.note_type, NoteType::Cloze | NoteType::BasicTyped)
+        {
+            return Ok(None);
+        }
+        let original = NoteInput {
+            note_type: seed.note_type,
+            front_html: seed.front_html.clone(),
+            back_html: seed.back_html.clone(),
+            tags: seed.tags.clone(),
+        };
+        let generated = self.prepare_note(user, &original)?;
+        let mut seen_slots = std::collections::HashSet::new();
+        for id in siblings {
+            let row = self.card(user, *id)?;
+            let ord = row.cloze_index.map(|n| n.saturating_sub(1)).unwrap_or(0);
+            if !seen_slots.insert(ord) || row.tags != seed.tags {
+                return Ok(Some("source_unavailable: imported siblings have duplicate slots or different tags; resolve the source grouping before editing".into()));
+            }
+            let lossless = generated
+                .generated
+                .iter()
+                .find(|g| g.ord == ord)
+                .is_some_and(|g| {
+                    g.extras.front_html.as_deref() == row.front_html.as_deref()
+                        && g.extras.back_html.as_deref() == row.back_html.as_deref()
+                        && g.extras.type_answer == row.type_answer
+                });
+            if !lossless {
+                return Ok(Some("source_unavailable: this legacy import lacks a lossless editable source; rendered content is readable, but cannot be safely rewritten".into()));
+            }
+        }
+        Ok(None)
+    }
 
     /// Sanitizes the editor's fields, expands them into cards, and checks
     /// every media reference resolves to the user's own upload.
@@ -2486,19 +2755,25 @@ impl Services {
         &self,
         user: UserId,
         ids: &[AiSourceId],
-        deck: DeckId,
+        deck: DeckTarget,
         instruction: &str,
         ai: &AiRuntime,
         now_ms: i64,
-    ) -> Result<AiJobId> {
+    ) -> Result<AiJobQueued> {
         let instruction = clean_instruction(instruction)?;
-        self.store.get_deck_limits(user, deck)?;
+        // An existing deck is checked before anything else, as it always
+        // was; a new one is made last, so nothing below leaves an empty
+        // deck behind when it refuses the job.
+        if let DeckTarget::Existing(deck) = &deck {
+            self.store.get_deck_limits(user, *deck)?;
+        }
         self.require_no_active_ai_job(user)?;
         let preflight = self.ai_preflight_set(user, ids, ai, now_ms)?;
         if let (Some(code), Some(reason)) = (preflight.code, preflight.reason) {
             return Err(refusal(code, reason));
         }
-        Ok(self.store.create_ai_job(
+        let (deck, deck_created) = self.resolve_deck(user, deck, now_ms)?;
+        let job = self.store.create_ai_job(
             user,
             &AiJobNew {
                 source_ids: ids,
@@ -2509,7 +2784,20 @@ impl Services {
                 instruction: &instruction,
                 now_ms,
             },
-        )?)
+        )?;
+        Ok(AiJobQueued {
+            job,
+            deck,
+            deck_created,
+        })
+    }
+
+    /// A target as the id it names, making the deck when the name is new.
+    fn resolve_deck(&self, user: UserId, deck: DeckTarget, now_ms: i64) -> Result<(DeckId, bool)> {
+        match deck {
+            DeckTarget::Existing(deck) => Ok((deck, false)),
+            DeckTarget::New(name) => self.deck_named(user, &name, now_ms),
+        }
     }
 
     /// Whether the plan admits each kind this server reads, for a page
@@ -2809,17 +3097,26 @@ impl Services {
         user: UserId,
         job: AiJobId,
         drafts: Option<&[AiDraftId]>,
-        deck: Option<DeckId>,
+        deck: Option<DeckTarget>,
         now_ms: i64,
     ) -> Result<AiKeepReport> {
         let root = self.ai_root_job(user, job)?;
-        let Some(deck) = deck.or(root.deck_id) else {
-            return Err(ServiceError::Invalid(
-                "Choose a deck to keep the cards in.".into(),
-            ));
+        let deck = match deck {
+            Some(target) => self.resolve_deck(user, target, now_ms)?.0,
+            None => match root.deck_id {
+                Some(deck) => deck,
+                None => {
+                    return Err(ServiceError::Invalid(
+                        "Choose a deck to keep the cards in.".into(),
+                    ));
+                }
+            },
         };
         self.store.get_deck_limits(user, deck)?;
-        let mut report = AiKeepReport::default();
+        let mut report = AiKeepReport {
+            deck: Some(deck),
+            ..AiKeepReport::default()
+        };
         for draft in self.store.list_ai_drafts(user, root.id)? {
             if !draft.status.is_open() || drafts.is_some_and(|ids| !ids.contains(&draft.id)) {
                 continue;
@@ -3418,10 +3715,30 @@ pub struct AiThread {
     pub active_job_id: Option<AiJobId>,
 }
 
+/// Where generated cards are to land: a deck the person picked from
+/// their own, or one named for the first time on the way in.
+#[derive(Debug, Clone)]
+pub enum DeckTarget {
+    Existing(DeckId),
+    New(String),
+}
+
+/// A queued generation: the job, the deck it will file into, and whether
+/// that deck is one this call just made.
+#[derive(Debug, Clone, Copy)]
+pub struct AiJobQueued {
+    pub job: AiJobId,
+    pub deck: DeckId,
+    pub deck_created: bool,
+}
+
 /// What a keep did.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AiKeepReport {
     pub kept: u32,
+    /// The deck the cards went into, once one was settled on: the id a
+    /// caller sends the person to, including a deck this keep named.
+    pub deck: Option<DeckId>,
     /// Cards the kept notes expanded into.
     pub cards: u32,
     /// Open drafts left on the review afterwards.
@@ -3649,6 +3966,14 @@ pub struct NoteInput {
     pub front_html: String,
     pub back_html: String,
     pub tags: Vec<String>,
+}
+
+pub struct McpSourcePatch {
+    pub card_id: CardId,
+    pub front_html: Option<String>,
+    pub back_html: Option<String>,
+    pub tags: Option<Vec<String>>,
+    pub sibling_card_ids: Vec<CardId>,
 }
 
 /// What the editor opens with for an existing card.

@@ -53,6 +53,12 @@ pub struct ImportPreview {
     pub deck: String,
     /// Extra line when the file names several decks that will merge.
     pub deck_note: Option<String>,
+    /// The decks the file names, with how many cards each holds, in the
+    /// file's order. More than one means the preview offers to keep them
+    /// (`CommitOptions::keep_decks`) and asks only for an optional deck to
+    /// put them under, prefilled with `parent`.
+    pub file_decks: Vec<(String, usize)>,
+    pub parent: String,
     pub warnings: u32,
     pub sample: Vec<(String, String)>,
     pub messages: Vec<String>,
@@ -70,8 +76,16 @@ pub struct ImportPreview {
 #[derive(Debug, Clone)]
 pub struct CommitOptions {
     pub token: String,
-    /// Destination deck, as edited on the preview. Required.
+    /// The deck named on the preview. For a file that names no deck, or
+    /// one, it is where the cards go, and is required. For a file that
+    /// names several, see `keep_decks`.
     pub deck: String,
+    /// A file that names several decks keeps them: each card goes to the
+    /// deck its row names (a path nests, as everywhere), inside `deck`
+    /// when one is given, which is then optional. Without this the decks
+    /// merge into `deck`, which is all a client built before decks nested
+    /// knows to ask for.
+    pub keep_decks: bool,
     /// Bring the Anki study progress along.
     pub progress: bool,
     /// Adopt the package's FSRS settings.
@@ -154,6 +168,11 @@ pub fn settings_desc(s: &ImportedSettings) -> String {
 
 /// "Pharm" for ["Pharm::Cardio", "Pharm::Renal"]; the first name when
 /// they share nothing.
+///
+/// This and `merge_note` serve the merge: the one destination a client
+/// built before decks nested is shown and sends back. A client that keeps
+/// the file's decks reads `file_decks` and ignores both, and both can go
+/// when the API next stops serving such a client.
 fn common_deck_parent(decks: &[String]) -> String {
     let first: Vec<&str> = decks[0].split("::").collect();
     let mut shared = first.len();
@@ -250,17 +269,19 @@ pub fn preview(
     if keep_apkg {
         std::fs::write(&apkg_path, bytes)?;
     }
-    let file_decks: Vec<String> = {
-        let mut names: Vec<String> = Vec::new();
+    let deck_counts: Vec<(String, usize)> = {
+        let mut counts: Vec<(String, usize)> = Vec::new();
         for r in &parsed.rows {
             if let Some(d) = &r.deck {
-                if !names.contains(d) {
-                    names.push(d.clone());
+                match counts.iter_mut().find(|(name, _)| name == d) {
+                    Some((_, n)) => *n += 1,
+                    None => counts.push((d.clone(), 1)),
                 }
             }
         }
-        names
+        counts
     };
+    let file_decks: Vec<String> = deck_counts.iter().map(|(name, _)| name.clone()).collect();
     // Prefill for the editable, required field on the preview: what the
     // user typed, else the file's deck, else the shared parent of the
     // file's decks ("Pharm" for Pharm::Cardio + Pharm::Renal), else blank.
@@ -299,6 +320,8 @@ pub fn preview(
         file_size_bytes: bytes.len(),
         deck: destination,
         deck_note,
+        file_decks: deck_counts,
+        parent: deck_override.trim().to_string(),
         warnings: pending.skipped,
         sample: pending
             .rows
@@ -339,13 +362,33 @@ pub fn commit(
         return Err(Failure::user("preview belongs to another user"));
     }
     let deck = opts.deck.trim().to_string();
-    if deck.is_empty() {
-        return Err(Failure::user("deck name required"));
+    let named: std::collections::HashSet<&str> = pending
+        .rows
+        .iter()
+        .filter_map(|r| r.deck.as_deref())
+        .collect();
+    if opts.keep_decks && named.len() > 1 {
+        // Each card goes where its row says, inside the deck named on the
+        // preview when there is one. A row that names no deck has only
+        // that deck to go to.
+        for row in &mut pending.rows {
+            let path = flash_core::deck_path::join(&deck, row.deck.as_deref().unwrap_or(""))
+                .ok_or_else(|| {
+                    Failure::user("some cards name no deck: name a deck to put the import under")
+                })?;
+            row.deck = Some(path);
+        }
+    } else {
+        // One destination for everything: a file that names no deck or
+        // one, and the merge a client built before decks nested asks for.
+        if deck.is_empty() {
+            return Err(Failure::user("deck name required"));
+        }
+        for row in &mut pending.rows {
+            row.deck = None;
+        }
     }
     pending.default_deck = deck;
-    for row in &mut pending.rows {
-        row.deck = None;
-    }
 
     let commit_started = std::time::Instant::now();
     let package = if pending.apkg {

@@ -555,6 +555,17 @@ pub async fn serve_media_bearer(
     serve_media_for(state, method, user, id, headers, false).await
 }
 
+/// Connector download only; the OAuth middleware supplies the owner.
+pub async fn serve_media_connector(
+    State(state): State<AppState>,
+    method: axum::http::Method,
+    axum::Extension(user): axum::Extension<flash_core::UserId>,
+    Path(id): Path<i64>,
+    headers: HeaderMap,
+) -> Response {
+    serve_media_for(state, method, user, id, headers, false).await
+}
+
 /// How long a presigned media URL stays valid, and how long a client may
 /// cache the redirect to it (shorter, so a cached redirect never points
 /// at a dead URL).

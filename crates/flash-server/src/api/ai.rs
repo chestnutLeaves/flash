@@ -19,7 +19,8 @@ use serde::{Deserialize, Serialize};
 use super::{call, ApiError, ApiJson, ApiResult, BearerUser};
 use crate::policy::AiUsage;
 use crate::service::{
-    facts_line, now_ms, AiJobDetail, AiPreflight, AiSetPreflight, AiThread, ServiceError, Services,
+    facts_line, now_ms, AiJobDetail, AiPreflight, AiSetPreflight, AiThread, DeckTarget,
+    ServiceError, Services,
 };
 use crate::state::AppState;
 use crate::web::MEDIA_UPLOAD_MAX_BYTES;
@@ -316,6 +317,11 @@ impl From<AiDraftRow> for Draft {
 #[derive(Debug, Serialize)]
 pub struct Queued {
     pub job_id: i64,
+    /// The deck the cards will land in: the id a `deck_name` resolved
+    /// to, so a client that named a deck learns which one it got. A
+    /// further pass over a review keeps the deck it already has and
+    /// leaves this null.
+    pub deck_id: Option<i64>,
 }
 
 /// A message accepted into the review's thread: the pass to poll and
@@ -373,6 +379,8 @@ impl From<AiThread> for Thread {
 pub struct KeepReport {
     pub kept: u32,
     pub cards: u32,
+    /// The deck the cards went into, a deck this keep named included.
+    pub deck_id: Option<i64>,
     pub remaining_pending: u32,
     /// The card policy's sentence when it stopped the keep early.
     pub stopped_by: Option<String>,
@@ -654,9 +662,26 @@ async fn preflight(
 struct JobBody {
     #[serde(deserialize_with = "crate::bounds::source_ids")]
     source_ids: Vec<i64>,
-    deck_id: i64,
+    /// A deck the account already has. Exactly one of this and
+    /// `deck_name` is given.
+    #[serde(default)]
+    deck_id: Option<i64>,
+    /// A deck by name: an existing one of that name, or a new deck.
+    #[serde(default, deserialize_with = "crate::bounds::opt_deck_name")]
+    deck_name: Option<String>,
     #[serde(default, deserialize_with = "crate::bounds::opt_instruction")]
     instruction: Option<String>,
+}
+
+/// The deck a body names, as one target. Two ways of saying it, or
+/// neither, is a refusal rather than a guess.
+fn deck_target(deck_id: Option<i64>, deck_name: Option<String>) -> Result<DeckTarget, ApiError> {
+    match (deck_id, deck_name) {
+        (Some(id), None) => Ok(DeckTarget::Existing(DeckId(id))),
+        (None, Some(name)) => Ok(DeckTarget::New(name)),
+        (Some(_), Some(_)) => Err(ApiError::invalid("send deck_id or deck_name, not both")),
+        (None, None) => Err(ApiError::invalid("send deck_id or deck_name")),
+    }
 }
 
 async fn create_job(
@@ -667,11 +692,12 @@ async fn create_job(
     let ai = state.ai()?.clone();
     let runtime = ai.clone();
     let ids: Vec<AiSourceId> = body.source_ids.into_iter().map(AiSourceId).collect();
-    let job = call(state.services.clone(), move |s| {
+    let deck = deck_target(body.deck_id, body.deck_name)?;
+    let queued = call(state.services.clone(), move |s| {
         s.ai_create_job(
             user.id,
             &ids,
-            DeckId(body.deck_id),
+            deck,
             body.instruction.as_deref().unwrap_or(""),
             &runtime,
             now_ms(),
@@ -679,7 +705,13 @@ async fn create_job(
     })
     .await?;
     ai.wake.notify_one();
-    Ok((StatusCode::CREATED, Json(Queued { job_id: job.0 })))
+    Ok((
+        StatusCode::CREATED,
+        Json(Queued {
+            job_id: queued.job.0,
+            deck_id: Some(queued.deck.0),
+        }),
+    ))
 }
 
 async fn job(
@@ -720,9 +752,12 @@ struct KeepBody {
     /// Absent: every open draft.
     #[serde(default, deserialize_with = "crate::bounds::opt_draft_ids")]
     draft_ids: Option<Vec<i64>>,
-    /// Absent: the job's own deck.
+    /// Absent, with `deck_name` absent too: the job's own deck.
     #[serde(default)]
     deck_id: Option<i64>,
+    /// The deck by name: an existing one of that name, or a new deck.
+    #[serde(default, deserialize_with = "crate::bounds::opt_deck_name")]
+    deck_name: Option<String>,
 }
 
 async fn keep(
@@ -732,22 +767,22 @@ async fn keep(
     ApiJson(body): ApiJson<KeepBody>,
 ) -> ApiResult<KeepReport> {
     state.ai()?;
+    // Neither field is the job's own deck; either one names a target.
+    let deck = match (body.deck_id, body.deck_name) {
+        (None, None) => None,
+        (deck_id, deck_name) => Some(deck_target(deck_id, deck_name)?),
+    };
     let report = call(state.services.clone(), move |s| {
         let ids: Option<Vec<AiDraftId>> = body
             .draft_ids
             .map(|ids| ids.into_iter().map(AiDraftId).collect());
-        s.ai_keep_drafts(
-            user.id,
-            AiJobId(id),
-            ids.as_deref(),
-            body.deck_id.map(DeckId),
-            now_ms(),
-        )
+        s.ai_keep_drafts(user.id, AiJobId(id), ids.as_deref(), deck, now_ms())
     })
     .await?;
     Ok(Json(KeepReport {
         kept: report.kept,
         cards: report.cards,
+        deck_id: report.deck.map(|d| d.0),
         remaining_pending: report.remaining_pending,
         stopped_by: report.stopped_by,
     }))
@@ -789,7 +824,13 @@ async fn regenerate(
     })
     .await?;
     ai.wake.notify_one();
-    Ok((StatusCode::CREATED, Json(Queued { job_id: job.0 })))
+    Ok((
+        StatusCode::CREATED,
+        Json(Queued {
+            job_id: job.0,
+            deck_id: None,
+        }),
+    ))
 }
 
 async fn more(
@@ -809,7 +850,13 @@ async fn more(
     })
     .await?;
     ai.wake.notify_one();
-    Ok((StatusCode::CREATED, Json(Queued { job_id: job.0 })))
+    Ok((
+        StatusCode::CREATED,
+        Json(Queued {
+            job_id: job.0,
+            deck_id: None,
+        }),
+    ))
 }
 
 #[derive(Deserialize)]

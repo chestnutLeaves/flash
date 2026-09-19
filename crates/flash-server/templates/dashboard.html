@@ -30,17 +30,10 @@
 {% if decks.is_empty() %}
 <p class="muted">No decks yet. <a href="/decks">Create one</a> or <a href="/import">import</a>.</p>
 {% else %}
-<table class="fl-table">
+<table class="fl-table" data-deck-tree>
   <thead><tr><th>Deck</th><th>Due</th><th>New</th><th></th></tr></thead>
   <tbody>
-  {% for deck in decks %}
-  <tr>
-    <td><a href="/decks/{{ deck.id }}">{{ deck.name }}</a></td>
-    <td class="num">{{ deck.due_count }}</td>
-    <td class="num">{{ deck.new_count }}</td>
-    <td style="text-align:right"><a class="small muted" href="/study?deck={{ deck.id }}">study</a></td>
-  </tr>
-  {% endfor %}
+  {% include "deck_rows.html" %}
   </tbody>
 </table>
 {% endif %}

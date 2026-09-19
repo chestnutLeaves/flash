@@ -19,6 +19,69 @@ const PNG: &[u8] = &[
     0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0, 1, 2, 3,
 ];
 
+#[tokio::test]
+async fn connector_media_download_uses_connector_auth_and_preserves_ranges() {
+    let h = harness("connector");
+    let id = ingest_media(
+        &h.services,
+        &h.media,
+        h.user,
+        false,
+        "cat.png",
+        PNG,
+        now_ms(),
+    )
+    .unwrap();
+    let bearer = oauth_bearer(&h.store, h.user);
+    let url = format!("/mcp-media/{}", id.0);
+    let reply = send(
+        &h.app,
+        Request::get(&url)
+            .header(header::AUTHORIZATION, format!("Bearer {bearer}"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::OK);
+    assert_eq!(reply.bytes, PNG);
+    assert_eq!(reply.header("content-type"), Some("image/png"));
+    assert!(reply.header("location").is_none());
+    let range = send(
+        &h.app,
+        Request::get(&url)
+            .header(header::AUTHORIZATION, format!("Bearer {bearer}"))
+            .header(header::RANGE, "bytes=0-3")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(range.status, StatusCode::PARTIAL_CONTENT);
+    assert_eq!(range.bytes, &PNG[..4]);
+    let other = member(&h.store, "Other", "other-media@example.com");
+    let foreign = oauth_bearer(&h.store, other);
+    let denied = send(
+        &h.app,
+        Request::get(&url)
+            .header(header::AUTHORIZATION, format!("Bearer {foreign}"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(denied.status, StatusCode::NOT_FOUND);
+    let anonymous = send(&h.app, Request::get(&url).body(Body::empty()).unwrap()).await;
+    assert_eq!(anonymous.status, StatusCode::UNAUTHORIZED);
+    // A connector grant still cannot use the first-party API.
+    let account = send(
+        &h.app,
+        Request::get("/api/v1/decks")
+            .header(header::AUTHORIZATION, format!("Bearer {bearer}"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(account.status, StatusCode::UNAUTHORIZED);
+}
+
 struct Harness {
     app: axum::Router,
     store: Arc<Store>,

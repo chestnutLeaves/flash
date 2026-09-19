@@ -19,7 +19,7 @@ use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::{Form, Json};
 use flash_core::{AiDraftId, AiJobId, AiSourceId, DeckId, UserId};
 use flash_store::notes::NoteType;
-use flash_store::{AiDraftRow, AiDraftStatus, AiJobState, AiTurnRow, DeckSummary};
+use flash_store::{AiDraftRow, AiDraftStatus, AiJobState, AiTurnRow};
 use serde::Deserialize;
 
 use crate::ai::caps::Caps;
@@ -28,7 +28,7 @@ use crate::api::ai::{busy, ingest, with_retry_after, SetPreflight, Upload};
 use crate::api::{ApiError, ApiJson};
 use crate::auth::{ApiUser, AuthUser, Theme};
 use crate::ext::Slot;
-use crate::service::{facts_line, now_ms, ServiceError, Services};
+use crate::service::{facts_line, now_ms, DeckRow, DeckTarget, ServiceError, Services};
 use crate::state::{AiRuntime, AppState};
 use crate::web::{act, respond, EditorView, NoteForm, Shell};
 
@@ -89,7 +89,7 @@ impl CapsView {
 #[template(path = "ai_generate.html")]
 struct GeneratePage {
     shell: Shell,
-    decks: Vec<DeckSummary>,
+    decks: Vec<DeckRow>,
     /// The deck the entry point named, preselected; 0 when the page was
     /// opened from the deck list.
     deck_id: i64,
@@ -307,9 +307,22 @@ pub struct JobForm {
     /// The chips' source ids, comma-joined, in composer order.
     #[serde(deserialize_with = "crate::bounds::source_id_list")]
     source_ids: String,
+    /// The deck the switcher names, or 0 for the deck `deck_name` names.
     deck_id: i64,
+    #[serde(default, deserialize_with = "crate::bounds::opt_deck_name")]
+    deck_name: Option<String>,
     #[serde(default, deserialize_with = "crate::bounds::opt_instruction")]
     instruction: Option<String>,
+}
+
+/// What the deck switchers post: an id, or the 0 that stands for "a new
+/// deck" and the name typed beside it.
+fn deck_target(deck_id: i64, name: Option<String>) -> DeckTarget {
+    if deck_id == 0 {
+        DeckTarget::New(name.unwrap_or_default())
+    } else {
+        DeckTarget::Existing(DeckId(deck_id))
+    }
 }
 
 /// "12,15,19" as ids; anything that is not a number is refused with a
@@ -343,7 +356,7 @@ pub async fn create_job(
         s.ai_create_job(
             user,
             &ids,
-            DeckId(form.deck_id),
+            deck_target(form.deck_id, form.deck_name),
             form.instruction.as_deref().unwrap_or(""),
             &runtime,
             now_ms(),
@@ -351,10 +364,13 @@ pub async fn create_job(
     })
     .await
     {
-        Ok(job) => {
+        Ok(queued) => {
             ai.wake.notify_one();
+            if queued.deck_created {
+                crate::web::account_event(&state, user, "deck_created", None, None);
+            }
             crate::web::account_event(&state, user, "ai_job", Some("generate"), None);
-            Redirect::to(&format!("/ai/jobs/{job}")).into_response()
+            Redirect::to(&format!("/ai/jobs/{}", queued.job)).into_response()
         }
         Err(response) => response,
     }
@@ -564,7 +580,7 @@ struct ReviewBody {
     /// The deck the generation was queued into, preselected on the
     /// switcher; 0 once that deck has been deleted.
     deck_id: i64,
-    decks: Vec<DeckSummary>,
+    decks: Vec<DeckRow>,
     pending: u32,
     kept: u32,
     discarded: u32,
@@ -630,7 +646,7 @@ struct ThreadReply {
 /// of it once housekeeping has taken some.
 /// The decks a generation can be filed into: an archived deck is not
 /// offered, though a job already aimed at one keeps its name.
-fn active_decks(s: &Services, user: UserId) -> Result<Vec<DeckSummary>, ServiceError> {
+fn active_decks(s: &Services, user: UserId) -> Result<Vec<DeckRow>, ServiceError> {
     Ok(s.list_decks(user, now_ms())?
         .into_iter()
         .filter(|d| d.archived_at.is_none())
@@ -777,11 +793,21 @@ struct DraftSavedPartial {
 }
 
 /// The deck the review's switcher currently names, sent along by every
-/// per-row keep.
+/// per-row keep. A `deck_id` of 0 is the switcher's "new deck" entry,
+/// and `deck_name` is what was typed beside it; the second row of a keep
+/// finds the deck the first row made, so one name is one deck.
 #[derive(Deserialize)]
 pub struct DeckForm {
     #[serde(default)]
     deck_id: Option<i64>,
+    #[serde(default, deserialize_with = "crate::bounds::opt_deck_name")]
+    deck_name: Option<String>,
+}
+
+impl DeckForm {
+    fn target(self) -> Option<DeckTarget> {
+        self.deck_id.map(|id| deck_target(id, self.deck_name))
+    }
 }
 
 pub async fn keep_draft(
@@ -796,13 +822,7 @@ pub async fn keep_draft(
     let draft = AiDraftId(id);
     match act(state.services.clone(), move |s| {
         let job = s.ai_draft(user, draft)?.job_id;
-        let report = s.ai_keep_drafts(
-            user,
-            job,
-            Some(&[draft]),
-            form.deck_id.map(DeckId),
-            now_ms(),
-        )?;
+        let report = s.ai_keep_drafts(user, job, Some(&[draft]), form.target(), now_ms())?;
         Ok(DraftRowPartial {
             row: DraftRowView::new(s.ai_draft(user, draft)?, report.stopped_by),
         })
@@ -940,13 +960,15 @@ pub async fn keep_job(
     let shell = Shell::new(&state, theme, "decks", is_admin);
     let job = AiJobId(id);
     let kept = act(state.services.clone(), move |s| {
-        let report = s.ai_keep_drafts(user, job, None, form.deck_id.map(DeckId), now_ms())?;
+        let report = s.ai_keep_drafts(user, job, None, form.target(), now_ms())?;
         // A policy that stopped the loop leaves drafts behind: the
         // review comes back with its sentence rather than the deck.
         match report.stopped_by {
             Some(reason) => Ok(Err(review_page_of(&s, shell, user, job, Some(reason))?)),
             None => {
-                let deck = form.deck_id.or_else(|| {
+                // The report's deck is the one the cards actually went
+                // into, a deck the switcher just named included.
+                let deck = report.deck.map(|d| d.0).or_else(|| {
                     s.ai_job(user, job)
                         .ok()
                         .and_then(|j| j.deck_id.map(|d| d.0))

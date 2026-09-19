@@ -21,11 +21,20 @@ Nothing here is in a deck until you keep it.</p>
         data-gen-confirm="Keep {{ review.pending }} cards?">
     <div class="fl-field">
       <label class="fl-label" for="review-deck">Into deck</label>
-      <select class="fl-input fl-select" id="review-deck" name="deck_id">
+      <select class="fl-input fl-select" id="review-deck" name="deck_id" data-gen-deck>
+        <option value="0"{% if review.decks.is_empty() %} selected{% endif %}>+ New deck&hellip;</option>
         {% for deck in review.decks %}
-        <option value="{{ deck.id }}"{% if deck.id.0 == review.deck_id %} selected{% endif %}>{{ deck.name }}</option>
+        <option value="{{ deck.id }}"{% if deck.id.0 == review.deck_id %} selected{% endif %}>{{ deck.path }}</option>
         {% endfor %}
       </select>
+      {# One name is one deck: the row that creates it is found by the
+         rows kept after it, so a per-row keep does not make a deck
+         each time. #}
+      <div class="gen-newdeck" data-gen-newdeck{% if !review.decks.is_empty() %} hidden{% endif %}>
+        <label class="fl-sr-only" for="review-deck-name">New deck name</label>
+        <input class="fl-input" type="text" id="review-deck-name" name="deck_name"
+               placeholder="Name the new deck" maxlength="200" data-gen-deck-name>
+      </div>
     </div>
     <button class="fl-btn fl-btn-primary" type="submit" data-busy-label="Keeping&hellip;"{% if review.pending == 0 %} disabled{% endif %}>Keep all ({{ review.pending }})</button>
   </form>

@@ -111,6 +111,50 @@ const CORE: &[Migration] = &[
         name: "v022_deck_archive",
         sql: V022_DECK_ARCHIVE,
     },
+    Migration {
+        name: "v023_mcp_confirmations",
+        sql: "CREATE TABLE mcp_confirmations (
+          token_hash TEXT PRIMARY KEY,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          client_id TEXT NOT NULL,
+          target TEXT NOT NULL,
+          deck_id INTEGER,
+          card_ids TEXT NOT NULL,
+          expires_ms INTEGER NOT NULL,
+          invalidated INTEGER NOT NULL DEFAULT 0 CHECK (invalidated IN (0, 1)),
+          result TEXT
+        );
+        CREATE INDEX mcp_confirmations_expiry ON mcp_confirmations(expires_ms);
+        CREATE INDEX mcp_confirmations_pending ON mcp_confirmations(user_id)
+          WHERE result IS NULL AND invalidated = 0;
+        CREATE TRIGGER mcp_confirmation_card_deleted AFTER DELETE ON cards BEGIN
+          UPDATE mcp_confirmations SET invalidated = 1
+          WHERE user_id = OLD.user_id AND result IS NULL AND invalidated = 0
+            AND EXISTS (SELECT 1 FROM json_each(card_ids) WHERE value = OLD.id);
+        END;
+        CREATE TRIGGER mcp_confirmation_deck_deleted AFTER DELETE ON decks BEGIN
+          UPDATE mcp_confirmations SET invalidated = 1
+          WHERE user_id = OLD.user_id AND result IS NULL AND invalidated = 0
+            AND deck_id = OLD.id;
+        END;",
+    },
+    // A deck deletion covers the decks under the deck, so its approval
+    // pins that set of decks beside the cards: a subdeck made or moved in
+    // after the person said yes holds no pinned card, and only the deck
+    // set can show it was not part of what they approved. `deck_id` stays
+    // the deck that was named. A row staged before this step has no list
+    // and is read as the named deck alone.
+    Migration {
+        name: "v024_mcp_confirmation_subtree",
+        sql: "ALTER TABLE mcp_confirmations ADD COLUMN deck_ids TEXT;
+        DROP TRIGGER mcp_confirmation_deck_deleted;
+        CREATE TRIGGER mcp_confirmation_deck_deleted AFTER DELETE ON decks BEGIN
+          UPDATE mcp_confirmations SET invalidated = 1
+          WHERE user_id = OLD.user_id AND result IS NULL AND invalidated = 0
+            AND (deck_id = OLD.id
+                 OR EXISTS (SELECT 1 FROM json_each(deck_ids) WHERE value = OLD.id));
+        END;",
+    },
 ];
 
 fn now_ms() -> i64 {

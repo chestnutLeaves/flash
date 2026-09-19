@@ -36,6 +36,7 @@ pub use repo::cards::{
     check_tags, CardExtras, CardRow, DeckLimits, DeckSummary, DeletedDeck, MAX_DECKS_PER_USER,
     MAX_TAGS_PER_CARD, MAX_TAG_LEN,
 };
+pub use repo::mcp::{McpDeletionPreview, McpDeletionReceipt, McpMutationReceipt, SourceEdit};
 pub use repo::media::MediaRow;
 pub use repo::notes::{NoteRow, NoteSave};
 pub use repo::oauth::{

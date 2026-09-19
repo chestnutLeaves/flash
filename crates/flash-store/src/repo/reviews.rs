@@ -119,9 +119,10 @@ impl Store {
 
     /// Candidate cards for a study queue: everything in scope that is New
     /// or has come due, in an active deck (an archived deck's cards are
-    /// out of every scope, the deck's own included). Ordering and
-    /// new-card budgeting happen in flash_core::queue over this
-    /// projection.
+    /// out of every scope, the deck's own included). A deck's scope holds
+    /// its subdecks: each entry names the deck the card lives in, which is
+    /// the deck whose budget it spends. Ordering and new-card budgeting
+    /// happen in flash_core::queue over this projection.
     pub fn queue_entries(
         &self,
         user: UserId,
@@ -129,18 +130,19 @@ impl Store {
         now_ms: i64,
     ) -> Result<Vec<QueueEntry>> {
         let conn = self.conn();
-        let (deck_filter, tag_filter) = match scope {
+        let (deck, tag_filter) = match scope {
             StudyScope::All => (None, None),
-            StudyScope::Deck(id) => (Some(id.0), None),
+            StudyScope::Deck(id) => (Some(*id), None),
             StudyScope::Tag(tag) => (None, Some(tag.trim().to_lowercase())),
         };
+        let deck_filter = super::cards::subtree_filter(&conn, user, deck)?;
         let mut stmt = conn.prepare(
             "SELECT s.card_id, c.deck_id, s.phase, s.due FROM card_state s
              JOIN cards c ON c.id = s.card_id
              JOIN decks d ON d.id = c.deck_id
              WHERE c.user_id = ?1 AND c.deleted_at IS NULL AND c.suspended = 0
                AND d.archived_at IS NULL
-               AND (?2 IS NULL OR c.deck_id = ?2)
+               AND (?2 IS NULL OR c.deck_id IN (SELECT value FROM json_each(?2)))
                AND (?3 IS NULL OR EXISTS (
                      SELECT 1 FROM card_tags ct JOIN tags t ON t.id = ct.tag_id
                      WHERE ct.card_id = c.id AND t.name = ?3))

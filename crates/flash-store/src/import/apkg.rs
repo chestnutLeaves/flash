@@ -760,6 +760,15 @@ fn media_message(m: &MediaSummary) -> Option<String> {
 
 // ---- deck names ----
 
+/// An Anki deck name as a deck path: the whole of it, so a subdeck arrives
+/// as a subdeck. The decks table separates the levels with \x1f and the
+/// older JSON with `::`; both come out joined by `::`, each level trimmed.
+/// A name with nothing in it stays as it was, for the caller to refuse.
+fn deck_path_of(name: &str) -> String {
+    let path = name.replace('\u{1f}', flash_core::deck_path::SEP);
+    flash_core::deck_path::normalise(&path).unwrap_or(path)
+}
+
 fn load_deck_names(conn: &Connection) -> Result<HashMap<i64, String>, ImportError> {
     // Newer schema: a real decks table.
     if let Ok(mut stmt) = conn.prepare(&format!(
@@ -769,15 +778,7 @@ fn load_deck_names(conn: &Connection) -> Result<HashMap<i64, String>, ImportErro
         if let Ok(rows) = stmt.query_map([], |r| Ok((r.get(0)?, r.get::<_, String>(1)?))) {
             let map: HashMap<i64, String> = rows
                 .filter_map(|r| r.ok())
-                // Anki nests decks with \x1f; use the leaf name.
-                .map(|(id, name)| {
-                    let leaf = name
-                        .rsplit(['\u{1f}', ':'])
-                        .next()
-                        .unwrap_or(&name)
-                        .to_string();
-                    (id, leaf)
-                })
+                .map(|(id, name)| (id, deck_path_of(&name)))
                 .collect();
             if !map.is_empty() {
                 return Ok(map);
@@ -794,8 +795,7 @@ fn load_deck_names(conn: &Connection) -> Result<HashMap<i64, String>, ImportErro
     if let Some(obj) = value.as_object() {
         for (id, deck) in obj {
             if let (Ok(id), Some(name)) = (id.parse(), deck["name"].as_str()) {
-                let leaf = name.rsplit("::").next().unwrap_or(name).to_string();
-                map.insert(id, leaf);
+                map.insert(id, deck_path_of(name));
             }
         }
     }
@@ -879,4 +879,25 @@ fn strip_html(html: &str) -> String {
         .filter(|line| !line.is_empty())
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::deck_path_of;
+
+    /// Anki's decks table separates the levels of a nested deck with \x1f
+    /// and its older JSON with `::`. Both are the whole path here, and one
+    /// colon is part of a name: the leaf-only reading used to cut
+    /// "Week 1: intro" down to " intro".
+    #[test]
+    fn an_anki_deck_name_is_its_whole_path() {
+        assert_eq!(
+            deck_path_of("Anatomy\u{1f}Cardiac\u{1f}Conduction"),
+            "Anatomy::Cardiac::Conduction"
+        );
+        assert_eq!(deck_path_of("Anatomy::Cardiac"), "Anatomy::Cardiac");
+        assert_eq!(deck_path_of(" Anatomy :: Cardiac "), "Anatomy::Cardiac");
+        assert_eq!(deck_path_of("Week 1: intro"), "Week 1: intro");
+        assert_eq!(deck_path_of("Default"), "Default");
+    }
 }

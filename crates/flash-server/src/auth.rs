@@ -53,6 +53,112 @@ pub fn clear_cookie_header(name: &str) -> String {
 
 pub const THEME_COOKIE: &str = "flash-theme";
 
+/// `Set-Cookie` value for a preference the page's own script may also
+/// write: how the deck list is shown, which holds nothing secret and must
+/// change the moment it is clicked, without a request. So it is not
+/// HttpOnly, where the session cookie is. `None` forgets it. `static/ui.js`
+/// writes the same attributes.
+pub fn pref_cookie_header(name: &str, value: Option<&str>) -> String {
+    match value {
+        Some(value) => format!("{name}={value}; Path=/; Secure; SameSite=Lax; Max-Age=31536000"),
+        None => format!("{name}=; Path=/; Secure; SameSite=Lax; Max-Age=0"),
+    }
+}
+
+pub const COLLAPSED_DECKS_COOKIE: &str = "flash-decks-folded";
+
+/// The decks this browser has folded shut in its deck lists, by id. Every
+/// deck starts open, so the cookie names only the ones that were closed,
+/// and they stay closed until they are opened again: the same kind of
+/// memory as `ShowArchived`, and as far from the address.
+///
+/// The value is ids joined by dots. Whatever else turns up in it is
+/// dropped, and the list is held to `MAX`, so a cookie someone wrote by
+/// hand costs nothing to read.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct CollapsedDecks(pub Vec<i64>);
+
+impl CollapsedDecks {
+    /// Far more than anyone folds, and well inside a cookie's 4 KB.
+    pub const MAX: usize = 200;
+
+    pub fn parse(value: &str) -> Self {
+        let mut ids: Vec<i64> = value
+            .split('.')
+            .filter_map(|id| id.parse().ok())
+            .filter(|id| *id > 0)
+            .take(Self::MAX)
+            .collect();
+        ids.sort_unstable();
+        ids.dedup();
+        Self(ids)
+    }
+
+    pub fn contains(&self, deck: i64) -> bool {
+        self.0.binary_search(&deck).is_ok()
+    }
+
+    /// With `deck` folded or not, and only the decks in `existing` kept,
+    /// so a deleted deck's id does not ride along for a year.
+    pub fn with(&self, deck: i64, collapsed: bool, existing: &[i64]) -> Self {
+        let mut ids: Vec<i64> = self
+            .0
+            .iter()
+            .copied()
+            .filter(|id| *id != deck && existing.contains(id))
+            .collect();
+        if collapsed && existing.contains(&deck) {
+            ids.push(deck);
+        }
+        ids.sort_unstable();
+        ids.truncate(Self::MAX);
+        Self(ids)
+    }
+
+    /// The `Set-Cookie` value that remembers this, or forgets it when
+    /// nothing is folded.
+    pub fn cookie(&self) -> String {
+        if self.0.is_empty() {
+            return pref_cookie_header(COLLAPSED_DECKS_COOKIE, None);
+        }
+        let ids: Vec<String> = self.0.iter().map(i64::to_string).collect();
+        pref_cookie_header(COLLAPSED_DECKS_COOKIE, Some(&ids.join(".")))
+    }
+}
+
+impl<S: Send + Sync> FromRequestParts<S> for CollapsedDecks {
+    type Rejection = std::convert::Infallible;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        let jar = CookieJar::from_headers(&parts.headers);
+        Ok(jar
+            .get(COLLAPSED_DECKS_COOKIE)
+            .map(|c| Self::parse(c.value()))
+            .unwrap_or_default())
+    }
+}
+
+pub const SHOW_ARCHIVED_COOKIE: &str = "flash-decks-archived";
+
+/// Whether the deck list shows archived decks. Like the theme it is how
+/// this browser likes its pages, so it lives in a cookie: it outlasts a
+/// refresh and a visit, stays on until it is turned off, and keeps out of
+/// the address, which is `/decks` either way.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct ShowArchived(pub bool);
+
+impl<S: Send + Sync> FromRequestParts<S> for ShowArchived {
+    type Rejection = std::convert::Infallible;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        let jar = CookieJar::from_headers(&parts.headers);
+        Ok(ShowArchived(
+            jar.get(SHOW_ARCHIVED_COOKIE)
+                .is_some_and(|c| c.value() == "1"),
+        ))
+    }
+}
+
 /// UI theme, read from a cookie and rendered as `data-theme` on <html>.
 /// Server-side so pages never flash the wrong palette.
 #[derive(Clone, Copy, PartialEq, Eq)]

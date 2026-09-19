@@ -63,19 +63,31 @@
   <p class="gen-guard" data-gen-guard hidden role="alert"></p>
   <p class="fl-sr-only" data-gen-live aria-live="polite"></p>
 
+  {# Deck 0 is the "new deck" entry: the name beside it is what the
+     cards land in, made if the account has no deck by that name. It is
+     the only choice when there are no decks yet, so the field is open
+     from the start there and the script never has to reveal it. #}
   <div class="fl-card fl-card-pad gen-form-foot">
     <div class="fl-field">
       <label class="fl-label" for="gen-deck">Into deck</label>
-      <select class="fl-input fl-select" id="gen-deck" name="deck_id" required>
+      <select class="fl-input fl-select" id="gen-deck" name="deck_id" required data-gen-deck>
+        <option value="0"{% if decks.is_empty() %} selected{% endif %}>+ New deck&hellip;</option>
         {% for deck in decks %}
-        <option value="{{ deck.id }}"{% if deck.id.0 == deck_id %} selected{% endif %}>{{ deck.name }}</option>
+        {# Nothing named in the path lands on the first deck, as it did
+           before this entry existed; without this the browser would
+           take the first option, which is now "new". #}
+        <option value="{{ deck.id }}"{% if deck.id.0 == deck_id || (deck_id == 0 && loop.first) %} selected{% endif %}>{{ deck.path }}</option>
         {% endfor %}
       </select>
-      {% if decks.is_empty() %}<span class="fl-hint">Make a deck first. The cards need somewhere to land.</span>{% endif %}
+      <div class="gen-newdeck" data-gen-newdeck{% if !decks.is_empty() %} hidden{% endif %}>
+        <label class="fl-sr-only" for="gen-deck-name">New deck name</label>
+        <input class="fl-input" type="text" id="gen-deck-name" name="deck_name"
+               placeholder="Name the new deck" maxlength="200" data-gen-deck-name>
+      </div>
     </div>
     <div class="row">
       <button id="gen-btn" class="fl-btn fl-btn-primary" type="submit" disabled data-busy-label="Queueing&hellip;">Generate cards</button>
-      <span class="fl-hint" data-gen-btn-hint>Attach something to read first. Reading is free; only writing the cards uses a generation.</span>
+      <span class="fl-hint" data-gen-btn-hint>Attach something to read first.</span>
     </div>
   </div>
 </form>
@@ -113,5 +125,5 @@
 </svg>
 
 {# bump ?v= together with base.html when static files change #}
-<script src="/static/ai.js?v=56" defer></script>
+<script src="/static/ai.js?v=58" defer></script>
 {% endblock %}

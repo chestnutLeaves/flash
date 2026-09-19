@@ -50,6 +50,10 @@ pub fn build_app(state: AppState) -> Router {
         .unwrap_or("localhost:8437")
         .to_string();
     let mcp_routes = Router::new()
+        .route(
+            "/mcp-media/{id}",
+            axum::routing::get(media::serve_media_connector),
+        )
         .nest_service(
             "/mcp",
             mcp::mcp_service(
@@ -57,6 +61,7 @@ pub fn build_app(state: AppState) -> Router {
                 state.media.clone(),
                 state.ext.clone(),
                 public_host,
+                state.config.base_url.clone(),
             ),
         )
         .layer(axum::middleware::from_fn_with_state(

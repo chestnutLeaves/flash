@@ -1,6 +1,11 @@
-//! Decks: list, create, detail (settings), rename, limits, boost, archive
-//! and unarchive, delete, the paged card list, quick-add, and the rich
-//! editor's create path.
+//! Decks: list, create, detail (settings), rename, move, limits, boost,
+//! archive and unarchive, delete, the paged card list, quick-add, and the
+//! rich editor's create path.
+//!
+//! A deck's `name` is its whole path (`Bio::Cells`), so a create or a
+//! rename that names a path nests the deck. `parent_id` on create and the
+//! move route are the same thing said with an id, for a client that shows
+//! a picker and never has a path typed into it.
 
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
@@ -24,6 +29,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/decks", get(list).post(create))
         .route("/decks/{id}", get(detail).patch(rename).delete(delete_deck))
+        .route("/decks/{id}/move", post(move_deck))
         .route("/decks/{id}/limits", axum::routing::put(set_limits))
         .route("/decks/{id}/boost", post(boost))
         .route("/decks/{id}/archive", post(archive))
@@ -53,6 +59,10 @@ struct NewDeckBody {
     name: String,
     #[serde(default, deserialize_with = "crate::bounds::deck_description")]
     description: String,
+    /// The deck to make this one inside; absent or null for where `name`
+    /// itself says.
+    #[serde(default)]
+    parent_id: Option<i64>,
 }
 
 async fn create(
@@ -66,7 +76,11 @@ async fn create(
     }
     let deck = call(state.services.clone(), move |s| {
         let now = now_ms();
-        let id = s.create_deck(user.id, &name, body.description.trim(), now)?;
+        let description = body.description.trim();
+        let id = match body.parent_id {
+            Some(parent) => s.create_subdeck(user.id, DeckId(parent), &name, description, now)?,
+            None => s.create_deck(user.id, &name, description, now)?,
+        };
         s.deck_by_id(user.id, id, now)
     })
     .await?;
@@ -111,6 +125,28 @@ async fn rename(
     }
     let deck = call(state.services.clone(), move |s| {
         s.rename_deck(user.id, DeckId(id), &name)?;
+        s.deck_by_id(user.id, DeckId(id), now_ms())
+    })
+    .await?;
+    Ok(Json(deck.into()))
+}
+
+#[derive(Deserialize)]
+struct MoveBody {
+    /// The deck to move into; null for the top level.
+    parent_id: Option<i64>,
+}
+
+/// Moves the deck, with the decks under it, and answers with it as it is
+/// now: a new `name`, `depth` and `parent_id`.
+async fn move_deck(
+    State(state): State<AppState>,
+    user: BearerUser,
+    Path(id): Path<i64>,
+    ApiJson(body): ApiJson<MoveBody>,
+) -> ApiResult<Deck> {
+    let deck = call(state.services.clone(), move |s| {
+        s.move_deck(user.id, DeckId(id), body.parent_id.map(DeckId))?;
         s.deck_by_id(user.id, DeckId(id), now_ms())
     })
     .await?;

@@ -4,8 +4,8 @@
 <div id="deck-settings" style="display:contents">
 <div class="page-head">
   <div>
-    <h1>{{ deck_name }}</h1>
-    <span class="fl-hint">Deck settings</span>
+    <h1>{{ deck_leaf }}</h1>
+    <span class="fl-hint">Deck settings{% if deck_name != deck_leaf %} &middot; {{ deck_name }}{% endif %}</span>
   </div>
   <a class="fl-btn fl-btn-secondary" href="/decks/{{ deck_id }}">&larr; Back to deck</a>
 </div>
@@ -13,10 +13,25 @@
 <form class="fl-card fl-card-pad" id="rename-card" method="post" action="/decks/{{ deck_id }}/rename" hx-boost="true" hx-push-url="false" hx-select="#deck-settings" hx-target="#deck-settings" hx-swap="outerHTML show:none" style="display:flex;flex-direction:column;gap:12px">
   <div class="row">
     <h3>Name</h3>
-    {% if let Some(e) = name_error %}<span class="fl-badge fl-badge-warn">{{ e }}</span>{% endif %}
+    {% if let Some(e) = name_error %}<span class="fl-badge fl-badge-warn fl-badge-wrap">{{ e }}</span>{% endif %}
   </div>
-  <input class="fl-input" type="text" id="deck-name" name="name" aria-label="Deck name" value="{{ deck_name }}" required maxlength="200" autocomplete="off">
+  <input class="fl-input" type="text" id="deck-name" name="name" aria-label="Deck name" value="{{ deck_leaf }}" required maxlength="200" autocomplete="off">
   <div class="row"><button class="fl-btn fl-btn-secondary" type="submit">Rename</button>{% if saved == "name" %}<span class="save-note fl-badge-toast" role="status">Saved</span>{% endif %}</div>
+</form>
+
+<form class="fl-card fl-card-pad" id="parent-card" method="post" action="/decks/{{ deck_id }}/move" hx-boost="true" hx-push-url="false" hx-select="#deck-settings" hx-target="#deck-settings" hx-swap="outerHTML show:none" style="display:flex;flex-direction:column;gap:12px">
+  <div class="row">
+    <h3>Parent deck</h3>
+    {% if let Some(e) = parent_error %}<span class="fl-badge fl-badge-warn fl-badge-wrap">{{ e }}</span>{% endif %}
+  </div>
+  <p class="fl-hint">The deck this one sits in. Studying a deck includes its subdecks{% if subdeck_count == 1 %}, and this deck's subdeck moves with it{% else if subdeck_count > 1 %}, and this deck's {{ subdeck_count }} subdecks move with it{% endif %}.</p>
+  <select class="fl-input fl-select" id="deck-parent" name="parent" aria-label="Parent deck">
+    <option value="">(top level)</option>
+    {% for parent in parents %}
+    <option value="{{ parent.id }}"{% if parent.selected %} selected{% endif %}>{{ parent.name }}</option>
+    {% endfor %}
+  </select>
+  <div class="row"><button class="fl-btn fl-btn-secondary" type="submit">Move</button>{% if saved == "parent" %}<span class="save-note fl-badge-toast" role="status">Moved</span>{% endif %}</div>
 </form>
 
 <div class="fl-card fl-card-pad" id="limits-card" style="display:flex;flex-direction:column;gap:14px">
@@ -46,11 +61,11 @@
 <form class="fl-card fl-card-pad" id="archive-card" method="post" action="/decks/{{ deck_id }}/{% if archived %}unarchive{% else %}archive{% endif %}" hx-boost="true" hx-push-url="false" hx-select="#deck-settings" hx-target="#deck-settings" hx-swap="outerHTML show:none" style="display:flex;flex-direction:column;gap:12px">
   {% if archived %}
   <h3>Archived deck</h3>
-  <p class="fl-hint">This deck is out of the study queue and the due counts. Unarchive it and its cards come back with the review history they had.</p>
+  <p class="fl-hint">This deck is out of the study queue and the due counts. Unarchive it and its cards come back with the review history they had{% if subdeck_count > 0 %}, and so do its {{ subdeck_count }} subdeck{% if subdeck_count != 1 %}s{% endif %}{% endif %}.{% if deck_name != deck_leaf %} The decks it sits in are unarchived with it.{% endif %}</p>
   <div class="row"><button class="fl-btn fl-btn-secondary" type="submit">Unarchive</button>{% if saved == "archive" %}<span class="save-note fl-badge-toast" role="status">Archived</span>{% endif %}</div>
   {% else %}
   <h3>Archive deck</h3>
-  <p class="fl-hint">Keeps every card, its media and review history, and takes the deck out of study and out of due counts. You can unarchive it any time.</p>
+  <p class="fl-hint">Keeps every card, its media and review history, and takes the deck out of study and out of due counts{% if subdeck_count > 0 %}, along with its {{ subdeck_count }} subdeck{% if subdeck_count != 1 %}s{% endif %}{% endif %}. You can unarchive it any time.</p>
   <div class="row"><button class="fl-btn fl-btn-secondary" type="submit">Archive</button>{% if saved == "archive" %}<span class="save-note fl-badge-toast" role="status">Restored</span>{% endif %}</div>
   {% endif %}
 </form>
@@ -59,10 +74,10 @@
 
 <div class="fl-card fl-card-pad" style="display:flex;flex-direction:column;gap:12px">
   <h3>Delete deck</h3>
-  <p class="fl-hint">Removes this deck and every card in it. Review history is kept. This can't be undone.</p>
+  <p class="fl-hint">Removes this deck{% if subdeck_count > 0 %}, its {{ subdeck_count }} subdeck{% if subdeck_count != 1 %}s{% endif %}{% endif %} and every card in {% if subdeck_count > 0 %}them{% else %}it{% endif %}. Review history is kept. This can't be undone.</p>
   <div><button class="fl-btn fl-btn-sm fl-btn-danger" type="button"
           hx-post="/decks/{{ deck_id }}/delete" hx-disabled-elt="this"
-          hx-confirm="Delete this deck and all its cards? This can't be undone.">Delete deck</button></div>
+          hx-confirm="Delete this deck{% if subdeck_count > 0 %}, its {{ subdeck_count }} subdeck{% if subdeck_count != 1 %}s{% endif %}{% endif %} and all {{ card_count }} card{% if card_count != 1 %}s{% endif %}? This can't be undone.">Delete deck</button></div>
 </div>
 </div>
 {% endblock %}

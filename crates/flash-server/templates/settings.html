@@ -169,7 +169,7 @@
     <h3>Appearance</h3>
     <p class="fl-hint" style="margin-top:4px">Dark is the default.</p>
   </div>
-  <form class="row" method="post" action="/settings/appearance" style="flex:none">
+  <form class="row" method="post" action="/settings/appearance" style="flex:none" data-theme-form>
     <select class="fl-input fl-select" name="theme" style="width:140px">
       <option value="dark" {% if shell.theme == "dark" %}selected{% endif %}>Dark</option>
       <option value="light" {% if shell.theme == "light" %}selected{% endif %}>Light</option>

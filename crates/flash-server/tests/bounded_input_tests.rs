@@ -22,6 +22,7 @@ use flash_server::testing::{send, AppBuilder};
 /// checked (a downstream extension's types are listed here too, for the
 /// tree that has them).
 const NOT_A_REQUEST: &[(&str, &str)] = &[
+    ("McpDeletionReceipt", "server-written confirmation result, read from the database for retry safety; never request input"),
     (
         "HealthReply",
         "the voice sidecar's own answer, read by the server over a client whose reply body is capped (tts::http REPLY_LIMIT); nothing a user sends",

@@ -589,12 +589,175 @@ fn queue_scoping_by_deck_and_tag() {
     );
 }
 
+/// A deck's name is a path. Creating `Bio::Cells::Organelles` creates the
+/// decks it sits in; a deck's scope and its card list hold its subdecks,
+/// and every queue entry still names the deck the card lives in, which is
+/// the deck whose budget it spends.
+#[test]
+fn a_deck_scope_holds_its_subdecks() {
+    let (store, user) = store_with_user();
+    let organelles = store
+        .create_deck(user, " Bio :: Cells::Organelles ", "deep", NOW)
+        .unwrap();
+    let decks = store.list_decks(user, NOW).unwrap();
+    let names: Vec<(&str, &str)> = decks
+        .iter()
+        .map(|d| (d.name.as_str(), d.description.as_str()))
+        .collect();
+    assert_eq!(
+        names,
+        vec![
+            ("Bio", ""),
+            ("Bio::Cells", ""),
+            ("Bio::Cells::Organelles", "deep")
+        ],
+        "the path is cleaned, and the decks on the way are made with it"
+    );
+    let id_of = |name: &str| store.find_deck_by_name(user, name).unwrap().unwrap();
+    let (bio, cells) = (id_of("Bio"), id_of("Bio::Cells"));
+    assert_eq!(id_of(" Bio::Cells :: Organelles"), organelles);
+    // Decks that only look related: a longer first segment, and another
+    // case. Neither is under "Bio".
+    let bio2 = store.create_deck(user, "Bio2::Cells", "", NOW).unwrap();
+    let lower = store.create_deck(user, "bio::cells", "", NOW).unwrap();
+
+    for (deck, front) in [
+        (bio, "b"),
+        (cells, "c"),
+        (organelles, "o"),
+        (bio2, "x"),
+        (lower, "y"),
+    ] {
+        store
+            .create_cards(user, deck, &[card(front, "back", &[])], None, NOW)
+            .unwrap();
+    }
+    let in_scope = |deck| {
+        let mut decks: Vec<_> = store
+            .queue_entries(user, &StudyScope::Deck(deck), NOW)
+            .unwrap()
+            .into_iter()
+            .map(|e| e.deck_id)
+            .collect();
+        decks.sort();
+        decks
+    };
+    let mut whole = vec![bio, cells, organelles];
+    whole.sort();
+    assert_eq!(in_scope(bio), whole);
+    let mut inner = vec![cells, organelles];
+    inner.sort();
+    assert_eq!(in_scope(cells), inner);
+    assert_eq!(in_scope(organelles), vec![organelles]);
+    assert_eq!(in_scope(bio2), vec![bio2]);
+
+    assert_eq!(store.count_cards(user, Some(bio), None).unwrap(), 3);
+    assert_eq!(store.count_cards(user, Some(cells), None).unwrap(), 2);
+    let fronts: Vec<String> = store
+        .list_cards(user, Some(cells), None, 50)
+        .unwrap()
+        .into_iter()
+        .map(|c| c.front)
+        .collect();
+    assert_eq!(
+        fronts,
+        vec!["o", "c"],
+        "newest first, the subdeck's included"
+    );
+
+    // An archived subdeck is out of its parent's scope too, and takes
+    // the deck under it along.
+    store.set_deck_archived(user, cells, Some(NOW)).unwrap();
+    assert_eq!(in_scope(bio), vec![bio]);
+
+    // Someone else's deck scopes nothing and lists nothing.
+    let other = store.create_user("O", None, "member", NOW).unwrap();
+    assert!(store
+        .queue_entries(other, &StudyScope::Deck(bio), NOW)
+        .unwrap()
+        .is_empty());
+    assert_eq!(store.count_cards(other, Some(bio), None).unwrap(), 0);
+}
+
+/// A subtree is matched on whole segments and exactly: `%` and `_` in a
+/// name are characters, not wildcards.
+#[test]
+fn a_wildcard_in_a_deck_name_matches_only_itself() {
+    let (store, user) = store_with_user();
+    let percent = store.create_deck(user, "A%", "", NOW).unwrap();
+    let underscore = store.create_deck(user, "A_", "", NOW).unwrap();
+    let a1x = store.create_deck(user, "A1::x", "", NOW).unwrap();
+    store
+        .create_cards(user, a1x, &[card("f", "b", &[])], None, NOW)
+        .unwrap();
+    for deck in [percent, underscore] {
+        assert!(store
+            .queue_entries(user, &StudyScope::Deck(deck), NOW)
+            .unwrap()
+            .is_empty());
+        assert_eq!(store.count_cards(user, Some(deck), None).unwrap(), 0);
+    }
+}
+
+/// The cap counts the decks a path makes on the way, all or nothing, and
+/// nothing is made inside an archived deck.
+#[test]
+fn a_path_meets_the_cap_and_the_archive_as_a_whole() {
+    let (store, user) = store_with_user();
+    for i in 0..flash_store::MAX_DECKS_PER_USER - 2 {
+        store
+            .create_deck(user, &format!("deck {i}"), "", NOW)
+            .unwrap();
+    }
+    let err = store.create_deck(user, "A::B::C", "", NOW).unwrap_err();
+    assert!(
+        matches!(&err, StoreError::Invalid(m) if m.contains("at most 500 decks")),
+        "{err:?}"
+    );
+    assert_eq!(
+        store.deck_count(user).unwrap(),
+        flash_store::MAX_DECKS_PER_USER - 2,
+        "three decks do not fit in two places, so none was made"
+    );
+    let b = store.create_deck(user, "A::B", "", NOW).unwrap();
+    assert_eq!(
+        store.deck_count(user).unwrap(),
+        flash_store::MAX_DECKS_PER_USER
+    );
+
+    // The same path twice is a duplicate name, and says so.
+    store.delete_deck(user, b).unwrap();
+    store.create_deck(user, "A::B", "", NOW).unwrap();
+    let err = store.create_deck(user, "A :: B", "", NOW).unwrap_err();
+    assert!(
+        matches!(&err, StoreError::Invalid(m) if m.contains("already exists")),
+        "{err:?}"
+    );
+
+    let (store, user) = store_with_user();
+    let old = store.create_deck(user, "Old", "", NOW).unwrap();
+    store.set_deck_archived(user, old, Some(NOW)).unwrap();
+    let err = store.create_deck(user, "Old::Notes", "", NOW).unwrap_err();
+    assert!(
+        matches!(&err, StoreError::Invalid(m) if m.contains("\"Old\" is archived")),
+        "{err:?}"
+    );
+    assert_eq!(store.deck_count(user).unwrap(), 1);
+
+    let long = format!("A::{}", "x".repeat(flash_core::deck_path::MAX_LEN));
+    let err = store.create_deck(user, &long, "", NOW).unwrap_err();
+    assert!(
+        matches!(&err, StoreError::Invalid(m) if m.contains("longer than 200 bytes")),
+        "{err:?}"
+    );
+}
+
 /// Archiving a deck takes its cards out of every scope and its counts to
 /// zero without touching the cards; unarchiving hands everything back.
 #[test]
 fn an_archived_deck_is_out_of_the_queue_and_the_counts() {
     let (store, user) = store_with_user();
-    // "Anatomy" sorts before "Pharm", so the active-first order shows.
+    // "Anatomy" sorts before "Pharm": archiving it must not move it.
     let anatomy = store.create_deck(user, "Anatomy", "", NOW).unwrap();
     let pharm = store.create_deck(user, "Pharm", "", NOW).unwrap();
     let old = store
@@ -639,10 +802,10 @@ fn an_archived_deck_is_out_of_the_queue_and_the_counts() {
     assert_eq!(
         rows(store.list_decks(user, later).unwrap()),
         vec![
-            ("Pharm".to_string(), 0, 1, None),
             ("Anatomy".to_string(), 0, 0, Some(later)),
+            ("Pharm".to_string(), 0, 1, None),
         ],
-        "archived last, counts zero"
+        "archived in place, counts zero"
     );
     assert!(store
         .due_between(user, NOW, later + DAY)
@@ -1178,6 +1341,196 @@ fn delete_sessions_for_user_honors_keep() {
 
     assert_eq!(store.delete_sessions_for_user(user, None).unwrap(), 1);
     assert!(store.lookup_web_session("s2", NOW).unwrap().is_none());
+}
+
+/// The names of the user's decks, in the store's order.
+fn deck_names(store: &Store, user: flash_core::UserId) -> Vec<String> {
+    store
+        .list_decks(user, NOW)
+        .unwrap()
+        .into_iter()
+        .map(|d| d.name)
+        .collect()
+}
+
+/// A rename is a move: the decks under the deck follow it, the deck it
+/// lands in is made when there is none, and every way it could go wrong
+/// leaves every name as it was.
+#[test]
+fn a_rename_carries_the_subtree() {
+    let (store, user) = store_with_user();
+    let cells = store.create_deck(user, "Bio::Cells", "", NOW).unwrap();
+    store
+        .create_deck(user, "Bio::Cells::Organelles", "", NOW)
+        .unwrap();
+    let bio = store.find_deck_by_name(user, "Bio").unwrap().unwrap();
+    let chem = store.create_deck(user, "Chem", "", NOW).unwrap();
+
+    store
+        .rename_deck(user, cells, " School :: Cytology ", NOW)
+        .unwrap();
+    assert_eq!(
+        deck_names(&store, user),
+        vec![
+            "Bio",
+            "Chem",
+            "School",
+            "School::Cytology",
+            "School::Cytology::Organelles"
+        ]
+    );
+    // The same path again is nothing.
+    store
+        .rename_deck(user, cells, "School::Cytology", NOW)
+        .unwrap();
+
+    // Moving keeps the deck's own name: under another deck, then back out.
+    store.move_deck(user, cells, Some(chem), NOW).unwrap();
+    assert!(deck_names(&store, user).contains(&"Chem::Cytology::Organelles".to_string()));
+    store.move_deck(user, cells, None, NOW).unwrap();
+    assert_eq!(
+        deck_names(&store, user),
+        vec!["Bio", "Chem", "Cytology", "Cytology::Organelles", "School"]
+    );
+
+    let before = deck_names(&store, user);
+    let refused = |result: Result<(), StoreError>, needle: &str| {
+        let err = result.unwrap_err();
+        assert!(
+            matches!(&err, StoreError::Invalid(m) if m.contains(needle)),
+            "{err:?}"
+        );
+        assert_eq!(deck_names(&store, user), before, "nothing moved");
+    };
+    refused(store.rename_deck(user, cells, " :: ", NOW), "empty");
+    refused(
+        store.rename_deck(user, cells, "Cytology::Inner", NOW),
+        "into itself",
+    );
+    let organelles = store
+        .find_deck_by_name(user, "Cytology::Organelles")
+        .unwrap();
+    refused(store.move_deck(user, cells, organelles, NOW), "into itself");
+    // Another deck has the name: two decks are never merged.
+    refused(store.rename_deck(user, cells, "Bio", NOW), "already exists");
+    // The bound is on the whole path, so a subdeck can be what breaks it.
+    let long = "x".repeat(flash_core::deck_path::MAX_LEN - 5);
+    refused(
+        store.rename_deck(user, cells, &long, NOW),
+        "\"Organelles\" longer than 200 bytes",
+    );
+    // Nothing active moves into an archived deck.
+    store.set_deck_archived(user, bio, Some(NOW)).unwrap();
+    refused(
+        store.move_deck(user, cells, Some(bio), NOW),
+        "\"Bio\" is archived",
+    );
+
+    // Someone else's deck is not found, as a deck or as a destination.
+    let other = store.create_user("O", None, "member", NOW).unwrap();
+    assert!(matches!(
+        store.rename_deck(other, cells, "Mine", NOW),
+        Err(StoreError::NotFound(_))
+    ));
+    let theirs = store.create_deck(other, "Theirs", "", NOW).unwrap();
+    assert!(matches!(
+        store.move_deck(other, theirs, Some(chem), NOW),
+        Err(StoreError::NotFound(_))
+    ));
+}
+
+/// A deck whose parent is not a deck (a name from before names nested)
+/// can take its parent's name: `A::A::A` must not trip over `A::A` while
+/// both are on their way.
+#[test]
+fn a_rename_onto_its_own_old_names_goes_through() {
+    let (store, user) = store_with_user();
+    store
+        .raw_execute_for_tests(&format!(
+            "INSERT INTO decks (user_id, name, created_at) VALUES ({0}, 'A::A', 0), ({0}, 'A::A::A', 0)",
+            user.raw()
+        ))
+        .unwrap();
+    let inner = store.find_deck_by_name(user, "A::A").unwrap().unwrap();
+    store.rename_deck(user, inner, "A", NOW).unwrap();
+    assert_eq!(deck_names(&store, user), vec!["A", "A::A"]);
+}
+
+/// Archiving takes the decks under the deck with it; unarchiving brings
+/// them back, and brings back the decks a subdeck sits in, so nothing
+/// active is ever inside something archived.
+#[test]
+fn archive_covers_the_subtree_and_unarchive_lifts_the_ancestors() {
+    let (store, user) = store_with_user();
+    let organelles = store
+        .create_deck(user, "Bio::Cells::Organelles", "", NOW)
+        .unwrap();
+    store.create_deck(user, "Bio::Plants", "", NOW).unwrap();
+    store.create_deck(user, "Chem", "", NOW).unwrap();
+    let id_of = |name: &str| store.find_deck_by_name(user, name).unwrap().unwrap();
+    let archived = || -> Vec<(String, Option<i64>)> {
+        store
+            .list_decks(user, NOW)
+            .unwrap()
+            .into_iter()
+            .filter(|d| d.archived_at.is_some())
+            .map(|d| (d.name, d.archived_at))
+            .collect()
+    };
+
+    // A subdeck archived earlier keeps its own date.
+    store
+        .set_deck_archived(user, id_of("Bio::Plants"), Some(NOW))
+        .unwrap();
+    store
+        .set_deck_archived(user, id_of("Bio"), Some(NOW + DAY))
+        .unwrap();
+    assert_eq!(
+        archived(),
+        vec![
+            ("Bio".to_string(), Some(NOW + DAY)),
+            ("Bio::Cells".to_string(), Some(NOW + DAY)),
+            ("Bio::Cells::Organelles".to_string(), Some(NOW + DAY)),
+            ("Bio::Plants".to_string(), Some(NOW)),
+        ]
+    );
+
+    // Unarchiving the innermost deck lifts the two it sits in, and leaves
+    // the rest of what is under them archived.
+    store.set_deck_archived(user, organelles, None).unwrap();
+    assert_eq!(archived(), vec![("Bio::Plants".to_string(), Some(NOW))]);
+
+    store
+        .set_deck_archived(user, id_of("Bio"), Some(NOW + DAY))
+        .unwrap();
+    store.set_deck_archived(user, id_of("Bio"), None).unwrap();
+    assert!(archived().is_empty(), "the whole subtree comes back");
+}
+
+/// Deleting a deck deletes the decks under it, and says how many.
+#[test]
+fn delete_deck_takes_the_subtree() {
+    let (store, user) = store_with_user();
+    let organelles = store
+        .create_deck(user, "Bio::Cells::Organelles", "", NOW)
+        .unwrap();
+    let keeper = store.create_deck(user, "Bio2", "", NOW).unwrap();
+    let id_of = |name: &str| store.find_deck_by_name(user, name).unwrap().unwrap();
+    for deck in [id_of("Bio"), organelles, keeper] {
+        store
+            .create_cards(
+                user,
+                deck,
+                &[card("f", "b", &[]), card("g", "b", &[])],
+                None,
+                NOW,
+            )
+            .unwrap();
+    }
+    let gone = store.delete_deck(user, id_of("Bio")).unwrap();
+    assert_eq!((gone.decks, gone.cards), (3, 4));
+    assert_eq!(deck_names(&store, user), vec!["Bio2"]);
+    assert_eq!(store.count_cards(user, None, None).unwrap(), 2);
 }
 
 #[test]

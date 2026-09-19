@@ -1,0 +1,28 @@
+{# A deck's page: the decks under it and the field that makes another, in a
+   panel the "Subdecks" button in the page head opens and closes
+   (`static/ui.js`). It is closed whenever the page loads, so the page opens
+   on the deck's own cards, and nothing about it is remembered. Its rows'
+   buttons swap `#subdecks-body` in place instead of reloading, so the panel
+   is not shut on the person using it. Without script the button is a link
+   to the panel, which shows itself as the link's target. An archived deck
+   lists what is under it but offers no new one: nothing is made inside an
+   archived deck. Expects `decks`, `rows`, `deck_id` and `archived`. #}
+<section class="deck-subdecks" id="subdecks" hidden>
+  <h2>Subdecks</h2>
+  <div class="deck-subdecks-body" id="subdecks-body">
+    {% if !decks.is_empty() %}
+    <table class="fl-table" data-deck-tree>
+      <thead><tr><th>Deck</th><th>Due</th><th>New</th><th></th></tr></thead>
+      <tbody>
+      {% include "deck_rows.html" %}
+      </tbody>
+    </table>
+    {% endif %}
+    {% if !archived %}
+    <form class="row" method="post" action="/decks/{{ deck_id }}/subdecks">
+      <input class="fl-input" type="text" name="name" placeholder="New subdeck name" aria-label="New subdeck name" required maxlength="120">
+      <button class="fl-btn fl-btn-secondary" type="submit">Add subdeck</button>
+    </form>
+    {% endif %}
+  </div>
+</section>

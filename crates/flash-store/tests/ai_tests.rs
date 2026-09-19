@@ -156,9 +156,9 @@ fn keep_note(store: &Store, user: UserId, deck: DeckId, job: Option<AiJobId>) ->
 }
 
 #[test]
-fn the_schema_reaches_22_with_the_generation_tables() {
+fn the_schema_reaches_24_with_the_generation_tables() {
     let (store, _) = store_with_user();
-    assert_eq!(store.schema_version().unwrap(), 22);
+    assert_eq!(store.schema_version().unwrap(), 24);
     for table in [
         "ai_sources",
         "ai_extractions",

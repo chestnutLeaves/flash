@@ -53,9 +53,10 @@ fn names(store: &Store, extension: &str) -> Vec<String> {
 fn fresh_database_records_the_core_steps_and_reopens_quietly() {
     let path = temp_db("fresh");
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 22);
+    assert_eq!(store.schema_version().unwrap(), 24);
     let core = names(&store, "core");
-    assert_eq!(core.len(), 22);
+    assert_eq!(core.len(), 24);
+    assert_eq!(core[23], "v024_mcp_confirmation_subtree");
     assert_eq!(core[0], "v001_initial");
     assert_eq!(core[13], "v014_reserved");
     assert_eq!(core[14], "v015_review_client");
@@ -115,6 +116,9 @@ fn a_schema_14_database_without_a_registry_is_adopted() {
         let conn = Connection::open(&path).unwrap();
         conn.execute_batch(
             "DROP TABLE schema_migrations;
+             DROP TRIGGER mcp_confirmation_card_deleted;
+             DROP TRIGGER mcp_confirmation_deck_deleted;
+             DROP TABLE mcp_confirmations;
              DROP INDEX idx_review_import_once;
              DROP TABLE voice_clip_refs;
              DROP TABLE voice_clips;
@@ -156,9 +160,9 @@ fn a_schema_14_database_without_a_registry_is_adopted() {
     let store = Store::open_with(&path, vec![Arc::new(Baseline)]).unwrap();
     let core = names(&store, "core");
     assert!(core.iter().any(|n| n == MONOLITH_MARKER));
-    // The marker, the 14 adopted steps, and v015 through v022, each
+    // The marker, the 14 adopted steps, and v015 through v024, each
     // applied once.
-    assert_eq!(core.len(), 23);
+    assert_eq!(core.len(), 25);
     assert_eq!(
         core.iter().filter(|n| *n == "v015_review_client").count(),
         1
@@ -184,7 +188,13 @@ fn a_schema_14_database_without_a_registry_is_adopted() {
         1
     );
     assert_eq!(core.iter().filter(|n| *n == "v022_deck_archive").count(), 1);
-    assert_eq!(store.schema_version().unwrap(), 22);
+    assert_eq!(
+        core.iter()
+            .filter(|n| *n == "v024_mcp_confirmation_subtree")
+            .count(),
+        1
+    );
+    assert_eq!(store.schema_version().unwrap(), 24);
     assert_eq!(names(&store, "ext"), ["0001_baseline"]);
     // Adopted, not executed.
     let exists: bool = store

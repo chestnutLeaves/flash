@@ -7,12 +7,21 @@ use serde::Serialize;
 use crate::service::{self, AccountOverview};
 pub use crate::tts::serve::ClipDescriptor;
 
-/// A deck with today's budgeted counts, as the lists show it.
+/// A deck with today's budgeted counts, as the lists show it. A list of
+/// these is in tree order: each deck followed by the decks under it.
 #[derive(Debug, Serialize)]
 pub struct Deck {
     pub id: i64,
+    /// The whole path: `Bio::Cells` is the deck `Cells` inside `Bio`.
     pub name: String,
+    /// The name to show under its parent.
+    pub leaf: String,
+    /// How many decks it sits inside; 0 at the top level.
+    pub depth: u32,
+    pub parent_id: Option<i64>,
     pub description: String,
+    /// Counts include the decks under this one, so rows are not to be
+    /// added up.
     pub due: u32,
     pub new: u32,
     /// Epoch ms when the deck was archived; null while it is active. An
@@ -20,11 +29,14 @@ pub struct Deck {
     pub archived_at: Option<i64>,
 }
 
-impl From<flash_store::DeckSummary> for Deck {
-    fn from(d: flash_store::DeckSummary) -> Self {
+impl From<service::DeckRow> for Deck {
+    fn from(d: service::DeckRow) -> Self {
         Deck {
             id: d.id.0,
             name: d.name,
+            leaf: d.leaf,
+            depth: d.depth,
+            parent_id: d.parent_id.map(|p| p.0),
             description: d.description,
             due: d.due_count,
             new: d.new_count,
@@ -83,7 +95,11 @@ pub struct DeckLimits {
 pub struct DeckDetail {
     pub deck: Deck,
     pub limits: DeckLimits,
+    /// Live cards in the deck and the decks under it.
     pub card_count: u32,
+    /// Decks under this one, at any depth: what archiving or deleting it
+    /// takes along.
+    pub subdeck_count: u32,
 }
 
 impl From<service::DeckDetail> for DeckDetail {
@@ -98,6 +114,7 @@ impl From<service::DeckDetail> for DeckDetail {
                 boost_today: d.boost_today,
             },
             card_count: d.card_count,
+            subdeck_count: d.subdeck_count,
         }
     }
 }

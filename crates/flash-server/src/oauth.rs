@@ -651,6 +651,10 @@ async fn token(State(state): State<AppState>, Form(form): Form<TokenForm>) -> Re
 #[derive(Debug, Clone)]
 pub struct ConnectorClient(pub String);
 
+/// Stable OAuth identity, unlike a display name or transport session.
+#[derive(Debug, Clone)]
+pub struct ConnectorClientId(pub String);
+
 /// Validates `Authorization: Bearer` and injects UserId (and the client's
 /// name) into request extensions (rmcp forwards them to tool handlers).
 /// 401s carry the resource-metadata pointer that MCP clients use to
@@ -684,6 +688,9 @@ pub async fn require_bearer(
     match info {
         Some(info) => {
             request.extensions_mut().insert(info.user);
+            request
+                .extensions_mut()
+                .insert(ConnectorClientId(info.client_id));
             request
                 .extensions_mut()
                 .insert(ConnectorClient(info.client_name));

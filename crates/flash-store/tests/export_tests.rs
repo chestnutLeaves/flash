@@ -48,6 +48,68 @@ fn apkg_round_trips_through_our_importer() {
     }
 }
 
+/// A subdeck leaves as Anki names one, by its whole path, with the decks
+/// it sits in written into the collection ahead of it (Anki expects them,
+/// cards or no cards), and comes back as the same path.
+#[test]
+fn a_subdeck_round_trips_with_the_decks_it_sits_in() {
+    let card = |deck: &str, front: &str| ExportCard {
+        deck: deck.into(),
+        front: front.into(),
+        back: "b".into(),
+        ..Default::default()
+    };
+    let cards = vec![
+        card("Bio::Cells::Organelles", "deep"),
+        card("Bio", "top"),
+        card("Week 1: intro", "one colon is a name, not a level"),
+    ];
+    let bytes = build_apkg(&cards, &flash_store::export::ExportMedia::default(), NOW).unwrap();
+    let parsed = parse_apkg(&bytes).unwrap();
+    let decks: Vec<&str> = parsed
+        .rows
+        .iter()
+        .map(|r| r.deck.as_deref().unwrap())
+        .collect();
+    assert_eq!(
+        decks,
+        vec!["Bio::Cells::Organelles", "Bio", "Week 1: intro"]
+    );
+
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+    let mut collection = Vec::new();
+    std::io::Read::read_to_end(
+        &mut zip.by_name("collection.anki2").unwrap(),
+        &mut collection,
+    )
+    .unwrap();
+    let path = std::env::temp_dir().join(format!("flash-export-{}.anki2", std::process::id()));
+    std::fs::write(&path, collection).unwrap();
+    let json: String = rusqlite::Connection::open(&path)
+        .unwrap()
+        .query_row("SELECT decks FROM col", [], |r| r.get(0))
+        .unwrap();
+    std::fs::remove_file(&path).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let mut names: Vec<&str> = value
+        .as_object()
+        .unwrap()
+        .values()
+        .map(|d| d["name"].as_str().unwrap())
+        .collect();
+    names.sort_unstable();
+    assert_eq!(
+        names,
+        vec![
+            "Bio",
+            "Bio::Cells",
+            "Bio::Cells::Organelles",
+            "Default",
+            "Week 1: intro"
+        ]
+    );
+}
+
 #[test]
 fn apkg_zip_contains_collection_and_media() {
     let bytes = build_apkg(

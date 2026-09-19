@@ -5,8 +5,13 @@
 <div class="page-head">
   <h1>Decks</h1>
   <span class="small muted">
-    {# The archived rows swap into the list in place; the href is the fallback without script. #}
-    {% if !archived.is_empty() %}{% if show_archived %}<a class="muted" href="/decks" hx-get="/decks" hx-select="#decks-main" hx-target="#decks-main" hx-swap="outerHTML show:none" hx-push-url="false">Hide archived</a>{% else %}<a class="muted" href="/decks?archived=1" hx-get="/decks?archived=1" hx-select="#decks-main" hx-target="#decks-main" hx-swap="outerHTML show:none" hx-push-url="false">Archived</a>{% endif %} &middot; {% endif %}<a class="muted" href="/import">Import</a>{% if ai_enabled %} &middot; <a class="muted" href="/generate">Generate</a>{% endif %}
+    {# Archived decks keep their place in the list; this shows or hides them.
+       It changes nothing on the server, so it costs no request: every row is
+       in the page, `static/ui.js` shows or hides the archived ones at once,
+       and the cookie it writes (as the theme is kept) makes the next load,
+       a refresh included, come out the same. The address stays /decks.
+       Without script the form posts and the redirect brings the page back. #}
+    {% if any_archived %}<form method="post" action="/decks/archived" style="display:inline" data-show-archived-form data-instant><input type="hidden" name="show" value="{% if show_archived %}0{% else %}1{% endif %}"><button class="muted fl-linkbtn" type="submit">{% if show_archived %}Hide archived{% else %}Show archived{% endif %}</button></form> &middot; {% endif %}<a class="muted" href="/import">Import</a>{% if ai_enabled %} &middot; <a class="muted" href="/generate">Generate</a>{% endif %}
   </span>
 </div>
 <form class="row" method="post" action="/decks">
@@ -14,44 +19,17 @@
   <button class="fl-btn fl-btn-primary" type="submit">Create</button>
 </form>
 
-{% if active.is_empty() && archived.is_empty() %}
+{% if decks.is_empty() %}
 <p class="muted">No decks yet.</p>
 {% else %}
-{% if active.is_empty() %}
-<p class="muted">Every deck is archived.</p>
-{% else %}
-<table class="fl-table">
+{# Said in place of the table while every deck is archived and hidden. #}
+<p class="muted" data-all-archived{% if any_active || show_archived %} hidden{% endif %}>Every deck is archived.</p>
+<table class="fl-table" data-deck-tree data-show-archived="{% if show_archived %}1{% else %}0{% endif %}"{% if !any_active && !show_archived %} hidden{% endif %}>
   <thead><tr><th>Deck</th><th>Due</th><th>New</th><th></th></tr></thead>
   <tbody>
-  {% for deck in active %}
-  <tr>
-    <td><a href="/decks/{{ deck.id }}">{{ deck.name }}</a></td>
-    <td class="num">{{ deck.due_count }}</td>
-    <td class="num">{{ deck.new_count }}</td>
-    <td style="text-align:right"><a class="small muted" href="/study?deck={{ deck.id }}">study</a></td>
-  </tr>
-  {% endfor %}
+  {% include "deck_rows.html" %}
   </tbody>
 </table>
-{% endif %}
-{% if show_archived && !archived.is_empty() %}
-<table class="fl-table fl-archived">
-  <thead><tr><th>Archived</th><th></th></tr></thead>
-  <tbody>
-  {% for deck in archived %}
-  <tr>
-    <td><a href="/decks/{{ deck.id }}">{{ deck.name }}</a></td>
-    <td style="text-align:right">
-      <form method="post" action="/decks/{{ deck.id }}/unarchive" hx-boost="true" hx-push-url="false" hx-select="#decks-main" hx-target="#decks-main" hx-swap="outerHTML show:none" style="display:inline">
-        <input type="hidden" name="back" value="archived">
-        <button class="small muted fl-linkbtn" type="submit">unarchive</button>
-      </form>
-    </td>
-  </tr>
-  {% endfor %}
-  </tbody>
-</table>
-{% endif %}
 {% endif %}
 </div>
 {% endblock %}

@@ -99,11 +99,17 @@ fn write_collection(
     conn.execute_batch(SCHEMA_11)
         .map_err(|e| format!("schema: {e}"))?;
 
-    // Deck name -> Anki deck id (Default keeps 1; ours start at 2).
+    // Deck name -> Anki deck id (Default keeps 1; ours start at 2). A
+    // subdeck's name is its path, which is how Anki names one too, and
+    // Anki expects the decks a subdeck sits in to be in the collection:
+    // each goes in ahead of it, cards or no cards.
     let mut deck_ids: Vec<(String, i64)> = Vec::new();
     for card in cards {
-        if !deck_ids.iter().any(|(name, _)| name == &card.deck) {
-            deck_ids.push((card.deck.clone(), 2 + deck_ids.len() as i64));
+        let ancestors = flash_core::deck_path::ancestors(&card.deck);
+        for name in ancestors.into_iter().chain([card.deck.as_str()]) {
+            if !deck_ids.iter().any(|(known, _)| known == name) {
+                deck_ids.push((name.to_string(), 2 + deck_ids.len() as i64));
+            }
         }
     }
 

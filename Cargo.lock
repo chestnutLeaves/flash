@@ -818,7 +818,7 @@ checksum = "d45db016d36b838f563236e9193d0ee6ce38f3f68b6c94e914b4929c96bbb890"
 
 [[package]]
 name = "flash-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "fsrs",
  "serde_json",
@@ -826,7 +826,7 @@ dependencies = [
 
 [[package]]
 name = "flash-scan"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -835,7 +835,7 @@ dependencies = [
 
 [[package]]
 name = "flash-server"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "argon2",
  "askama",
@@ -875,7 +875,7 @@ dependencies = [
 
 [[package]]
 name = "flash-store"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "ammonia",
  "csv",

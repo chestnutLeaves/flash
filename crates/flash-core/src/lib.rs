@@ -1,6 +1,8 @@
 //! Pure domain logic: no IO, no async, no SQLite.
 
 pub mod card;
+pub mod deck_path;
+pub mod deck_tree;
 pub mod ids;
 pub mod queue;
 pub mod rating;

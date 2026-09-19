@@ -16,6 +16,7 @@ const PER_USER_TABLES: &[&str] = &[
     "sessions",
     "oauth_codes",
     "oauth_tokens",
+    "mcp_confirmations",
     "decks",
     "cards",
     "tags",

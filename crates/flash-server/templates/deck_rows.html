@@ -1,0 +1,59 @@
+{# The rows of a deck table, shared by the decks page, Today and a deck's
+   own list of subdecks. Rows come in tree order; a subdeck shows its own
+   name, indented under the deck it sits in, with the whole path on hover.
+
+   Every row is in the page, shown or `hidden` as the page should load. A
+   deck with decks under it has a fold beside its name. Every deck starts
+   open; one folded shut stays shut in this browser until it is opened
+   again, and its counts already hold what it hides. An archived deck
+   keeps its place: no counts, and unarchive where study would be when the
+   page allows it.
+
+   Folding, like showing archived decks, changes nothing on the server, so
+   it costs no request: `static/ui.js` shows and hides the rows at once
+   from `data-depth`, `data-archived` and `data-collapsed`, and writes the
+   cookie that makes the next load come out the same. Without script the
+   fold is a form that posts and the redirect brings the page back.
+
+   Unarchiving does change something. On the deck list and on a deck's
+   page it swaps its table in place; on a deck's page the page head is
+   swapped with it, because unarchiving a subdeck brings back the decks it
+   sits in, which may be the page's own deck.
+
+   Expects `decks` and `rows` (`DeckRowsCtx`). The table that includes
+   this carries `data-deck-tree`. #}
+{% for deck in decks %}
+<tr data-deck="{{ deck.id }}" data-depth="{{ deck.depth }}"{% if deck.archived_at.is_some() %} data-archived class="is-archived"{% endif %}{% if deck.collapsed %} data-collapsed{% endif %}{% if deck.hidden %} hidden{% endif %}>
+  <td class="deck-name" style="--depth:{{ deck.depth }}">
+    {% if deck.foldable %}
+    <form class="deck-fold{% if !deck.has_subdecks %} is-off{% endif %}" method="post" action="/decks/{{ deck.id }}/fold" data-deck-fold data-instant>
+      <input type="hidden" name="collapsed" value="{% if deck.collapsed %}0{% else %}1{% endif %}">
+      <input type="hidden" name="back" value="{{ rows.back }}">
+      {% if rows.from != 0 %}<input type="hidden" name="from" value="{{ rows.from }}">{% endif %}
+      <button type="submit" aria-expanded="{% if deck.collapsed %}false{% else %}true{% endif %}" aria-label="Subdecks of {{ deck.leaf }}" title="{% if deck.collapsed %}Show{% else %}Hide{% endif %} subdecks">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
+    </form>
+    {# A list where something folds keeps every name in one column. #}
+    {% else if rows.folds %}<span class="deck-fold" aria-hidden="true"></span>{% endif %}
+    <a href="/decks/{{ deck.id }}" title="{{ deck.path }}">{{ deck.leaf }}</a>{% if deck.archived_at.is_some() %} <span class="archived-note">(archived)</span>{% endif %}
+  </td>
+  {% if deck.archived_at.is_some() %}
+  <td class="num"></td>
+  <td class="num"></td>
+  <td style="text-align:right">
+    {% if rows.unarchive %}
+    <form method="post" action="/decks/{{ deck.id }}/unarchive" style="display:inline"{% if rows.back == "decks" %} hx-boost="true" hx-push-url="false" hx-select="#decks-main" hx-target="#decks-main" hx-swap="outerHTML show:none"{% else if rows.back == "deck" %} hx-boost="true" hx-push-url="false" hx-select="#subdecks-body" hx-target="#subdecks-body" hx-select-oob="#deck-head" hx-swap="outerHTML show:none"{% endif %}>
+      <input type="hidden" name="back" value="{{ rows.back }}">
+      {% if rows.from != 0 %}<input type="hidden" name="from" value="{{ rows.from }}">{% endif %}
+      <button class="small muted fl-linkbtn" type="submit">unarchive</button>
+    </form>
+    {% endif %}
+  </td>
+  {% else %}
+  <td class="num">{{ deck.due_count }}</td>
+  <td class="num">{{ deck.new_count }}</td>
+  <td style="text-align:right"><a class="small muted" href="/study?deck={{ deck.id }}">study</a></td>
+  {% endif %}
+</tr>
+{% endfor %}

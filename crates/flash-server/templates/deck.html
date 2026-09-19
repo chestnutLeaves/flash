@@ -1,11 +1,25 @@
 {% extends "base.html" %}
 {% block title %}{{ deck_name }} - Flash{% endblock %}
 {% block content %}
+{# The head and its archived note, as one piece: unarchiving a subdeck from
+   its row below brings this deck back too, and the row's button swaps this
+   in beside its own table (`deck_rows.html`). #}
+<div id="deck-head" style="display:contents">
+{# The decks this one sits in go above the title row, not in it: a page head
+   lines its two sides up on their first line of text, which has to be the
+   title for the buttons to sit beside it. #}
+<div class="deck-title">
+{% if !crumbs.is_empty() %}
+<nav class="deck-crumbs" aria-label="Parent decks">{% for crumb in crumbs %}<a href="/decks/{{ crumb.id }}">{{ crumb.leaf }}</a> &rsaquo; {% endfor %}</nav>
+{% endif %}
 <div class="page-head">
-  <h1>{{ deck_name }}</h1>
+  <h1>{{ deck_leaf }}</h1>
   <div class="row">
+    {# Opens and closes the subdecks panel below. An archived deck with
+       nothing under it has nothing to show there and nothing it may add,
+       so it has no button. #}
+    {% if !archived || subdeck_count > 0 %}<a class="small muted deck-subdecks-toggle" href="#subdecks" role="button" aria-expanded="false" aria-controls="subdecks" data-subdecks-toggle>Subdecks{% if subdeck_count > 0 %} ({{ subdeck_count }}){% endif %}</a>{% endif %}
     <a class="fl-btn fl-btn-secondary" href="/decks/{{ deck_id }}/settings">Settings</a>
-    {% if ai_enabled %}<a class="fl-btn fl-btn-secondary" href="/decks/{{ deck_id }}/generate">Generate cards</a>{% endif %}
     {% if archived %}
     <form method="post" action="/decks/{{ deck_id }}/unarchive" style="display:inline">
       <input type="hidden" name="back" value="deck">
@@ -16,13 +30,24 @@
     {% endif %}
   </div>
 </div>
+</div>
 {% if archived %}
 <p class="fl-hint" role="status">This deck is archived. Its cards stay, but they are not in the study queue.</p>
 {% endif %}
+</div>
+
+{# The panel the "Subdecks" button above opens: always here, closed as the
+   page loads. #}
+{% if !archived || subdeck_count > 0 %}{% include "deck_subdecks.html" %}{% endif %}
 
 <div id="deck-main" style="display:contents">
 <section>
-<h2>Add a card</h2>
+{# Generating is another way to add cards, so it sits with adding one,
+   as a quiet link across from the heading. #}
+<div class="section-head">
+  <h2>Add a card</h2>
+  {% if ai_enabled %}<a class="small muted" href="/decks/{{ deck_id }}/generate">Generate</a>{% endif %}
+</div>
 {% if let Some(msg) = editor_error %}
 <div class="fl-card fl-card-pad" style="border-color:var(--bad)" role="alert">
   <strong>{{ msg }}</strong>
