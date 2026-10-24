@@ -23,6 +23,13 @@ ignore = [
     # a crate's askama.toml with it, at build time only; it never runs in
     # the server. Drop this when askama moves off it.
     { id = "RUSTSEC-2026-0374", reason = "build-time only, through askama_derive's config feature; no newer askama yet" },
+    # Timing variability in crypto-bigint 0.5 (fixed in 0.7.6). It reaches
+    # us as webauthn-rs 0.6.1-dev -> crypto-glue 0.1 -> elliptic-curve
+    # 0.13, which only verifies passkey signatures with public keys (and
+    # signs with the test authenticator's throwaway keys); every signature
+    # the server makes goes through ring. Drop this when webauthn-rs moves
+    # to crypto-glue 0.2. Mirrored in .github/workflows/audit.yml.
+    { id = "RUSTSEC-2026-0387", reason = "crypto-bigint 0.5 verifies passkey signatures with public keys only; no secret operand in production" },
 ]
 
 [licenses]

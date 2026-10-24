@@ -29,4 +29,4 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           # Each ignore carries its reason in deny.toml [advisories].
-          ignore: RUSTSEC-2023-0071,RUSTSEC-2026-0374
+          ignore: RUSTSEC-2023-0071,RUSTSEC-2026-0374,RUSTSEC-2026-0387
