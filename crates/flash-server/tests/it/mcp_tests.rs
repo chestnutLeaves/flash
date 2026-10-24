@@ -63,6 +63,47 @@ async fn tool_error(h: &Harness, session: &str, name: &str, args: serde_json::Va
 }
 
 #[tokio::test]
+async fn gemini_gets_replies_without_a_retry_line() {
+    let h = harness();
+    let (status, session, body) = rpc(
+        &h,
+        None,
+        serde_json::json!({
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-11-25",
+                "capabilities": {"roots": {"listChanged": true}, "sampling": {}},
+                "clientInfo": {"name": "Gemini", "version": "1.0.0"}
+            }
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(!body.contains("retry:"), "{body}");
+    let session = session.expect("session id assigned");
+    let (status, _, _) = rpc(
+        &h,
+        Some(&session),
+        serde_json::json!({"jsonrpc": "2.0", "method": "notifications/initialized"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let (status, _, body) = rpc(
+        &h,
+        Some(&session),
+        serde_json::json!({
+            "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+            "params": {"name": "list_decks", "arguments": {}}
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(!body.contains("retry:"), "{body}");
+    let result = result_of(&body);
+    assert!(result.is_object() && result["isError"] != true, "{body}");
+}
+
+#[tokio::test]
 async fn rich_batch_edits_preserve_media_siblings_and_history_and_rollback() {
     let h = harness();
     let session = initialize(&h).await;
@@ -1038,13 +1079,11 @@ pub(crate) async fn rpc_with(
 
 /// Extracts the JSON-RPC result from a plain-JSON or SSE-framed body.
 pub(crate) fn result_of(body: &str) -> serde_json::Value {
-    // SSE streams open with a priming frame (`data:` + retry); take the
-    // first data line that actually carries JSON.
     let json_part = if body.contains("data:") {
         body.lines()
             .filter_map(|l| l.strip_prefix("data:"))
             .map(str::trim)
-            .find(|payload| payload.starts_with('{'))
+            .next()
             .unwrap_or("{}")
             .to_string()
     } else {

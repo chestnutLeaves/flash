@@ -109,6 +109,10 @@ pub const MCP_BODY_LIMIT: usize = 1024 * 1024;
 /// Sessions are kept in the database (`DbSessions`), so a restart does
 /// not end an assistant's connection, and `shutdown` ends the open
 /// streams when the process stops, so they don't hold up its drain.
+///
+/// Replies carry no `retry:` priming frame, from the transport or the
+/// session layer: Gemini's client (since 2026-10) cannot parse one and
+/// drops the connection after initialize.
 pub fn mcp_service(
     state: AppState,
     public_host: String,
@@ -128,9 +132,12 @@ pub fn mcp_service(
         services: services.clone(),
     }));
     config.cancellation_token = state.shutdown.clone();
+    config.sse_retry = None;
+    let mut sessions = LocalSessionManager::default();
+    sessions.session_config.sse_retry = None;
     StreamableHttpService::new(
         move || Ok(FlashMcp::new(state.clone())),
-        Default::default(),
+        Arc::new(sessions),
         config,
     )
 }
