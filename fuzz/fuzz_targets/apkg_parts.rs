@@ -13,7 +13,7 @@
 
 use std::io::Write;
 
-use flash_store::import::{extract_media_file, parse_apkg, read_media_manifest};
+use flash_store::import::{extract_media_file, open_package, parse_apkg, read_media_manifest};
 use libfuzzer_sys::fuzz_target;
 
 fn package(layout: u8, manifest: &[u8], collection: &[u8]) -> Vec<u8> {
@@ -70,9 +70,9 @@ fuzz_target!(|data: &[u8]| {
     let (manifest, collection) = data[3..].split_at(split);
     let bytes = package(layout, manifest, collection);
     let _ = parse_apkg(&bytes);
-    if let Ok(entries) = read_media_manifest(&bytes) {
+    if let (Ok(entries), Ok(mut zip)) = (read_media_manifest(&bytes), open_package(&bytes)) {
         for entry in entries.iter().take(16) {
-            let _ = extract_media_file(&bytes, entry, 1 << 16);
+            let _ = extract_media_file(&mut zip, entry, 1 << 16);
         }
     }
 });
