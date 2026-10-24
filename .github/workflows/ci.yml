@@ -3,8 +3,8 @@
 #   build-test  (required)  cargo build + cargo test for the whole workspace
 #   lint        (required)  rustfmt --check + clippy -D warnings
 #
-# This file is what the public repository runs; a downstream tree may
-# carry more workflows beside it.
+# Pushes and pull requests run the jobs in a public repository; in a
+# private one they run when started by hand.
 name: ci
 
 on:
@@ -26,6 +26,7 @@ env:
 
 jobs:
   build-test:
+    if: ${{ !github.event.repository.private || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     steps:
       - name: Free disk (preinstalled toolchains this job never uses)
@@ -46,6 +47,7 @@ jobs:
         run: df -h / | tail -1
 
   lint:
+    if: ${{ !github.event.repository.private || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -74,6 +76,7 @@ jobs:
   # crash on the first thousand mutations; the corpus for longer runs
   # lives with whoever runs them.
   fuzz:
+    if: ${{ !github.event.repository.private || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -3,8 +3,8 @@
 //! the quota arithmetic. Every read is ownership-scoped in SQL: user A
 //! can never resolve user B's media id.
 
-use flash_core::{CardId, MediaId, UserId};
-use rusqlite::Connection;
+use flash_core::{CardId, DeckId, MediaId, UserId};
+use rusqlite::{params, Connection};
 
 use crate::media::MediaKind;
 use crate::{Result, Store, StoreError};
@@ -36,12 +36,12 @@ fn media_row_from(r: &rusqlite::Row<'_>) -> rusqlite::Result<MediaRow> {
 }
 
 impl Store {
-    /// How many rows anywhere still name this blob hash: the core's media
-    /// rows, the generation sources (their blobs share the store), plus
+    /// How many rows anywhere still name this blob hash: the media rows,
+    /// the rows of the older schema steps' tables that hold blobs, plus
     /// whatever each extension pins. Zero means the blob may leave
     /// storage. Takes the caller's connection so deletions count inside
     /// their own transaction.
-    pub(crate) fn blob_refs(&self, conn: &Connection, sha256: &str) -> Result<i64> {
+    pub fn blob_refs(&self, conn: &Connection, sha256: &str) -> Result<i64> {
         let mut refs: i64 = conn.query_row(
             "SELECT (SELECT COUNT(*) FROM media WHERE sha256 = ?1)
                   + (SELECT COUNT(*) FROM ai_sources WHERE sha256 = ?1)",
@@ -111,6 +111,23 @@ impl Store {
         Ok(row)
     }
 
+    /// Who holds a media row, for a link whose signature names the row
+    /// and its owner: the owner is read here and the signature checked
+    /// against it, so a link never carries a user id the server trusts.
+    pub fn media_owner(&self, id: MediaId) -> Result<Option<UserId>> {
+        let conn = self.conn();
+        let owner = conn
+            .query_row("SELECT user_id FROM media WHERE id = ?1", [id.0], |r| {
+                Ok(UserId::from_db(r.get(0)?))
+            })
+            .map(Some)
+            .or_else(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                other => Err(other),
+            })?;
+        Ok(owner)
+    }
+
     /// Whether any user already holds a blob with this hash: the upload
     /// can be skipped, the store is content-addressed.
     pub fn blob_known(&self, sha256: &str) -> Result<bool> {
@@ -157,41 +174,12 @@ impl Store {
         Ok(())
     }
 
-    /// Deletes a user's media row (and its card links), returning how many
-    /// rows across ALL users still reference the same blob hash: 0 means
-    /// the caller may remove the blob from disk.
-    pub fn delete_media(&self, user: UserId, id: MediaId) -> Result<u64> {
-        let conn = self.conn();
-        let sha: String = conn
-            .query_row(
-                "SELECT sha256 FROM media WHERE id = ?1 AND user_id = ?2",
-                rusqlite::params![id.0, user.raw()],
-                |r| r.get(0),
-            )
-            .map_err(|e| match e {
-                rusqlite::Error::QueryReturnedNoRows => StoreError::NotFound("media"),
-                other => StoreError::Db(other),
-            })?;
-        conn.execute(
-            "DELETE FROM card_media WHERE media_id = ?1
-               AND EXISTS (SELECT 1 FROM media WHERE id = ?1 AND user_id = ?2)",
-            rusqlite::params![id.0, user.raw()],
-        )?;
-        conn.execute(
-            "DELETE FROM ai_figures WHERE media_id = ?1 AND user_id = ?2",
-            rusqlite::params![id.0, user.raw()],
-        )?;
-        conn.execute(
-            "DELETE FROM media WHERE id = ?1 AND user_id = ?2",
-            rusqlite::params![id.0, user.raw()],
-        )?;
-        Ok(self.blob_refs(&conn, &sha)? as u64)
-    }
-
-    /// Media rows no card links and no extraction pins as a figure any
-    /// more, older than `older_than_ms`, for every account: the rows go,
-    /// and the hashes nobody holds any more come back for the caller to
-    /// remove from storage. Housekeeping runs this daily; the age floor
+    /// Media rows no card links and no other row pins any more, older
+    /// than `older_than_ms`, for every account: the rows go,
+    /// and the hashes nobody holds any more are owed to a `delete_blobs`
+    /// job in the same transaction (it re-checks each hash, so an upload
+    /// of the same bytes meanwhile keeps its file) and come back for the
+    /// caller to count. Housekeeping runs this daily; the age floor
     /// keeps an editor upload that is about to be linked (a note saved
     /// in the next minute) out of it.
     pub fn sweep_unlinked_media(&self, older_than_ms: i64) -> Result<Vec<String>> {
@@ -220,24 +208,28 @@ impl Store {
                 orphans.push(sha);
             }
         }
+        crate::repo::jobs::owe_blob_deletes(&tx, &orphans)?;
         tx.commit()?;
         Ok(orphans)
     }
 
     /// Media rows referenced by the user's live (non-deleted) cards, what
-    /// an export has to bundle. Ordered by id so exported filenames are
-    /// stable across runs.
-    pub fn media_for_export(&self, user: UserId) -> Result<Vec<MediaRow>> {
+    /// an export has to bundle, narrowed to the cards of `deck` and its
+    /// subdecks when given (a deck's own export). Ordered by id so
+    /// exported filenames are stable across runs.
+    pub fn media_for_export_in(&self, user: UserId, deck: Option<DeckId>) -> Result<Vec<MediaRow>> {
         let conn = self.conn();
+        let decks = crate::repo::decks::subtree_filter(&conn, user, deck)?;
         let mut stmt = conn.prepare(
             "SELECT DISTINCT m.id, m.sha256, m.filename, m.mime, m.kind, m.size, m.created_at
              FROM media m
              JOIN card_media cm ON cm.media_id = m.id
              JOIN cards c ON c.id = cm.card_id
              WHERE m.user_id = ?1 AND c.user_id = ?1 AND c.deleted_at IS NULL
+               AND (?2 IS NULL OR c.deck_id IN (SELECT value FROM json_each(?2)))
              ORDER BY m.id",
         )?;
-        let rows = stmt.query_map([user.raw()], media_row_from)?;
+        let rows = stmt.query_map(params![user.raw(), decks], media_row_from)?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
     }
 }

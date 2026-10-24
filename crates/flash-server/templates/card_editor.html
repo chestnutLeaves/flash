@@ -1,22 +1,55 @@
 {# Edit dialog for one card: an htmx partial swapped into #editor-dialog.
-   Saving posts back here; success answers 204 + HX-Refresh, a refusal
-   re-renders this dialog with `error`. #}
-<div class="fl-dialog-overlay" data-editor-overlay>
-  <form class="fl-dialog editor-dialog" hx-post="/cards/{{ editor.card_id }}/edit" hx-target="#editor-dialog" hx-swap="innerHTML" data-editor-form>
+   Saving posts back here; success answers 204 + HX-Refresh (from the
+   study page, `after=study`: 204 + the flash:card-saved event), a refusal
+   re-renders this dialog with `error`. History lists the note's earlier
+   versions; Restore posts to /cards/{id}/restore/{revision}, which
+   re-renders this dialog over the restored text with `notice`. On the
+   card's own page (`after=page`, card_page.html) the same editor is the
+   page itself: no overlay or close button, Cancel goes to the deck, and a
+   save comes back here saying "Saved". #}
+{% let page = after == Some("page") %}
+<div class="{% if page %}card-page-editor{% else %}fl-dialog-overlay{% endif %}"{% if !page %} data-editor-overlay{% endif %}>
+  <form class="{% if page %}fl-card fl-card-pad card-page-form{% else %}fl-dialog editor-dialog{% endif %}" hx-post="/cards/{{ editor.card_id }}/edit{% if let Some(a) = after %}?after={{ a }}{% endif %}" hx-target="#editor-dialog" hx-swap="innerHTML" data-editor-form>
+    {% if !page %}
     <div class="editor-dialog-head">
-      <h2 style="margin:0">Edit card</h2>
-      <button type="button" class="fl-btn fl-btn-sm fl-iconbtn fl-btn-ghost" aria-label="Close" data-editor-close><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+      <h2 style="margin:0">{{ "editor-heading"|t }}</h2>
+      <button type="button" class="fl-btn fl-btn-sm fl-iconbtn fl-btn-ghost" aria-label="{{ "close"|t }}" data-editor-close><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
     </div>
+    {% endif %}
     {% if let Some(msg) = error %}<div class="editor-error" role="alert">{{ msg }}</div>{% endif %}
+    {% if let Some(msg) = notice %}<div class="editor-notice" role="status" data-editor-changed>{{ msg }}</div>{% endif %}
     {% include "card_editor_body.html" %}
     <div class="fl-field">
-      <label class="fl-label" for="edit-tags-{{ editor.card_id }}">Tags</label>
-      <input class="fl-input" type="text" id="edit-tags-{{ editor.card_id }}" name="tags" value="{{ editor.tags }}" placeholder="exam-2, cardiac">
-      <span class="fl-hint">Comma-separated, applied to every card of this note.</span>
+      <label class="fl-label" for="edit-tags-{{ editor.card_id }}">{{ "editor-tags"|t }}</label>
+      <input class="fl-input" type="text" dir="auto" id="edit-tags-{{ editor.card_id }}" name="tags" value="{{ editor.tags }}" placeholder="{{ "deck-tags-placeholder"|t }}">
+      <span class="fl-hint">{{ "editor-tags-hint"|t }}</span>
     </div>
+    {% if !history.is_empty() %}
+    <details class="fl-advanced editor-history"{% if notice.is_some() && !page %} open{% endif %}>
+      <summary>{{ "editor-history"|tn(history.len()) }}</summary>
+      <ul class="fl-advanced-body editor-history-list">
+        {% for r in history %}
+        <li class="editor-history-item">
+          <div class="editor-history-text">
+            <span>{{ r.front }}</span>
+            <span class="fl-hint">{{ r.back }}</span>
+            <span class="fl-hint">{{ r.when }}</span>
+          </div>
+          <button type="button" class="fl-btn fl-btn-sm fl-btn-secondary"
+                  hx-post="/cards/{{ editor.card_id }}/restore/{{ r.id }}{% if let Some(a) = after %}?after={{ a }}{% endif %}" hx-params="none"
+                  hx-target="#editor-dialog" hx-swap="innerHTML" hx-disabled-elt="this">{{ "editor-restore"|t }}</button>
+        </li>
+        {% endfor %}
+      </ul>
+    </details>
+    {% endif %}
     <div class="row" style="justify-content:flex-end">
-      <button type="button" class="fl-btn fl-btn-secondary" data-editor-close>Cancel</button>
-      <button class="fl-btn fl-btn-primary" type="submit">Save</button>
+      {% if page %}
+      <a class="fl-btn fl-btn-secondary" href="/decks/{{ editor.deck_id }}">{{ "editor-cancel"|t }}</a>
+      {% else %}
+      <button type="button" class="fl-btn fl-btn-secondary" data-editor-close>{{ "editor-cancel"|t }}</button>
+      {% endif %}
+      <button class="fl-btn fl-btn-primary" type="submit">{{ "editor-save"|t }}</button>
     </div>
   </form>
 </div>

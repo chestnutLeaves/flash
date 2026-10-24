@@ -15,13 +15,13 @@
 use std::io::Read;
 
 use super::proto::{read_varint, skip_field};
-use super::ImportError;
+use super::{ImportError, ImportNote};
 use crate::media::{classify, sanitize_filename, MediaKind};
 
 /// The uploader's sentences; library detail goes to `ImportError::detail`.
-const NOT_A_ZIP: &str = "that file is not an Anki package (not a zip archive)";
-const MANIFEST_DAMAGED: &str = "the package's media list is damaged and could not be read";
-const COMPRESSED_DAMAGED: &str = "compressed content is damaged and could not be unpacked";
+const NOT_A_ZIP: &str = "import-not-a-zip";
+const MANIFEST_DAMAGED: &str = "import-media-list-damaged";
+const COMPRESSED_DAMAGED: &str = "import-compressed-damaged";
 
 /// Decompressed manifest cap: a manifest bigger than this is not a deck.
 const MANIFEST_MAX_BYTES: u64 = 8 * 1024 * 1024;
@@ -47,16 +47,13 @@ pub struct ApkgMediaEntry {
 /// checked here, before any caller looks inside; every reader of the
 /// package (the collection, the manifest, each media file) comes
 /// through this function.
-pub(crate) fn open_package(
-    bytes: &[u8],
-) -> Result<zip::ZipArchive<std::io::Cursor<&[u8]>>, ImportError> {
+pub fn open_package(bytes: &[u8]) -> Result<zip::ZipArchive<std::io::Cursor<&[u8]>>, ImportError> {
     let zip = zip::ZipArchive::new(std::io::Cursor::new(bytes))
-        .map_err(|e| ImportError::new(NOT_A_ZIP, format!("zip: {e}")))?;
+        .map_err(|e| ImportError::new(ImportNote::new(NOT_A_ZIP), format!("zip: {e}")))?;
     if zip.len() > super::MAX_PACKAGE_ENTRIES {
-        return Err(ImportError::user(format!(
-            "that package holds more than {} files; imports are capped at that many per file",
-            super::MAX_PACKAGE_ENTRIES
-        )));
+        return Err(ImportError::user(
+            ImportNote::new("import-too-many-files").num("max", super::MAX_PACKAGE_ENTRIES),
+        ));
     }
     Ok(zip)
 }
@@ -72,9 +69,13 @@ pub fn read_media_manifest(bytes: &[u8]) -> Result<Vec<ApkgMediaEntry>, ImportEr
         Ok(file) => {
             file.take(MANIFEST_MAX_BYTES + 1)
                 .read_to_end(&mut manifest_bytes)
-                .map_err(|e| ImportError::new(MANIFEST_DAMAGED, format!("read: {e}")))?;
+                .map_err(|e| {
+                    ImportError::new(ImportNote::new(MANIFEST_DAMAGED), format!("read: {e}"))
+                })?;
             if manifest_bytes.len() as u64 > MANIFEST_MAX_BYTES {
-                return Err(ImportError::user("the package's media list is too large"));
+                return Err(ImportError::user(ImportNote::new(
+                    "import-media-list-large",
+                )));
             }
         }
         Err(_) => return Ok(Vec::new()),
@@ -82,7 +83,7 @@ pub fn read_media_manifest(bytes: &[u8]) -> Result<Vec<ApkgMediaEntry>, ImportEr
 
     let mut entries = if latest {
         let decoded = zstd_decode_capped(&manifest_bytes, MANIFEST_MAX_BYTES)
-            .map_err(|e| ImportError::new(MANIFEST_DAMAGED, e.detail()))?;
+            .map_err(|e| ImportError::new(ImportNote::new(MANIFEST_DAMAGED), e.detail()))?;
         parse_media_entries_proto(&decoded)
     } else {
         parse_media_map_json(&manifest_bytes)?
@@ -96,23 +97,29 @@ pub fn read_media_manifest(bytes: &[u8]) -> Result<Vec<ApkgMediaEntry>, ImportEr
             }
         }
     }
-    // Drop manifest rows whose zip entry doesn't exist.
-    let names: std::collections::HashSet<String> = zip.file_names().map(str::to_string).collect();
+    // Drop manifest rows whose zip entry doesn't exist. A name that does
+    // not decode cannot be opened by name either, so it counts as absent.
+    let names: std::collections::HashSet<String> = zip
+        .file_names()
+        .filter_map(Result::ok)
+        .map(std::borrow::Cow::into_owned)
+        .collect();
     entries.retain(|e| names.contains(&e.zip_name));
     Ok(entries)
 }
 
-/// Extracts one media file, enforcing `max_bytes` on the decompressed
-/// output (bomb defense) and verifying the manifest sha1 when present.
+/// Extracts one media file from a package `open_package` opened (a clone
+/// per thread shares its parsed directory), enforcing `max_bytes` on the
+/// decompressed output (bomb defense) and verifying the manifest sha1
+/// when present.
 pub fn extract_media_file(
-    bytes: &[u8],
+    zip: &mut zip::ZipArchive<std::io::Cursor<&[u8]>>,
     entry: &ApkgMediaEntry,
     max_bytes: u64,
 ) -> Result<Vec<u8>, ImportError> {
-    let mut zip = open_package(bytes)?;
     let file = zip.by_name(&entry.zip_name).map_err(|_| {
         ImportError::new(
-            format!("{} is missing from the package", entry.filename),
+            ImportNote::new("import-media-missing").text("file", &entry.filename),
             format!("entry {} absent", entry.zip_name),
         )
     })?;
@@ -121,20 +128,21 @@ pub fn extract_media_file(
         .read_to_end(&mut raw)
         .map_err(|e| {
             ImportError::new(
-                format!("{} could not be read from the package", entry.filename),
+                ImportNote::new("import-media-unreadable").text("file", &entry.filename),
                 format!("entry {}: {e}", entry.zip_name),
             )
         })?;
     if raw.len() as u64 > max_bytes {
-        return Err(ImportError::user(format!(
-            "{}: larger than the {max_bytes} byte limit",
-            entry.filename
-        )));
+        return Err(ImportError::user(
+            ImportNote::new("import-media-too-large")
+                .num("max", max_bytes)
+                .about(&entry.filename),
+        ));
     }
     let out = if entry.zstd {
         zstd_decode_capped(&raw, max_bytes).map_err(|e| {
             ImportError::new(
-                format!("{}: {}", entry.filename, e.public()),
+                e.public().clone().about(&entry.filename),
                 format!("entry {}: {}", entry.zip_name, e.detail()),
             )
         })?
@@ -145,10 +153,9 @@ pub fn extract_media_file(
         let mut hasher = sha1_smol::Sha1::new();
         hasher.update(&out);
         if hasher.digest().bytes() != expected {
-            return Err(ImportError::user(format!(
-                "{}: content does not match its declared hash",
-                entry.filename
-            )));
+            return Err(ImportError::user(
+                ImportNote::new("import-media-hash").about(&entry.filename),
+            ));
         }
     }
     Ok(out)
@@ -156,7 +163,9 @@ pub fn extract_media_file(
 
 /// zstd decode with a hard output cap; errors instead of ballooning.
 pub(super) fn zstd_decode_capped(bytes: &[u8], max_bytes: u64) -> Result<Vec<u8>, ImportError> {
-    let damaged = |e: std::io::Error| ImportError::new(COMPRESSED_DAMAGED, format!("zstd: {e}"));
+    let damaged = |e: std::io::Error| {
+        ImportError::new(ImportNote::new(COMPRESSED_DAMAGED), format!("zstd: {e}"))
+    };
     let decoder = zstd::stream::read::Decoder::new(std::io::Cursor::new(bytes)).map_err(damaged)?;
     let mut out = Vec::new();
     decoder
@@ -164,9 +173,9 @@ pub(super) fn zstd_decode_capped(bytes: &[u8], max_bytes: u64) -> Result<Vec<u8>
         .read_to_end(&mut out)
         .map_err(damaged)?;
     if out.len() as u64 > max_bytes {
-        return Err(ImportError::user(format!(
-            "decompresses past the {max_bytes} byte limit"
-        )));
+        return Err(ImportError::user(
+            ImportNote::new("import-decompress-limit").num("max", max_bytes),
+        ));
     }
     Ok(out)
 }
@@ -382,7 +391,7 @@ mod tests {
         let compressed = zstd::encode_all(std::io::Cursor::new(big), 3).unwrap();
         assert!(compressed.len() < 20_000);
         let err = zstd_decode_capped(&compressed, 1024).unwrap_err();
-        assert!(err.public().contains("limit"), "{err}");
+        assert_eq!(err.public().id, "import-decompress-limit", "{err}");
     }
 
     #[test]

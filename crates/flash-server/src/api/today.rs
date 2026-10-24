@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use super::dto::Deck;
 use super::{app_platform, call, ApiError, ApiJson, ApiResult, BearerUser};
-use crate::ext::Surface;
+use crate::ext::{AccountEvent, Surface};
 use crate::service::{now_ms, ServiceError};
 use crate::state::AppState;
 
@@ -23,35 +23,22 @@ pub fn router() -> Router<AppState> {
         .route("/connect/dismiss", post(dismiss_connect_cta))
 }
 
-/// The guided-setup prompt the Connect page hands to Claude and ChatGPT.
-const CONNECT_PROMPT: &str = "I want to connect Flash, my flashcard app, to you as a custom connector. Its MCP server URL is: {mcp}\n\nGuide me through adding it on this platform, one step at a time, waiting for me to say done after each step. Steps: open the connector settings for this app; add a custom connector; paste the URL above exactly; confirm; then I will be asked to sign in to Flash with my passkey to finish. After it connects, list my decks to prove it works.";
-
-/// Everything the Connect page shows: the MCP URL, the one-click setup
-/// links, and the copy boxes.
+/// What the Connect screen needs: the MCP address people paste into
+/// their assistant, and the Claude Code command.
 #[derive(Serialize)]
 pub struct Connect {
     pub mcp_url: String,
-    pub claude_url: String,
-    pub claude_desktop_url: String,
-    pub chatgpt_url: String,
     pub claude_code_cmd: String,
 }
 
 async fn connect(State(state): State<AppState>, user: BearerUser) -> ApiResult<Connect> {
-    let mcp_url = format!("{}/mcp", state.config.base_url);
-    let prompt = crate::auth::urlencode(&CONNECT_PROMPT.replace("{mcp}", &mcp_url));
+    let mcp_url = state.site.mcp_url();
     state.ext.account_event(
         &state.services,
         user.id,
-        "view",
-        Surface::Mobile,
-        Some("connect"),
-        None,
+        AccountEvent::new("view", Surface::Mobile).detail(Some("connect")),
     );
     Ok(Json(Connect {
-        claude_url: format!("https://claude.ai/new?q={prompt}"),
-        claude_desktop_url: format!("claude://claude.ai/new?q={prompt}"),
-        chatgpt_url: format!("https://chatgpt.com/?q={prompt}"),
         claude_code_cmd: format!("claude mcp add --transport http flash {mcp_url}"),
         mcp_url,
     }))
@@ -70,8 +57,7 @@ pub struct Today {
     pub show_connect_cta: bool,
 }
 
-/// Opening the app lands here first, so this is where an app session is
-/// counted (the extension collapses repeats within a sitting).
+/// The app's first screen, which reports an `app_session` account event.
 async fn today(
     State(state): State<AppState>,
     user: BearerUser,
@@ -80,17 +66,10 @@ async fn today(
     state.ext.account_event(
         &state.services,
         user.id,
-        "app_session",
-        Surface::Mobile,
-        app_platform(&headers),
-        None,
+        AccountEvent::new("app_session", Surface::Mobile).client(app_platform(&headers)),
     );
-    let tts = state.tts.clone();
     let d = call(state.services.clone(), move |s| {
         let d = s.dashboard(user.id, now_ms())?;
-        if let Some(tts) = &tts {
-            crate::tts::prefetch_queue_head(tts, &s, user.id, now_ms());
-        }
         Ok::<_, ServiceError>(d)
     })
     .await?;
@@ -106,7 +85,7 @@ async fn today(
 }
 
 /// The number the app puts on its icon: cards due right now, the same
-/// figure the Today page and the daily push carry.
+/// figure the Today page carries.
 #[derive(Serialize)]
 pub struct Badge {
     pub badge: u32,
@@ -114,7 +93,7 @@ pub struct Badge {
 
 async fn badge(State(state): State<AppState>, user: BearerUser) -> ApiResult<Badge> {
     let counts = call(state.services.clone(), move |s| {
-        s.queue_counts(user.id, &StudyScope::All, now_ms())
+        s.queue_counts(user.id, &StudyScope::all(), now_ms())
     })
     .await?;
     Ok(Json(Badge { badge: counts.due }))

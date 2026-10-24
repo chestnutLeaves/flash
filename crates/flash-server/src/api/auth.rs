@@ -1,8 +1,8 @@
 //! Signing in from the app. Every path ends in `issue_tokens`, the
 //! mobile twin of `auth::issue_session`: a 1 h access token plus a 60 d
 //! rotating refresh token, stored (hashed) in `oauth_tokens` under the
-//! first-party client id. Credentials are exchanged natively (password,
-//! a Google ID token, an Apple identity token) and resolved by the same
+//! first-party client id. Credentials are exchanged natively (a password,
+//! or an external identity provider's token) and resolved by the same
 //! `flows` the web uses, so the rules never fork.
 
 use axum::extract::{Path, State};
@@ -16,12 +16,14 @@ use serde::{Deserialize, Serialize};
 use super::dto::{Me, TokenPair};
 use super::{call, ApiError, ApiJson, ApiResult, BearerUser, MOBILE_CLIENT_ID, MOBILE_SCOPE};
 use crate::auth::{hash_token, new_token};
-use crate::ext::{AccountView, Surface};
+use crate::ext::{AccountEvent, AccountView, Surface};
+use crate::flows::account::KeepSession;
+use crate::flows::devices::{self, DeviceKind};
 use crate::flows::{enroll, login, reset};
 use crate::middleware;
-use crate::oauth::{ACCESS_TTL_MS, REFRESH_TTL_MS};
+use crate::oauth::{exchange_refresh, ACCESS_TTL_MS, REFRESH_TTL_MS};
 use crate::password;
-use crate::service::now_ms;
+use crate::service::{now_ms, Services};
 use crate::state::AppState;
 use crate::webauthn::{self, normalize_email, CeremonyError, EnrollError};
 
@@ -52,18 +54,41 @@ pub fn router(state: &AppState) -> Router<AppState> {
         .route("/auth/logout", post(logout))
         .route("/auth/sessions", get(sessions))
         .route("/auth/sessions/revoke_others", post(revoke_others))
-        .route("/auth/sessions/{id}", delete(revoke_session))
+        .route("/auth/sessions/{kind}/{id}", delete(revoke_session))
         .route("/me", get(me))
 }
 
+/// The phone a sign-in comes from, as its request names it: a display
+/// name for the devices list, and the id the app keeps for its install.
+/// A sign-in carrying an install id replaces that install's earlier
+/// grant, so one phone is one row however often it signs in.
+pub struct AppDevice {
+    label: String,
+    install_id: Option<String>,
+}
+
+impl AppDevice {
+    pub fn new(device_label: &str, install_id: Option<String>) -> Self {
+        AppDevice {
+            label: clean_label(device_label),
+            install_id: install_id
+                .map(|id| id.trim().to_string())
+                .filter(|id| !id.is_empty()),
+        }
+    }
+}
+
 /// Mints the app's access/refresh pair for `user`; only hashes reach
-/// the store. `label` names the device for the sessions list.
+/// the store. The device names the grant in the devices list.
 pub(crate) fn issue_tokens(
     store: &Store,
     user: UserId,
-    label: &str,
+    device: &AppDevice,
     now_ms: i64,
 ) -> flash_store::Result<(String, String)> {
+    if let Some(install) = &device.install_id {
+        store.revoke_install_tokens(user, MOBILE_CLIENT_ID, install, now_ms)?;
+    }
     let access = new_token();
     let refresh = new_token();
     store.insert_oauth_token(
@@ -72,7 +97,8 @@ pub(crate) fn issue_tokens(
         MOBILE_CLIENT_ID,
         user,
         MOBILE_SCOPE,
-        label,
+        &device.label,
+        device.install_id.as_deref(),
         now_ms + ACCESS_TTL_MS,
         now_ms + REFRESH_TTL_MS,
         now_ms,
@@ -85,21 +111,31 @@ pub(crate) fn issue_tokens(
 pub fn signed_in(
     app: &AppState,
     user: UserId,
-    label: &str,
+    device: &AppDevice,
     now_ms: i64,
 ) -> Result<TokenPair, ApiError> {
     let s = &app.services;
-    let (access, refresh) = issue_tokens(s.store(), user, label, now_ms)?;
-    let mut me: Me = s.account_overview(user).map_err(ApiError::from)?.into();
-    me.extra = app
-        .ext
-        .account_json(app, s, user, AccountView::Me)
-        .map_err(ApiError::from)?;
-    Ok(TokenPair::new(access, refresh, me))
+    let (access, refresh) = issue_tokens(s.store(), user, device, now_ms)?;
+    Ok(TokenPair::new(
+        access,
+        refresh,
+        ACCESS_TTL_MS / 1000,
+        me_of(app, s, user)?,
+    ))
+}
+
+/// The one way to build `Me`: the account plus the extension's fields.
+/// Sign-in, refresh and `/me` all answer with it, so the app sees one
+/// shape; runs on a blocking thread.
+fn me_of(app: &AppState, s: &Services, user: UserId) -> Result<Me, ApiError> {
+    let mut me: Me = s.account_overview(user)?.into();
+    me.language = super::settings::chosen_language(s.store(), user, app.i18n.shipped())?;
+    me.extra = app.ext.account_json(app, s, user, AccountView::Me)?;
+    Ok(me)
 }
 
 /// Device names are display-only; keep them short and trimmed.
-pub fn clean_label(raw: &str) -> String {
+fn clean_label(raw: &str) -> String {
     raw.trim().chars().take(80).collect()
 }
 
@@ -113,6 +149,8 @@ struct PasswordBody {
     password: String,
     #[serde(default, deserialize_with = "crate::bounds::device_label")]
     device_label: String,
+    #[serde(default, deserialize_with = "crate::bounds::opt_opaque")]
+    install_id: Option<String>,
 }
 
 async fn password_login(
@@ -166,20 +204,17 @@ async fn password_login(
     } else {
         None
     };
-    let label = clean_label(&body.device_label);
+    let device = AppDevice::new(&body.device_label, body.install_id);
     let app = state.clone();
     let pair = call(state.services.clone(), move |s| {
         login::finish(s.store(), user, rehashed.as_deref())?;
-        signed_in(&app, user, &label, now)
+        signed_in(&app, user, &device, now)
     })
     .await?;
     state.ext.account_event(
         &state.services,
         user,
-        "login",
-        Surface::Mobile,
-        Some("password"),
-        None,
+        AccountEvent::new("login", Surface::Mobile).detail(Some("password")),
     );
     Ok(Json(pair))
 }
@@ -218,11 +253,11 @@ async fn reset_request(
 }
 
 fn link_invalid(what: &'static str) -> ApiError {
-    ApiError::new(
-        StatusCode::FORBIDDEN,
-        "link_invalid",
-        format!("this {what} link is invalid, expired, or already used"),
-    )
+    let id = match what {
+        "reset" => "auth-reset-spent-line",
+        _ => "auth-invite-spent-line",
+    };
+    ApiError::new(StatusCode::FORBIDDEN, "link_invalid", crate::i18n::t(id))
 }
 
 #[derive(Deserialize)]
@@ -231,6 +266,8 @@ struct NewPasswordBody {
     password: String,
     #[serde(default, deserialize_with = "crate::bounds::device_label")]
     device_label: String,
+    #[serde(default, deserialize_with = "crate::bounds::opt_opaque")]
+    install_id: Option<String>,
 }
 
 async fn reset_confirm(
@@ -241,7 +278,8 @@ async fn reset_confirm(
     if !password::token_shape_ok(&token) {
         return Err(link_invalid("reset"));
     }
-    password::validate_new_password(&body.password).map_err(ApiError::invalid)?;
+    password::validate_new_password(&body.password)
+        .map_err(|id| ApiError::invalid(crate::i18n::t(id)))?;
     // Look the token up before hashing: a stranger with a made-up link
     // must not be able to spend the Argon2 permits. The reset is not
     // consumed here, so a hiccup between the steps burns nothing.
@@ -259,12 +297,12 @@ async fn reset_confirm(
     let phc = password::hash_blocking(&state, body.password)
         .await
         .map_err(|_| ApiError::internal())?;
-    let label = clean_label(&body.device_label);
+    let device = AppDevice::new(&body.device_label, body.install_id);
     let app = state.clone();
     call(state.services.clone(), move |s| {
         let now = now_ms();
         match reset::confirm(s.store(), &hash, &phc, now)? {
-            Some(user) => signed_in(&app, user, &label, now),
+            Some(user) => signed_in(&app, user, &device, now),
             None => Err(link_invalid("reset")),
         }
     })
@@ -312,6 +350,8 @@ struct EnrollPasswordBody {
     email: String,
     #[serde(default, deserialize_with = "crate::bounds::device_label")]
     device_label: String,
+    #[serde(default, deserialize_with = "crate::bounds::opt_opaque")]
+    install_id: Option<String>,
 }
 
 async fn enroll_password(
@@ -322,7 +362,8 @@ async fn enroll_password(
     if !password::token_shape_ok(&token) {
         return Err(link_invalid("invite"));
     }
-    password::validate_new_password(&body.password).map_err(ApiError::invalid)?;
+    password::validate_new_password(&body.password)
+        .map_err(|id| ApiError::invalid(crate::i18n::t(id)))?;
     let hash = hash_token(&token);
     let now = now_ms();
     let enrollment = {
@@ -334,11 +375,12 @@ async fn enroll_password(
         .await?
         .ok_or_else(|| link_invalid("invite"))?
     };
-    enroll::resolve_email(&enrollment, &body.email).map_err(ApiError::invalid)?;
+    enroll::resolve_email(&enrollment, &body.email)
+        .map_err(|id| ApiError::invalid(crate::i18n::t(id)))?;
     let phc = password::hash_blocking(&state, body.password)
         .await
         .map_err(|_| ApiError::internal())?;
-    let label = clean_label(&body.device_label);
+    let device = AppDevice::new(&body.device_label, body.install_id);
     let app = state.clone();
     call(state.services.clone(), move |s| {
         let outcome = enroll::with_password(
@@ -351,11 +393,12 @@ async fn enroll_password(
             now,
         )?;
         match outcome {
-            enroll::EnrollOutcome::Created(user) => signed_in(&app, user, &label, now),
-            enroll::EnrollOutcome::EmailTaken => {
-                Err(ApiError::conflict("email_taken", "email already in use"))
-            }
-            enroll::EnrollOutcome::BadEmail(msg) => Err(ApiError::invalid(msg)),
+            enroll::EnrollOutcome::Created(user) => signed_in(&app, user, &device, now),
+            enroll::EnrollOutcome::EmailTaken => Err(ApiError::conflict(
+                "email_taken",
+                crate::i18n::t("auth-email-taken"),
+            )),
+            enroll::EnrollOutcome::BadEmail(id) => Err(ApiError::invalid(crate::i18n::t(id))),
             enroll::EnrollOutcome::InviteGone => Err(link_invalid("invite")),
         }
     })
@@ -367,9 +410,11 @@ async fn enroll_password(
 
 fn enroll_error(e: EnrollError) -> ApiError {
     match e {
-        EnrollError::BadEmail(msg) => ApiError::invalid(msg),
+        EnrollError::BadEmail(id) => ApiError::invalid(crate::i18n::t(id)),
         EnrollError::NoInvite => link_invalid("invite"),
-        EnrollError::EmailTaken => ApiError::conflict("email_taken", "email already in use"),
+        EnrollError::EmailTaken => {
+            ApiError::conflict("email_taken", crate::i18n::t("auth-email-taken"))
+        }
         EnrollError::Ceremony(c) => ceremony_error(c),
     }
 }
@@ -406,6 +451,8 @@ struct EnrollPasskeyFinishBody {
     credential: webauthn_rs::prelude::RegisterPublicKeyCredential,
     #[serde(default, deserialize_with = "crate::bounds::device_label")]
     device_label: String,
+    #[serde(default, deserialize_with = "crate::bounds::opt_opaque")]
+    install_id: Option<String>,
 }
 
 async fn enroll_passkey_finish(
@@ -420,10 +467,10 @@ async fn enroll_passkey_finish(
         webauthn::finish_enroll_ceremony(&state, &hash_token(&body.ceremony_id), body.credential)
             .await
             .map_err(enroll_error)?;
-    let label = clean_label(&body.device_label);
+    let device = AppDevice::new(&body.device_label, body.install_id);
     let app = state.clone();
     call(state.services.clone(), move |_| {
-        signed_in(&app, enrolled.user, &label, now_ms())
+        signed_in(&app, enrolled.user, &device, now_ms())
     })
     .await
     .map(Json)
@@ -447,7 +494,7 @@ pub(super) fn ceremony_error(e: CeremonyError) -> ApiError {
         CeremonyError::Expired => ApiError::new(
             StatusCode::BAD_REQUEST,
             "ceremony_expired",
-            "that passkey ceremony expired; start again",
+            crate::i18n::t("api-passkey-expired"),
         ),
         CeremonyError::Rejected | CeremonyError::UnknownCredential => {
             ApiError::invalid_credentials()
@@ -478,6 +525,8 @@ struct PasskeyLoginBody {
     credential: webauthn_rs::prelude::PublicKeyCredential,
     #[serde(default, deserialize_with = "crate::bounds::device_label")]
     device_label: String,
+    #[serde(default, deserialize_with = "crate::bounds::opt_opaque")]
+    install_id: Option<String>,
 }
 
 async fn passkey_login_finish(
@@ -488,19 +537,16 @@ async fn passkey_login_finish(
         webauthn::finish_login_ceremony(&state, &hash_token(&body.ceremony_id), body.credential)
             .await
             .map_err(ceremony_error)?;
-    let label = clean_label(&body.device_label);
+    let device = AppDevice::new(&body.device_label, body.install_id);
     let app = state.clone();
     let pair = call(state.services.clone(), move |_| {
-        signed_in(&app, user, &label, now_ms())
+        signed_in(&app, user, &device, now_ms())
     })
     .await?;
     state.ext.account_event(
         &state.services,
         user,
-        "login",
-        Surface::Mobile,
-        Some("passkey"),
-        None,
+        AccountEvent::new("login", Surface::Mobile).detail(Some("passkey")),
     );
     Ok(Json(pair))
 }
@@ -517,33 +563,28 @@ async fn refresh(
     State(state): State<AppState>,
     ApiJson(body): ApiJson<RefreshBody>,
 ) -> ApiResult<TokenPair> {
-    let now = now_ms();
-    let old_hash = hash_token(&body.refresh_token);
-    let access = new_token();
-    let refresh = new_token();
-    let access_hash = hash_token(&access);
-    let refresh_hash = hash_token(&refresh);
+    let app = state.clone();
     call(state.services.clone(), move |s| {
-        let grant = s.store().rotate_refresh_token(
-            &old_hash,
-            &access_hash,
-            &refresh_hash,
-            now + ACCESS_TTL_MS,
-            now + REFRESH_TTL_MS,
-            now,
+        // The client is named so another client's token is refused
+        // before anything about it changes.
+        let refreshed = exchange_refresh(
+            s.store(),
+            &body.refresh_token,
+            Some(MOBILE_CLIENT_ID),
+            now_ms(),
         )?;
-        match grant {
-            Some(g) if g.client_id == MOBILE_CLIENT_ID => {
-                let me: Me = s
-                    .account_overview(g.user_id)
-                    .map_err(ApiError::from)?
-                    .into();
-                Ok(TokenPair::new(access, refresh, me))
-            }
-            _ => Err(ApiError::new(
+        match refreshed {
+            Some(r) => Ok(TokenPair::new(
+                r.access,
+                r.refresh,
+                r.expires_in,
+                me_of(&app, &s, r.grant.user_id)?,
+            )),
+            None => Err(ApiError::new(
                 StatusCode::UNAUTHORIZED,
                 "invalid_grant",
-                "refresh token invalid",
+                // for machines: OAuth's own refusal, for the app's code.
+                crate::i18n::Words::for_machines("refresh token invalid"),
             )),
         }
     })
@@ -553,16 +594,25 @@ async fn refresh(
 
 async fn logout(State(state): State<AppState>, user: BearerUser) -> Result<StatusCode, ApiError> {
     call(state.services.clone(), move |s| {
-        s.store().revoke_token(user.id, user.token_id, now_ms())
+        s.store()
+            .revoke_token(user.id, MOBILE_CLIENT_ID, user.token_id, now_ms())
     })
     .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
+fn this_device(user: &BearerUser) -> KeepSession {
+    KeepSession {
+        web_session_hash: None,
+        api_token_id: Some(user.token_id),
+    }
+}
+
 #[derive(Serialize)]
 struct SessionRow {
+    kind: DeviceKind,
     id: i64,
-    label: String,
+    label: crate::i18n::Words,
     created_at: i64,
     last_used_at: Option<i64>,
     /// The grant making this request.
@@ -574,21 +624,23 @@ struct Sessions {
     items: Vec<SessionRow>,
 }
 
+/// Every device signed in to the account, browsers included.
 async fn sessions(State(state): State<AppState>, user: BearerUser) -> ApiResult<Sessions> {
+    let this = this_device(&user);
     let rows = call(state.services.clone(), move |s| {
-        s.store()
-            .list_tokens_for_user(user.id, MOBILE_CLIENT_ID, now_ms())
+        devices::list(s.store(), user.id, &this, now_ms())
     })
     .await?;
     Ok(Json(Sessions {
         items: rows
             .into_iter()
-            .map(|t| SessionRow {
-                id: t.id,
-                label: t.label,
-                created_at: t.created_at,
-                last_used_at: t.last_used_at,
-                current: t.id == user.token_id,
+            .map(|d| SessionRow {
+                kind: d.kind,
+                id: d.id,
+                label: d.label,
+                created_at: d.created_at,
+                last_used_at: d.last_used_at,
+                current: d.current,
             })
             .collect(),
     }))
@@ -597,10 +649,11 @@ async fn sessions(State(state): State<AppState>, user: BearerUser) -> ApiResult<
 async fn revoke_session(
     State(state): State<AppState>,
     user: BearerUser,
-    Path(id): Path<i64>,
+    Path((kind, id)): Path<(String, i64)>,
 ) -> Result<StatusCode, ApiError> {
+    let kind = DeviceKind::parse(&kind).ok_or(ApiError::not_found("session"))?;
     call(state.services.clone(), move |s| {
-        s.store().revoke_token(user.id, id, now_ms())
+        devices::sign_out(s.store(), user.id, kind, id, now_ms())
     })
     .await?;
     Ok(StatusCode::NO_CONTENT)
@@ -612,15 +665,16 @@ struct Revoked {
 }
 
 async fn revoke_others(State(state): State<AppState>, user: BearerUser) -> ApiResult<Revoked> {
+    let this = this_device(&user);
     let revoked = call(state.services.clone(), move |s| {
-        s.store()
-            .revoke_tokens_for_user(user.id, MOBILE_CLIENT_ID, Some(user.token_id), now_ms())
+        devices::sign_out_others(s.store(), user.id, &this, now_ms())
     })
     .await?;
     Ok(Json(Revoked { revoked }))
 }
 
 async fn me(State(state): State<AppState>, user: BearerUser) -> ApiResult<Me> {
-    let overview = call(state.services.clone(), move |s| s.account_overview(user.id)).await?;
-    Ok(Json(overview.into()))
+    let app = state.clone();
+    let me = call(state.services.clone(), move |s| me_of(&app, &s, user.id)).await?;
+    Ok(Json(me))
 }

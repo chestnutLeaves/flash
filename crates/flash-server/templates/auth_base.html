@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-theme="{{ theme }}">
+<html lang="{{ ""|html_lang }}" dir="{{ ""|html_dir }}" data-script="{{ ""|html_script }}" data-theme="{{ theme }}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -8,13 +8,21 @@
 <link rel="icon" href="/static/favicon-192.png?v=1" type="image/png" sizes="192x192">
 <link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v=1">
 {# bump ?v= together with base.html and study.html when static files change #}
-<link rel="stylesheet" href="/static/app.css?v=74">
+<link rel="stylesheet" href="/static/app.css?v=111">{% include "_auth_head.html" %}
+{# First, so it hears every script after it. #}
+<script src="/static/report.js?v=1" defer></script>
+{# Second: every script after it words through it, from the words the
+   page carries (`js_island`): those of the scripts it loads. #}
+<script src="/static/i18n.js?v=9" defer></script>
+{{ "js-ui js-passkey"|js_island|safe }}
+{# Third: what every script after it looks things up with. #}
+<script src="/static/dom.js?v=6" defer></script>
 {% block head %}{% endblock %}
 {% block scripts %}{% endblock %}
 </head>
 <body>
 <div class="auth">
-  <a class="wordmark" href="/">
+  <a class="wordmark" href="{{ "/"|href }}">
     <svg viewBox="0 0 64 64" fill="none" aria-hidden="true"><g transform="translate(32 32) scale(1.25) translate(-32 -32)"><g stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M47.5 27.9 51.8 26.7 M51.8 26.7 51.6 17.2 M51.8 26.7 56.3 35"></path><path d="M36.1 16.5 37.3 12.2 M37.3 12.2 29 7.7 M37.3 12.2 46.7 12.4"></path><path d="M20.7 20.7 17.5 17.5 M17.5 17.5 9.4 22.4 M17.5 17.5 22.4 9.4"></path><path d="M16.5 36.1 12.2 37.3 M12.2 37.3 12.4 46.7 M12.2 37.3 7.7 29"></path><path d="M27.9 47.5 26.7 51.8 M26.7 51.8 35 56.3 M26.7 51.8 17.2 51.6"></path><path d="M43.3 43.3 46.5 46.5 M46.5 46.5 54.6 41.6 M46.5 46.5 41.6 54.6"></path></g><path fill="currentColor" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round" d="M49.4 27.3 Q38.7 25.3 36.7 14.6 Q29.5 22.8 19.3 19.3 Q22.8 29.5 14.6 36.7 Q25.3 38.7 27.3 49.4 Q34.5 41.2 44.7 44.7 Q41.2 34.5 49.4 27.3 Z"></path></g></svg>
     <span>Flash</span>
   </a>

@@ -1,83 +1,97 @@
 {% extends "base.html" %}
-{% block title %}{{ deck_name }} settings - Flash{% endblock %}
+{% block title %}{{ "deck-settings-title"|ta("name", deck_name) }}{% endblock %}
 {% block content %}
 <div id="deck-settings" style="display:contents">
 <div class="page-head">
   <div>
     <h1>{{ deck_leaf }}</h1>
-    <span class="fl-hint">Deck settings{% if deck_name != deck_leaf %} &middot; {{ deck_name }}{% endif %}</span>
+    <span class="fl-hint">{{ "deck-settings-label"|t }}{% if deck_name != deck_leaf %} &middot; {{ deck_name }}{% endif %}</span>
   </div>
-  <a class="fl-btn fl-btn-secondary" href="/decks/{{ deck_id }}">&larr; Back to deck</a>
+  <a class="fl-btn fl-btn-secondary" href="/decks/{{ deck_id }}"><span class="fl-dir" aria-hidden="true">&larr;</span> {{ "deck-settings-back"|t }}</a>
 </div>
 
 <form class="fl-card fl-card-pad" id="rename-card" method="post" action="/decks/{{ deck_id }}/rename" hx-boost="true" hx-push-url="false" hx-select="#deck-settings" hx-target="#deck-settings" hx-swap="outerHTML show:none" style="display:flex;flex-direction:column;gap:12px">
   <div class="row">
-    <h3>Name</h3>
+    <h3>{{ "deck-name-heading"|t }}</h3>
     {% if let Some(e) = name_error %}<span class="fl-badge fl-badge-warn fl-badge-wrap">{{ e }}</span>{% endif %}
   </div>
-  <input class="fl-input" type="text" id="deck-name" name="name" aria-label="Deck name" value="{{ deck_leaf }}" required maxlength="200" autocomplete="off">
-  <div class="row"><button class="fl-btn fl-btn-secondary" type="submit">Rename</button>{% if saved == "name" %}<span class="save-note fl-badge-toast" role="status">Saved</span>{% endif %}</div>
+  <input class="fl-input" type="text" dir="auto" id="deck-name" name="name" aria-label="{{ "deck-name-label"|t }}" value="{{ deck_leaf }}" required maxlength="200" autocomplete="off">
+  <div class="row"><button class="fl-btn fl-btn-secondary" type="submit">{{ "deck-rename"|t }}</button>{% if saved == "name" %}<span class="save-note fl-badge-toast" role="status">{{ "deck-saved"|t }}</span>{% endif %}</div>
 </form>
 
 <form class="fl-card fl-card-pad" id="parent-card" method="post" action="/decks/{{ deck_id }}/move" hx-boost="true" hx-push-url="false" hx-select="#deck-settings" hx-target="#deck-settings" hx-swap="outerHTML show:none" style="display:flex;flex-direction:column;gap:12px">
   <div class="row">
-    <h3>Parent deck</h3>
+    <h3>{{ "deck-parent-heading"|t }}</h3>
     {% if let Some(e) = parent_error %}<span class="fl-badge fl-badge-warn fl-badge-wrap">{{ e }}</span>{% endif %}
   </div>
-  <p class="fl-hint">The deck this one sits in. Studying a deck includes its subdecks{% if subdeck_count == 1 %}, and this deck's subdeck moves with it{% else if subdeck_count > 1 %}, and this deck's {{ subdeck_count }} subdecks move with it{% endif %}.</p>
-  <select class="fl-input fl-select" id="deck-parent" name="parent" aria-label="Parent deck">
-    <option value="">(top level)</option>
+  <p class="fl-hint">{{ "deck-parent-hint"|tn(subdeck_count) }}</p>
+  <select class="fl-input fl-select" id="deck-parent" name="parent" aria-label="{{ "deck-parent-label"|t }}">
+    <option value="">{{ "deck-top-level"|t }}</option>
     {% for parent in parents %}
     <option value="{{ parent.id }}"{% if parent.selected %} selected{% endif %}>{{ parent.name }}</option>
     {% endfor %}
   </select>
-  <div class="row"><button class="fl-btn fl-btn-secondary" type="submit">Move</button>{% if saved == "parent" %}<span class="save-note fl-badge-toast" role="status">Moved</span>{% endif %}</div>
+  <div class="row"><button class="fl-btn fl-btn-secondary" type="submit">{{ "deck-move"|t }}</button>{% if saved == "parent" %}<span class="save-note fl-badge-toast" role="status">{{ "deck-moved"|t }}</span>{% endif %}</div>
 </form>
 
+{% if let Some(goal) = goal %}
+<div class="fl-card fl-card-pad" id="goal-card" style="display:flex;flex-direction:column;gap:14px">
+  <div class="row" style="justify-content:space-between">
+    <h3>{{ "goal-card-heading"|t }}</h3>
+    {% if saved == "goal" %}<span class="save-note fl-badge-toast" role="status">{{ "deck-saved"|t }}</span>{% endif %}
+  </div>
+  {% include "goal_form.html" %}
+</div>
+{% endif %}
+
 <div class="fl-card fl-card-pad" id="limits-card" style="display:flex;flex-direction:column;gap:14px">
-  <h3>Daily limits</h3>
+  <h3>{{ "deck-limits-heading"|t }}</h3>
   <form method="post" action="/decks/{{ deck_id }}/limits" hx-boost="true" hx-push-url="false" hx-select="#limits-card" hx-target="#limits-card" hx-swap="outerHTML show:none" style="display:flex;flex-direction:column;gap:14px">
     <div class="field-cols">
-      <div class="fl-field"><label class="fl-label" for="lim-new">New cards / day</label>
+      <div class="fl-field"><label class="fl-label" for="lim-new">{{ "deck-limit-new"|t }}</label>
         <input class="fl-input" type="number" id="lim-new" name="new_per_day" min="0" max="9999"
-               placeholder="account default ({{ limits.default_new }})"
+               placeholder="{{ "deck-limit-default"|tn(limits.default_new) }}"
                {% if let Some(n) = limits.new_override %}value="{{ n }}"{% endif %}></div>
-      <div class="fl-field"><label class="fl-label" for="lim-rev">Max reviews / day</label>
+      <div class="fl-field"><label class="fl-label" for="lim-rev">{{ "deck-limit-reviews"|t }}</label>
         <input class="fl-input" type="number" id="lim-rev" name="reviews_per_day" min="0" max="99999"
-               placeholder="account default ({{ limits.default_reviews }})"
+               placeholder="{{ "deck-limit-default"|tn(limits.default_reviews) }}"
                {% if let Some(n) = limits.reviews_override %}value="{{ n }}"{% endif %}></div>
     </div>
-    <div class="row"><button class="fl-btn fl-btn-secondary" type="submit">Save limits</button>{% if saved == "limits" %}<span class="save-note fl-badge-toast" role="status">Saved</span>{% endif %}</div>
+    <div class="row"><button class="fl-btn fl-btn-secondary" type="submit">{{ "deck-save-limits"|t }}</button>{% if saved == "limits" %}<span class="save-note fl-badge-toast" role="status">{{ "deck-saved"|t }}</span>{% endif %}</div>
   </form>
   <form class="row" method="post" action="/decks/{{ deck_id }}/boost" hx-boost="true" hx-push-url="false" hx-select="#limits-card" hx-target="#limits-card" hx-swap="outerHTML show:none" style="border-top:1px solid var(--stroke);padding-top:14px">
-    <span class="fl-hint">More new cards today:</span>
+    <span class="fl-hint">{{ "study-more-new"|t }}</span>
     <button class="fl-btn fl-btn-sm fl-btn-secondary" type="submit" name="extra" value="5">+5</button>
     <button class="fl-btn fl-btn-sm fl-btn-secondary" type="submit" name="extra" value="10">+10</button>
     <button class="fl-btn fl-btn-sm fl-btn-secondary" type="submit" name="extra" value="20">+20</button>
-    {% if limits.boost_today > 0 %}<span class="fl-badge fl-badge-good"><span class="fl-badge-dot"></span>+{{ limits.boost_today }} today</span>{% endif %}
+    {% if limits.boost_today > 0 %}<span class="fl-badge fl-badge-good"><span class="fl-badge-dot"></span>{{ "deck-boosted"|tn(limits.boost_today) }}</span>{% endif %}
   </form>
 </div>
 
+{% if !card_html.is_empty() %}
+{{ card_html|safe }}
+{% endif %}
+
 <form class="fl-card fl-card-pad" id="archive-card" method="post" action="/decks/{{ deck_id }}/{% if archived %}unarchive{% else %}archive{% endif %}" hx-boost="true" hx-push-url="false" hx-select="#deck-settings" hx-target="#deck-settings" hx-swap="outerHTML show:none" style="display:flex;flex-direction:column;gap:12px">
   {% if archived %}
-  <h3>Archived deck</h3>
-  <p class="fl-hint">This deck is out of the study queue and the due counts. Unarchive it and its cards come back with the review history they had{% if subdeck_count > 0 %}, and so do its {{ subdeck_count }} subdeck{% if subdeck_count != 1 %}s{% endif %}{% endif %}.{% if deck_name != deck_leaf %} The decks it sits in are unarchived with it.{% endif %}</p>
-  <div class="row"><button class="fl-btn fl-btn-secondary" type="submit">Unarchive</button>{% if saved == "archive" %}<span class="save-note fl-badge-toast" role="status">Archived</span>{% endif %}</div>
+  <h3>{{ "deck-archived-heading"|t }}</h3>
+  <p class="fl-hint">{{ "deck-archived-explain"|tn(subdeck_count) }}{% if deck_name != deck_leaf %} {{ "deck-archived-parents"|t }}{% endif %}</p>
+  <div class="row"><button class="fl-btn fl-btn-secondary" type="submit">{{ "deck-unarchive"|t }}</button>{% if saved == "archive" %}<span class="save-note fl-badge-toast" role="status">{{ "deck-archived-toast"|t }}</span>{% endif %}</div>
   {% else %}
-  <h3>Archive deck</h3>
-  <p class="fl-hint">Keeps every card, its media and review history, and takes the deck out of study and out of due counts{% if subdeck_count > 0 %}, along with its {{ subdeck_count }} subdeck{% if subdeck_count != 1 %}s{% endif %}{% endif %}. You can unarchive it any time.</p>
-  <div class="row"><button class="fl-btn fl-btn-secondary" type="submit">Archive</button>{% if saved == "archive" %}<span class="save-note fl-badge-toast" role="status">Restored</span>{% endif %}</div>
+  <h3>{{ "deck-archive-heading"|t }}</h3>
+  <p class="fl-hint">{{ "deck-archive-explain"|tn(subdeck_count) }}</p>
+  <div class="row"><button class="fl-btn fl-btn-secondary" type="submit">{{ "deck-archive"|t }}</button>{% if saved == "archive" %}<span class="save-note fl-badge-toast" role="status">{{ "deck-restored"|t }}</span>{% endif %}</div>
   {% endif %}
 </form>
 
-{{ sharing_html|safe }}
+{{ end_html|safe }}
 
 <div class="fl-card fl-card-pad" style="display:flex;flex-direction:column;gap:12px">
-  <h3>Delete deck</h3>
-  <p class="fl-hint">Removes this deck{% if subdeck_count > 0 %}, its {{ subdeck_count }} subdeck{% if subdeck_count != 1 %}s{% endif %}{% endif %} and every card in {% if subdeck_count > 0 %}them{% else %}it{% endif %}. Review history is kept. This can't be undone.</p>
+  <h3>{{ "deck-delete-heading"|t }}</h3>
+  <p class="fl-hint">{{ "deck-delete-explain"|tn(subdeck_count) }}</p>
   <div><button class="fl-btn fl-btn-sm fl-btn-danger" type="button"
           hx-post="/decks/{{ deck_id }}/delete" hx-disabled-elt="this"
-          hx-confirm="Delete this deck{% if subdeck_count > 0 %}, its {{ subdeck_count }} subdeck{% if subdeck_count != 1 %}s{% endif %}{% endif %} and all {{ card_count }} card{% if card_count != 1 %}s{% endif %}? This can't be undone.">Delete deck</button></div>
+          hx-confirm="{{ "deck-delete-confirm"|tn2("subdecks", subdeck_count, "cards", card_count) }}">{{ "deck-delete"|t }}</button></div>
 </div>
 </div>
 {% endblock %}

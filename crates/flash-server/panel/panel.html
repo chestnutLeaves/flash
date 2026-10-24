@@ -1,0 +1,471 @@
+<!doctype html>
+<html lang="en" dir="ltr" data-script="Latn">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Flash</title>
+<!--
+  Flash's panel, an MCP Apps view (io.modelcontextprotocol/ui). The host
+  renders it in a sandboxed frame beside the conversation, with one of
+  two views: a study session (start_study_session), or the cards just
+  made or edited (create_cards, update_cards), one at a time. It speaks
+  the extension's JSON-RPC over postMessage: every action is a tools/call
+  the host proxies over the user's own connection, so the page holds no
+  credentials. Card HTML is sanitized by the server when it is saved;
+  media loads through links the server signs for this panel.
+-->
+<style>
+/* The site's font, from this server (the server writes its address in
+   for the mark when it hands out the page). */
+@font-face{font-family:"Geist";font-style:normal;font-weight:400;font-display:swap;src:url(__FLASH_ORIGIN__/static/fonts/Geist-Regular.woff2?v=3) format("woff2")}
+@font-face{font-family:"Geist";font-style:normal;font-weight:500;font-display:swap;src:url(__FLASH_ORIGIN__/static/fonts/Geist-Medium.woff2?v=3) format("woff2")}
+@font-face{font-family:"Geist";font-style:normal;font-weight:600;font-display:swap;src:url(__FLASH_ORIGIN__/static/fonts/Geist-SemiBold.woff2?v=3) format("woff2")}
+/* The page's script (the root's data-script, set with its language):
+   whether it takes tracking. The panel's own words are in the host's
+   font, which knows every script. */
+/* ---- scripts: written from the table of languages (i18n::scripts), not by hand ---- */
+@font-face{font-family:"Geist";font-style:normal;font-weight:400;font-display:swap;src:url(__FLASH_ORIGIN__/static/fonts/Geist-Regular-ext.woff2?v=2) format("woff2");unicode-range:U+100-101,U+103-113,U+116-12B,U+12E-130,U+132-137,U+139-13E,U+141-148,U+14A-14D,U+150-151,U+154-17E,U+18F,U+192,U+1A0-1A1,U+1AF-1B0,U+1CD-1CE,U+1E4-1E9,U+218-21B,U+237,U+259,U+2B9,U+2C7-2C8,U+2D8-2D9,U+2DB,U+2DD,U+302,U+306-307,U+30A-30C,U+312,U+31B,U+326-328,U+335-338,U+400-45F,U+462-463,U+46A-46B,U+472-475,U+490-493,U+496-497,U+49A-49B,U+4A2-4A3,U+4AE-4B3,U+4B6-4B7,U+4BA-4BB,U+4C0,U+4CF,U+4D8-4D9,U+4E2-4E3,U+4E8-4E9,U+4EE-4EF,U+E3F,U+1E20-1E21,U+1E80-1E85,U+1E9E,U+1EA0-1EF9,U+2020-2021,U+2028-2029,U+2030,U+2070,U+2074-2079,U+2080-2089,U+20AA,U+20B1,U+20B4,U+20B9,U+20BD,U+2116-2117,U+2153-2155,U+215B-215E,U+2190,U+2192,U+2194-2199,U+219D,U+21A9-21AA,U+21B0-21B1,U+21B3-21B5,U+21E4-21E5,U+21E7,U+2202,U+2206,U+220F,U+2211,U+221A,U+221E,U+222B,U+2236,U+2248,U+2260,U+2264-2265,U+2460-2468,U+24EA,U+24FF,U+25B2-25B3,U+25B6-25B7,U+25BC-25BD,U+25C0-25C1,U+25CA-25CC,U+25CF,U+2639-263A,U+2776-277E,U+3003,U+301C,U+A78B-A78C,U+F8FF,U+FB01-FB02}
+@font-face{font-family:"Geist";font-style:normal;font-weight:500;font-display:swap;src:url(__FLASH_ORIGIN__/static/fonts/Geist-Medium-ext.woff2?v=2) format("woff2");unicode-range:U+100-101,U+103-113,U+116-12B,U+12E-130,U+132-137,U+139-13E,U+141-148,U+14A-14D,U+150-151,U+154-17E,U+18F,U+192,U+1A0-1A1,U+1AF-1B0,U+1CD-1CE,U+1E4-1E9,U+218-21B,U+237,U+259,U+2B9,U+2C7-2C8,U+2D8-2D9,U+2DB,U+2DD,U+302,U+306-307,U+30A-30C,U+312,U+31B,U+326-328,U+335-338,U+400-45F,U+462-463,U+46A-46B,U+472-475,U+490-493,U+496-497,U+49A-49B,U+4A2-4A3,U+4AE-4B3,U+4B6-4B7,U+4BA-4BB,U+4C0,U+4CF,U+4D8-4D9,U+4E2-4E3,U+4E8-4E9,U+4EE-4EF,U+E3F,U+1E20-1E21,U+1E80-1E85,U+1E9E,U+1EA0-1EF9,U+2020-2021,U+2028-2029,U+2030,U+2070,U+2074-2079,U+2080-2089,U+20AA,U+20B1,U+20B4,U+20B9,U+20BD,U+2116-2117,U+2153-2155,U+215B-215E,U+2190,U+2192,U+2194-2199,U+219D,U+21A9-21AA,U+21B0-21B1,U+21B3-21B5,U+21E4-21E5,U+21E7,U+2202,U+2206,U+220F,U+2211,U+221A,U+221E,U+222B,U+2236,U+2248,U+2260,U+2264-2265,U+2460-2468,U+24EA,U+24FF,U+25B2-25B3,U+25B6-25B7,U+25BC-25BD,U+25C0-25C1,U+25CA-25CC,U+25CF,U+2639-263A,U+2776-277E,U+3003,U+301C,U+A78B-A78C,U+F8FF,U+FB01-FB02}
+@font-face{font-family:"Geist";font-style:normal;font-weight:600;font-display:swap;src:url(__FLASH_ORIGIN__/static/fonts/Geist-SemiBold-ext.woff2?v=2) format("woff2");unicode-range:U+100-101,U+103-113,U+116-12B,U+12E-130,U+132-137,U+139-13E,U+141-148,U+14A-14D,U+150-151,U+154-17E,U+18F,U+192,U+1A0-1A1,U+1AF-1B0,U+1CD-1CE,U+1E4-1E9,U+218-21B,U+237,U+259,U+2B9,U+2C7-2C8,U+2D8-2D9,U+2DB,U+2DD,U+302,U+306-307,U+30A-30C,U+312,U+31B,U+326-328,U+335-338,U+400-45F,U+462-463,U+46A-46B,U+472-475,U+490-493,U+496-497,U+49A-49B,U+4A2-4A3,U+4AE-4B3,U+4B6-4B7,U+4BA-4BB,U+4C0,U+4CF,U+4D8-4D9,U+4E2-4E3,U+4E8-4E9,U+4EE-4EF,U+E3F,U+1E20-1E21,U+1E80-1E85,U+1E9E,U+1EA0-1EF9,U+2020-2021,U+2028-2029,U+2030,U+2070,U+2074-2079,U+2080-2089,U+20AA,U+20B1,U+20B4,U+20B9,U+20BD,U+2116-2117,U+2153-2155,U+215B-215E,U+2190,U+2192,U+2194-2199,U+219D,U+21A9-21AA,U+21B0-21B1,U+21B3-21B5,U+21E4-21E5,U+21E7,U+2202,U+2206,U+220F,U+2211,U+221A,U+221E,U+222B,U+2236,U+2248,U+2260,U+2264-2265,U+2460-2468,U+24EA,U+24FF,U+25B2-25B3,U+25B6-25B7,U+25BC-25BD,U+25C0-25C1,U+25CA-25CC,U+25CF,U+2639-263A,U+2776-277E,U+3003,U+301C,U+A78B-A78C,U+F8FF,U+FB01-FB02}
+:root,[data-script="Latn"],[data-script="Cyrl"],[data-script="Grek"]{--script-track:1}
+[data-script="Arab"],[data-script="Hebr"],[data-script="Deva"],[data-script="Thai"],[data-script="Hans"],[data-script="Hant"],[data-script="Jpan"],[data-script="Kore"]{--script-track:0}
+/* ---- end of scripts ---- */
+:root{
+  color-scheme:light dark;
+  --fl-page:#ffffff;--fl-raised:#f4f4f5;--fl-hover:#ececee;
+  --fl-text:#18181b;--fl-text-2:#52525b;--fl-muted:#6d6d75;
+  --fl-stroke:rgba(0,0,0,.09);--fl-stroke-2:rgba(0,0,0,.18);
+  --fl-accent:#111113;--fl-accent-fg:#ffffff;
+  --fl-again:#d43b40;--fl-hard:#b57e10;--fl-good:#178d5c;
+  --fl-again-ink:#b3282d;--fl-hard-ink:#8f620a;--fl-good-ink:#12704a;
+  --fl-warn-dim:rgba(181,126,16,.14);--fl-good-dim:rgba(23,141,92,.11);--fl-again-dim:rgba(212,59,64,.1);
+  --fl-card:#ffffff;
+  /* A card's text colors and highlights, the site's hues (app.css). */
+  --ink-red:#c04347;--ink-amber:#9a6c10;--ink-green:#1d7a52;--ink-teal:#12756d;--ink-blue:#2f6cb3;--ink-purple:#6d4fb3;--ink-pink:#ad4a80;
+  --tint-red:rgba(212,59,64,.12);--tint-amber:rgba(181,126,16,.14);--tint-green:rgba(23,141,92,.11);--tint-teal:rgba(18,120,112,.12);--tint-blue:rgba(47,108,179,.11);--tint-purple:rgba(109,79,179,.11);--tint-pink:rgba(173,74,128,.12);
+  --fl-font:var(--font-sans,-apple-system,"Segoe UI",system-ui,sans-serif);
+  /* The cards are in Flash's own font, as on the site. */
+  --fl-card-font:"Geist",var(--fl-font);
+  /* A session card's one height, which the loading placeholder takes too. */
+  --card-h:280px;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --fl-page:#111113;--fl-raised:#17171a;--fl-hover:#1f1f23;
+    --fl-text:#ededf0;--fl-text-2:#a0a0a8;--fl-muted:#86868e;
+    --fl-stroke:rgba(255,255,255,.08);--fl-stroke-2:rgba(255,255,255,.16);
+    --fl-accent:#e8e8e8;--fl-accent-fg:#0a0a0b;
+    --fl-again:#f2555a;--fl-hard:#f5b944;--fl-good:#4cc38a;
+    --fl-again-ink:#ff8a8e;--fl-hard-ink:#f0c060;--fl-good-ink:#6fdaa6;
+    --fl-warn-dim:rgba(245,185,68,.16);--fl-good-dim:rgba(76,195,138,.16);--fl-again-dim:rgba(242,85,90,.14);
+    --fl-card:#17171a;
+    --ink-red:#e2777c;--ink-amber:#d5a94f;--ink-green:#5fba85;--ink-teal:#55b8b2;--ink-blue:#6aa5e0;--ink-purple:#a58ae0;--ink-pink:#d982b5;
+    --tint-red:rgba(242,85,90,.16);--tint-amber:rgba(245,185,68,.16);--tint-green:rgba(76,195,138,.16);--tint-teal:rgba(85,190,180,.16);--tint-blue:rgba(96,165,230,.16);--tint-purple:rgba(165,138,224,.18);--tint-pink:rgba(217,130,181,.18);
+  }
+}
+:root[data-theme="dark"]{
+  --fl-page:#111113;--fl-raised:#17171a;--fl-hover:#1f1f23;
+  --fl-text:#ededf0;--fl-text-2:#a0a0a8;--fl-muted:#86868e;
+  --fl-stroke:rgba(255,255,255,.08);--fl-stroke-2:rgba(255,255,255,.16);
+  --fl-accent:#e8e8e8;--fl-accent-fg:#0a0a0b;
+  --fl-again:#f2555a;--fl-hard:#f5b944;--fl-good:#4cc38a;
+  --fl-again-ink:#ff8a8e;--fl-hard-ink:#f0c060;--fl-good-ink:#6fdaa6;
+  --fl-warn-dim:rgba(245,185,68,.16);--fl-good-dim:rgba(76,195,138,.16);--fl-again-dim:rgba(242,85,90,.14);
+  --fl-card:#17171a;
+  --ink-red:#e2777c;--ink-amber:#d5a94f;--ink-green:#5fba85;--ink-teal:#55b8b2;--ink-blue:#6aa5e0;--ink-purple:#a58ae0;--ink-pink:#d982b5;
+  --tint-red:rgba(242,85,90,.16);--tint-amber:rgba(245,185,68,.16);--tint-green:rgba(76,195,138,.16);--tint-teal:rgba(85,190,180,.16);--tint-blue:rgba(96,165,230,.16);--tint-purple:rgba(165,138,224,.18);--tint-pink:rgba(217,130,181,.18);
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--fl-page);color:var(--fl-text);font:15px/1.55 var(--fl-font)}
+/* The spacing is main's, not body's: ChatGPT injects a stylesheet after
+   this one that zeroes the top and bottom padding of html and body. */
+main{max-width:680px;margin:0 auto;padding:16px}
+header{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px;min-height:26px;font-size:13px;color:var(--fl-muted)}
+header .scope{display:flex;flex-wrap:wrap;align-items:center;gap:6px;min-width:0}
+/* The deck as a path, its own name in bold. */
+header .deck{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+header .deck b{font-weight:600;color:var(--fl-text)}
+header .left{flex:none;display:flex;align-items:center;gap:10px;font-variant-numeric:tabular-nums}
+header .side-tools{flex:none;display:flex;align-items:center;gap:10px}
+/* Expand: on every card where the host has full screen, in the header row
+   that is there anyway. Small to look at, with a finger-sized hit area
+   around it. */
+#expand{position:relative;min-height:0;height:26px;padding:0 10px;display:inline-flex;align-items:center;gap:5px;font-size:12px;border-radius:999px;background:var(--fl-page)}
+#expand::before{content:"";position:absolute;inset:-9px -4px}
+#expand svg{width:12px;height:12px}
+.tags-label{color:var(--fl-muted);font-size:12px}
+.chip{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid var(--fl-stroke-2);background:var(--fl-raised);color:var(--fl-text-2);font-size:12px;font-weight:500;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.badge{font-size:12px;font-weight:500;border-radius:999px;padding:3px 9px;background:var(--fl-raised);color:var(--fl-text-2)}
+.badge.new{background:var(--fl-good-dim);color:var(--fl-good-ink)}
+.tally{font-size:12px;color:var(--fl-text-2)}
+/* Where the session or the cards stand: a mark per card, or one bar
+   when there are too many cards for marks. */
+.track{display:flex;gap:4px;height:4px;margin-bottom:14px}
+.track>span{flex:1;min-width:0;border-radius:2px;background:var(--fl-hover)}
+.track .done{background:var(--fl-text-2)}
+.track .now{background:var(--fl-accent)}
+.track.bar>span{border-radius:999px;overflow:hidden}
+.track.bar b{display:block;height:100%;border-radius:inherit;background:var(--fl-accent)}
+/* The card as the site's study page draws it: the front in medium weight,
+   the back below a rule in the secondary colour. */
+/* No card is taller than the cap: a longer one scrolls inside itself,
+   faded at the edge while more is below, so one huge card never makes
+   the panel huge. */
+.face{--front:19px;--back:17px;--fit:1;position:relative;background:var(--fl-card);border:1px solid var(--fl-stroke);border-radius:12px;padding:28px 24px;min-height:150px;max-height:340px;overflow-y:auto;overscroll-behavior:contain}
+/* A session's card is one fixed size, as a flashcard app's is, so a
+   reveal or a grade never moves the buttons or resizes the panel. What
+   it holds sits in the middle; a card too long for it shrinks its text
+   (--fit, set by the script, down to three quarters) and only past that
+   scrolls. */
+#face{display:flex;flex-direction:column;height:var(--card-h);max-height:none;min-height:0}
+/* A host with no full screen: the one card that does not fit even at the
+   smallest text takes the height it needs, so none of it is out of reach. */
+#face.grow{height:auto}
+/* A card too long for the inline box, where the host has full screen:
+   no scrolling inline (Claude's phone app gives a swipe in it to the chat,
+   and both hosts ask for none); it ends in the fade, with Show all over
+   it, which opens full screen. The pill sits outside the card's own
+   content, so it never covers an answer the card scrolls to. */
+.stage{position:relative}
+.face.clip{overflow:hidden}
+.show-all{position:absolute;/* physical: half the width over and half its own back centres it, in either direction */left:50%;bottom:10px;transform:translateX(-50%);min-height:0;height:30px;padding:0 12px;display:inline-flex;align-items:center;gap:6px;font-size:13px;border-radius:999px;background:var(--fl-raised);box-shadow:0 1px 4px rgba(0,0,0,.12)}
+.show-all::before{content:"";position:absolute;inset:-7px -4px}
+.show-all svg{width:12px;height:12px}
+#shown.grow{max-height:none}
+/* Full screen (the host's own mode, a side panel in ChatGPT): the page
+   fills the frame, the card takes the room the buttons leave and scrolls
+   when it must, at its usual text size. The bottom keeps clear of the
+   device's safe area, and, where the frame fills most of the window
+   (`overlaid`, set by the script), of the message box the host lays over
+   it: ChatGPT's full window puts about 160 px of composer over the frame's
+   bottom and reports no inset for it (measured 2026-10-10), and Claude
+   keeps its composer over full screen too. ChatGPT's side panel, under
+   half the window, and a phone have nothing over them. */
+html.fullscreen,html.fullscreen body{height:100%}
+html.fullscreen main{box-sizing:border-box;display:flex;flex-direction:column;height:var(--full-h,100%);max-width:760px;/* physical: the safe areas are the device's own edges, which do not turn with the text */padding:calc(16px + var(--safe-top,0px)) calc(16px + var(--safe-right,0px)) max(24px,calc(16px + var(--safe-bottom,0px))) calc(16px + var(--safe-left,0px))}
+html.fullscreen.overlaid main{padding-bottom:max(176px,calc(16px + var(--safe-bottom,0px)))}
+html.fullscreen #card{flex:1;display:flex;flex-direction:column;min-height:0}
+html.fullscreen .stage{flex:1;display:flex;flex-direction:column;min-height:0}
+html.fullscreen #face{flex:1;height:auto}
+html.fullscreen #cards{flex:1;display:flex;flex-direction:column;min-height:0}
+html.fullscreen #shown{flex:1;max-height:none}
+#face .fit{margin:auto 0}
+/* Every card's text at --fit of its size: 1 until a card is too long for
+   its box, then as small as three quarters (the script). The front keeps
+   the size it had before the answer came in (--fit-front), so a reveal
+   shrinks only the answer. */
+.face .side{font-size:calc(var(--front) * var(--fit))}
+#front{font-size:calc(var(--front) * var(--fit-front,var(--fit)))}
+.face .answer .side{font-size:calc(var(--back) * var(--fit))}
+/* Pictures as the card was written, as the site shows them, only never
+   taller than the card's box (its height less its padding and border).
+   Set on the text's middle, not its baseline, so a tall one adds no gap
+   below itself. */
+.face .side img,.face .side video{max-height:280px;vertical-align:middle}
+#face .side img,#face .side video{max-height:calc(var(--card-h) - 60px)}
+html.fullscreen .face .side img,html.fullscreen .face .side video,html.fullscreen #face .side img,html.fullscreen #face .side video{max-height:none}
+.face .side.center{text-align:center}
+/* For a moment while the script measures a side's text alone. */
+.side.bare img,.side.bare video{display:none}
+/* The front can be tapped for the answer, as a flashcard is turned. */
+#face.tap{cursor:pointer}
+.face.more{-webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 48px),transparent);mask-image:linear-gradient(to bottom,#000 calc(100% - 48px),transparent)}
+.side{font-family:var(--fl-card-font);font-size:19px;font-weight:500;line-height:1.45;letter-spacing:calc(-.01em * var(--script-track));overflow-wrap:anywhere}
+.side,.side :is(p,div,li,blockquote,h1,h2,h3,h4,h5,h6,dt,dd,td,th,figcaption,summary),.quick-field :is(p,div,li){unicode-bidi:plaintext}
+.side img,.side video{max-width:100%;height:auto;object-fit:contain;border-radius:8px}
+.side audio{max-width:100%}
+.side table{border-collapse:collapse;max-width:100%}
+.side td,.side th{border:1px solid var(--fl-stroke-2);padding:4px 8px}
+.side pre{white-space:pre-wrap;background:var(--fl-raised);padding:8px 12px;border-radius:8px;font-size:14px;line-height:1.5}
+.answer{margin-top:20px;padding-top:20px;border-top:1px solid var(--fl-stroke)}
+.answer .side{font-size:17px;font-weight:400;letter-spacing:0;line-height:1.55;color:var(--fl-text-2)}
+.cloze-blank{background:var(--fl-warn-dim);border-radius:6px;padding:0 6px;font-weight:600}
+.cloze-answer{background:var(--fl-good-dim);border-radius:6px;padding:0 6px;font-weight:600}
+.cloze-answer-block{display:block;background:var(--fl-good-dim);border-inline-start:3px solid var(--fl-good);border-radius:6px;padding:6px 12px;margin:8px 0;font-weight:500}
+.hl-red{color:var(--ink-red)}.hl-amber{color:var(--ink-amber)}.hl-green{color:var(--ink-green)}.hl-teal{color:var(--ink-teal)}.hl-blue{color:var(--ink-blue)}.hl-purple{color:var(--ink-purple)}.hl-pink{color:var(--ink-pink)}
+.hl-bg-red{background:var(--tint-red)}.hl-bg-amber{background:var(--tint-amber)}.hl-bg-green{background:var(--tint-green)}.hl-bg-teal{background:var(--tint-teal)}.hl-bg-blue{background:var(--tint-blue)}.hl-bg-purple{background:var(--tint-purple)}.hl-bg-pink{background:var(--tint-pink)}
+.hl-bg-red,.hl-bg-amber,.hl-bg-green,.hl-bg-teal,.hl-bg-blue,.hl-bg-purple,.hl-bg-pink{border-radius:6px;padding:0 4px;color:var(--fl-text)}
+/* An edited card: what a side said before, under what it says now. */
+.was{margin-top:8px;font-size:14px;line-height:1.5;color:var(--fl-muted)}
+.was-label{display:block;font-size:12px;margin-bottom:2px}
+.was-body{text-decoration:line-through;overflow-wrap:anywhere}
+.was-body img,.was-body video{max-width:100%;height:auto;opacity:.6}
+.card-tags{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px;margin-top:12px}
+/* Swiping the card sideways pages; the page still scrolls up and down. */
+#cards .face{touch-action:pan-y}
+#cards{position:relative}
+#probe{position:absolute;top:0;inset-inline-start:0;visibility:hidden;pointer-events:none}
+.pager{display:flex;align-items:center;gap:12px;margin-top:14px;font-size:13px;color:var(--fl-muted);font-variant-numeric:tabular-nums}
+.pager .track{flex:1;margin:0}
+/* Drawn chevrons, the site's own (24-unit box, 16 px, stroke 2), centred
+   in the button both ways: a ‹ › character sits on the text's baseline,
+   low and off to one side. */
+.pager button{width:44px;padding:0;display:inline-flex;align-items:center;justify-content:center;background:var(--fl-page)}
+.pager button svg{width:16px;height:16px}
+/* The chevrons point the way the cards go, which a right-to-left reader
+   reads the other way. */
+[dir=rtl] .fl-dir{transform:scaleX(-1)}
+#position{min-width:52px;text-align:center}
+/* Buttons at 14px and medium weight, tall enough for a finger. The font
+   stays the host's: ChatGPT sets its own in every panel and asks apps
+   to use the platform's. */
+button{font:500 14px/1 var(--fl-font);color:inherit;cursor:pointer;border:1px solid var(--fl-stroke-2);background:var(--fl-raised);border-radius:10px;min-height:44px;padding:0 16px}
+button:hover{background:var(--fl-hover)}
+button:focus-visible,a:focus-visible{outline:2px solid var(--fl-accent);outline-offset:2px}
+button:disabled{opacity:.55;cursor:default}
+.primary{background:var(--fl-accent);color:var(--fl-accent-fg);border-color:var(--fl-accent);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.primary:hover{background:var(--fl-accent);opacity:.92}
+.actions{margin-top:16px;min-height:56px}
+/* Show answer and the grades fill the same slot, at the same height. */
+#reveal{width:100%;min-height:56px}
+.cta{display:flex;gap:8px;margin-top:16px}
+.cta button{flex:1;min-width:0}
+#see-all{background:var(--fl-page)}
+/* The grades, tinted: Again red, Hard amber, Good green and outlined as
+   the usual choice, Easy plain. Each says when the card comes back. */
+.grades{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.grades button{min-height:56px;padding:6px 4px;border-color:transparent;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;line-height:1.1}
+.grades .when{font-size:11px;font-weight:400;opacity:.8;white-space:nowrap}
+.grades .when:empty{display:none}
+.grades [data-rating="1"]{background:var(--fl-again-dim);color:var(--fl-again-ink)}
+.grades [data-rating="1"]:hover{border-color:var(--fl-again)}
+.grades [data-rating="2"]{background:var(--fl-warn-dim);color:var(--fl-hard-ink)}
+.grades [data-rating="2"]:hover{border-color:var(--fl-hard)}
+.grades [data-rating="3"]{background:var(--fl-good-dim);color:var(--fl-good-ink);border-color:var(--fl-good)}
+.grades [data-rating="4"]{background:var(--fl-raised)}
+.grades [data-rating="4"]:hover{border-color:var(--fl-stroke-2)}
+/* A finished session: what was done, the week ahead, what comes next. */
+.hero{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px}
+#done h2{margin:0;font-family:var(--fl-card-font);font-weight:600;font-size:24px;line-height:1.2;letter-spacing:calc(-.01em * var(--script-track))}
+#done-text{margin:4px 0 0;color:var(--fl-text-2);font-size:14px}
+.score{display:flex;flex-wrap:wrap;gap:6px}
+.pill{height:28px;padding:0 10px;border-radius:999px;font-size:13px;font-weight:500;display:inline-flex;align-items:center;font-variant-numeric:tabular-nums}
+.pill.good{background:var(--fl-good-dim);color:var(--fl-good-ink)}
+.pill.easy{background:var(--fl-raised);color:var(--fl-text-2)}
+.pill.hard{background:var(--fl-warn-dim);color:var(--fl-hard-ink)}
+.pill.again{background:var(--fl-again-dim);color:var(--fl-again-ink)}
+.week{display:grid;grid-template-columns:repeat(7,1fr);gap:8px;margin-top:20px}
+.week .col{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:5px;height:104px;min-width:0}
+.week i{display:block;width:100%;border-radius:6px;background:var(--fl-hover)}
+.week .next i{background:var(--fl-accent)}
+.week b{font-size:11px;font-weight:500;font-variant-numeric:tabular-nums}
+.week span{font-size:11px;color:var(--fl-muted)}
+/* The goal the session counted toward, as the site's done screen shows
+   it: a ring that fills as the deck is learned, green on track and amber
+   behind, and the button that catches a behind deck up. */
+.goal-box{display:grid;grid-template-columns:40px 1fr auto;align-items:center;gap:12px;margin-top:16px;padding:12px 14px;border-radius:12px;background:var(--fl-raised)}
+.goal-ring{transform:rotate(-90deg)}
+.goal-track{stroke:var(--fl-stroke-2)}
+.goal-arc{stroke:var(--fl-good)}
+.goal-box.behind .goal-arc{stroke:var(--fl-hard)}
+.goal-text{display:flex;flex-direction:column;gap:2px;min-width:0}
+.goal-text b{font-size:14px;font-weight:600}
+.goal-text span{font-size:12px;color:var(--fl-muted)}
+.goal-pct{font-size:12px;font-weight:600;color:var(--fl-good-ink)}
+.next-box{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:16px;padding:12px 14px;border-radius:12px;background:var(--fl-raised)}
+.next-box>div{display:flex;flex-direction:column;gap:2px;min-width:0}
+.next-box b{font-size:14px;font-weight:600}
+.next-box span{font-size:12px;color:var(--fl-muted)}
+/* Remind me: asked once, beside the day it is about; once set, it says so
+   and is not offered again. */
+#remind{flex:none;position:relative;min-height:0;height:34px;padding:0 14px;font-size:13px;background:var(--fl-page)}
+#remind::before{content:"";position:absolute;inset:-5px -4px}
+.reminded{flex:none;display:inline-flex;align-items:center;gap:5px;font-size:13px;font-weight:500;color:var(--fl-good-ink)}
+.reminded svg{width:14px;height:14px}
+.acts{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+.acts button{flex:1}
+/* A quiet way to the site, under the rest. */
+.quiet{margin:14px 0 0;text-align:center}
+.link{position:relative;min-height:0;height:auto;padding:0;border:0;background:none;font-size:13px;font-weight:400;line-height:1.4;color:var(--fl-text-2);text-decoration:underline;text-underline-offset:3px;text-decoration-color:var(--fl-stroke-2)}
+.link::before{content:"";position:absolute;inset:-12px -8px}
+.link:hover{background:none;color:var(--fl-text)}
+/* The "more" button beside Expand, for the card on screen: its quick
+   edit and Archive, in a small menu. With neither on offer, no button. */
+.more-wrap{position:relative;display:inline-flex}
+.more-wrap:has(#edit[hidden]):has(#archive[hidden]){display:none}
+#card-more{position:relative;min-height:0;height:26px;width:30px;padding:0;display:inline-flex;align-items:center;justify-content:center;border-radius:999px;background:var(--fl-page)}
+#card-more::before{content:"";position:absolute;inset:-9px -4px}
+#card-more svg{width:15px;height:15px}
+.more-menu{position:absolute;top:calc(100% + 6px);inset-inline-end:0;z-index:5;min-width:170px;display:flex;flex-direction:column;padding:4px;background:var(--fl-raised);border:1px solid var(--fl-stroke-2);border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.18)}
+.more-menu[hidden]{display:none}
+.more-menu button{min-height:36px;height:auto;padding:0 10px;display:flex;align-items:center;gap:10px;border:0;border-radius:8px;background:none;font-weight:400;font-size:14px;color:var(--fl-text);text-align:start;white-space:nowrap}
+.more-menu button[hidden]{display:none}
+.more-menu button:hover{background:var(--fl-hover)}
+.more-menu svg{width:15px;height:15px;flex:none;color:var(--fl-muted)}
+/* After Archive, where the count was: what happened and the way back. */
+.archived-note{display:inline-flex;align-items:center;gap:8px;color:var(--fl-text-2)}
+.archived-note .link{font-size:13px}
+/* The quick edit: the note's two fields as the card has them, typed in
+   and deleted from, never formatted; Advanced edit, under them on the
+   left, is the site's whole editor. */
+.quick-fields{display:flex;flex-direction:column;gap:6px;background:var(--fl-card);border:1px solid var(--fl-stroke-2);border-radius:12px;padding:16px 18px}
+.quick-label{font-size:12px;font-weight:500;color:var(--fl-muted)}
+.quick-label+.quick-field{margin-bottom:8px}
+.quick-field{font-family:var(--fl-card-font);font-size:16px;line-height:1.45;min-height:56px;max-height:180px;overflow-y:auto;padding:10px 12px;border:1px solid var(--fl-stroke-2);border-radius:8px;background:var(--fl-page);overflow-wrap:anywhere;outline:none}
+.quick-field:focus{border-color:var(--fl-accent)}
+.quick-field img,.quick-field video{max-width:100%;max-height:120px;vertical-align:middle}
+.quick-fields .link{align-self:flex-start;display:inline-flex;align-items:center;gap:5px}
+.quick-fields .link svg{width:11px;height:11px}
+.quick-actions{display:flex;gap:8px}
+.quick-error{margin:10px 0 0;color:var(--fl-again);font-size:14px}
+/* Loading: the study view's own shape, so the first card takes its place
+   without the panel changing height. */
+.loading .track>span{background:var(--fl-hover)}
+.loading .face{height:var(--card-h);display:flex;align-items:center;justify-content:center;color:var(--fl-muted)}
+.loading .face p{margin:0;font-size:14px}
+.loading .bone{height:56px;border-radius:10px;background:var(--fl-raised)}
+.error{margin-top:12px;color:var(--fl-again);font-size:14px}
+[hidden]{display:none !important}
+@media (max-width:420px){
+  main{padding:12px}
+  .face{padding:22px 18px;max-height:300px}
+  .face{--front:18px;--back:16px}
+  :root{--card-h:250px}
+  .face .side img,.face .side video{max-height:252px}
+  #face .side img,#face .side video{max-height:calc(var(--card-h) - 48px)}
+  .side{font-size:18px}
+  .answer .side{font-size:16px}
+  .grades{gap:6px}
+  .week{gap:5px}
+  #goal-more{grid-column:1/-1}
+}
+</style>
+</head>
+<body>
+<main aria-live="polite">
+  <header>
+    <span class="scope" id="scope"><span class="deck" id="deck">Flash</span></span>
+    <span class="side-tools">
+      <span class="left" id="left"></span>
+      <span class="more-wrap">
+        <button id="card-more" type="button" title="More" aria-label="More for this card" data-t-title="panel-more" data-t-label="panel-more-label" aria-haspopup="true" aria-expanded="false" aria-controls="card-more-menu"><svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><circle cx="5" cy="12" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="19" cy="12" r="1.9"/></svg></button>
+        <span class="more-menu" id="card-more-menu" hidden>
+          <button id="edit" type="button" hidden><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg><span data-t="panel-edit-card">Edit card</span></button>
+          <button id="archive" type="button" hidden><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg><span data-t="panel-archive-card">Archive card</span></button>
+        </span>
+      </span>
+      <button id="expand" type="button" title="Show this card full screen" aria-label="Expand: show this card full screen" data-t-title="panel-expand-title" data-t-label="panel-expand-label" hidden><svg viewBox="0 0 12 12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 1h4v4M5 11H1V7M11 1 7 5M1 11l4-4"/></svg><span data-t="panel-expand">Expand</span></button>
+    </span>
+  </header>
+
+  <div id="loading" class="loading">
+    <div class="track"><span></span></div>
+    <div class="face"><p id="loading-text" data-t="panel-loading">Loading your cards...</p></div>
+    <div class="actions"><div class="bone"></div></div>
+  </div>
+
+  <div class="track" id="track" hidden></div>
+
+  <section id="card" hidden>
+    <div class="stage">
+      <div class="face" id="face">
+        <div class="fit">
+          <div class="side" id="front" dir="auto"></div>
+          <div class="answer" id="answer" hidden>
+            <div class="side" id="back" dir="auto"></div>
+          </div>
+        </div>
+      </div>
+      <button class="show-all" type="button" hidden><span data-t="panel-show-all">Show all</span><svg viewBox="0 0 12 12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 1h4v4M5 11H1V7M11 1 7 5M1 11l4-4"/></svg></button>
+    </div>
+    <div class="actions">
+      <button class="primary" id="reveal" type="button" title="Space" aria-keyshortcuts="Space" data-t="panel-show-answer" data-t-title="panel-key-space">Show answer</button>
+      <div class="grades" id="grades" hidden>
+        <button type="button" data-rating="1" title="Key 1" aria-keyshortcuts="1"><span data-t="panel-again">Again</span><span class="when"></span></button>
+        <button type="button" data-rating="2" title="Key 2" aria-keyshortcuts="2"><span data-t="panel-hard">Hard</span><span class="when"></span></button>
+        <button type="button" data-rating="3" title="Key 3" aria-keyshortcuts="3"><span data-t="panel-good">Good</span><span class="when"></span></button>
+        <button type="button" data-rating="4" title="Key 4" aria-keyshortcuts="4"><span data-t="panel-easy">Easy</span><span class="when"></span></button>
+      </div>
+    </div>
+  </section>
+
+  <section id="quick" hidden>
+    <div class="quick-fields">
+      <span class="quick-label" id="quick-front-label" data-t="panel-front">Front</span>
+      <div class="quick-field" id="quick-front" contenteditable="true" role="textbox" aria-multiline="true" aria-labelledby="quick-front-label" dir="auto" spellcheck="true"></div>
+      <span class="quick-label" id="quick-back-label" data-t="panel-back">Back</span>
+      <div class="quick-field" id="quick-back" contenteditable="true" role="textbox" aria-multiline="true" aria-labelledby="quick-back-label" dir="auto" spellcheck="true"></div>
+      <button class="link" id="advanced" type="button"><span data-t="panel-advanced-edit">Advanced edit</span><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg></button>
+    </div>
+    <p class="quick-error" id="quick-error" role="alert" hidden></p>
+    <div class="actions quick-actions">
+      <button class="primary" id="quick-save" type="button" data-t="panel-save">Save</button>
+      <button id="quick-cancel" type="button" data-t="panel-cancel">Cancel</button>
+    </div>
+  </section>
+
+  <section id="done" hidden>
+    <div class="hero">
+      <div>
+        <h2 id="done-title"></h2>
+        <p id="done-text"></p>
+      </div>
+      <div class="score" id="score" hidden></div>
+    </div>
+    <div class="goal-box" id="goal-box" hidden>
+      <svg class="goal-ring" width="40" height="40" viewBox="0 0 40 40" aria-hidden="true"><circle class="goal-track" cx="20" cy="20" r="16" fill="none" stroke-width="4"/><circle class="goal-arc" id="goal-arc" cx="20" cy="20" r="16" fill="none" stroke-width="4" stroke-linecap="round" stroke-dasharray="0 101"/></svg>
+      <div class="goal-text">
+        <b id="goal-head"></b>
+        <span id="goal-caption" dir="auto"></span>
+      </div>
+      <button class="primary" id="goal-more" type="button" hidden></button>
+      <span class="goal-pct" id="goal-pct"></span>
+    </div>
+    <div class="week" id="week" hidden></div>
+    <div class="next-box" id="next-box" hidden>
+      <div>
+        <b id="next-due"></b>
+        <span id="remind-text" hidden></span>
+      </div>
+      <button id="remind" type="button" data-t="panel-remind" data-t-title="panel-remind-title" hidden>Remind me</button>
+      <span class="reminded" id="reminded" hidden><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span data-t="panel-reminded">Reminder set</span></span>
+    </div>
+    <div class="acts" id="acts">
+      <button class="primary" id="make" type="button" data-t="panel-make" hidden>Make cards</button>
+      <button class="primary" id="more" type="button" hidden>Study 10 more</button>
+    </div>
+    <p class="quiet" id="progress-row" hidden><button class="link" id="progress" type="button" data-t="panel-progress">See your progress</button></p>
+  </section>
+
+  <section id="cards" hidden>
+    <div class="stage">
+      <div class="face" id="shown">
+        <div class="side" data-part="front" dir="auto"></div>
+        <div class="was" data-part="was-front" hidden><span class="was-label" data-t="panel-before">Before</span><div class="was-body" data-part="was-front-body" dir="auto"></div></div>
+        <div class="answer">
+          <div class="side" data-part="back" dir="auto"></div>
+          <div class="was" data-part="was-back" hidden><span class="was-label" data-t="panel-before">Before</span><div class="was-body" data-part="was-back-body" dir="auto"></div></div>
+          <div class="card-tags" data-part="tags" hidden></div>
+        </div>
+      </div>
+      <button class="show-all" type="button" hidden><span data-t="panel-show-all">Show all</span><svg viewBox="0 0 12 12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 1h4v4M5 11H1V7M11 1 7 5M1 11l4-4"/></svg></button>
+    </div>
+    <div class="pager" id="pager">
+      <button id="prev" type="button" aria-label="Previous card" data-t-label="panel-previous"><svg class="fl-dir" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg></button>
+      <div class="track" id="pager-track"></div>
+      <span id="position"></span>
+      <button id="next" type="button" aria-label="Next card" data-t-label="panel-next"><svg class="fl-dir" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg></button>
+    </div>
+    <div class="cta">
+      <button class="primary" id="study" type="button" hidden></button>
+      <button id="see-all" type="button" data-t="panel-see-all" hidden>See all</button>
+    </div>
+  </section>
+
+  <div id="error" class="error" hidden>
+    <span id="error-text"></span>
+    <button id="retry" type="button" data-t="panel-try-again">Try again</button>
+  </div>
+</main>
+__FLASH_PANEL_LANGUAGES__
+__FLASH_PANEL_WORDS__
+<script>
+__FLASH_NEGOTIATE_SCRIPT__</script>
+<script>
+__FLASH_I18N_SCRIPT__</script>
+<script>
+__FLASH_PAYLOAD_SCRIPT__</script>
+<script>
+__FLASH_PANEL_SCRIPT__</script>
+</body>
+</html>

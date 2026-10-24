@@ -92,10 +92,10 @@ pub fn build_csv(cards: &[ExportCard]) -> String {
                 out.push(',');
             }
             // Spreadsheets execute cells that start like formulas, and a
-            // card's text is not always the exporter's own words (copied
-            // community decks, MCP clients). A leading apostrophe makes
-            // the cell literal text in Excel, Sheets and LibreOffice; the
-            // importer's trim never sees it because the cell is quoted.
+            // card's text is not always the exporter's own words (imported
+            // decks, MCP clients). A leading apostrophe makes the cell
+            // literal text in Excel, Sheets and LibreOffice; the importer's
+            // trim never sees it because the cell is quoted.
             let formula_like = field.starts_with(['=', '+', '-', '@', '\t', '\r']);
             if formula_like || field.contains(['"', ',', '\n', '\r']) {
                 out.push('"');

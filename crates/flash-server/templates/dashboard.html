@@ -1,22 +1,23 @@
 {% extends "base.html" %}
 {% block title %}Flash{% endblock %}
+{% block head %}{% if ask_timezone %}<script src="/static/timezone.js?v=3" data-adopt defer></script>{% endif %}{% endblock %}
 {% block content %}
-<h1>Today</h1>
+<h1>{{ "today-heading"|t }}</h1>
 <div id="today-top" style="display:contents">
 <div class="stat-grid">
-  <div class="fl-card fl-card-pad fl-stat"><span class="fl-stat-value">{{ due_now }}</span><span class="fl-stat-label">due now</span></div>
-  <div class="fl-card fl-card-pad fl-stat"><span class="fl-stat-value">{{ new_available }}</span><span class="fl-stat-label">new today</span></div>
-  <div class="fl-card fl-card-pad fl-stat"><span class="fl-stat-value">{{ reviewed_today }}</span><span class="fl-stat-label">reviewed today</span></div>
+  <div class="fl-card fl-card-pad fl-stat"><span class="fl-stat-value">{{ due_now }}</span><span class="fl-stat-label">{{ "today-due"|t }}</span></div>
+  <div class="fl-card fl-card-pad fl-stat"><span class="fl-stat-value">{{ new_available }}</span><span class="fl-stat-label">{{ "today-new"|t }}</span></div>
+  <div class="fl-card fl-card-pad fl-stat"><span class="fl-stat-value">{{ reviewed_today }}</span><span class="fl-stat-label">{{ "today-reviewed"|t }}</span></div>
 </div>
 <div class="row" style="justify-content:space-between;align-items:center;gap:16px">
   {% if due_now > 0 || new_available > 0 %}
-  <a class="fl-btn fl-btn-primary" href="/study">Start studying</a>
+  <a class="fl-btn fl-btn-primary" href="/study">{{ "today-start"|t }}</a>
   {% else %}
-  <p class="muted" style="margin:0">All caught up. Nothing due right now.</p>
+  <p class="muted" style="margin:0">{{ "today-caught-up"|t }}</p>
   {% endif %}
   {% if new_available == 0 && !decks.is_empty() %}
   <form class="row" method="post" action="/study/boost" hx-boost="true" hx-push-url="false" hx-select="#today-top" hx-target="#today-top" hx-swap="outerHTML show:none">
-    <span class="fl-hint">More new cards today{% if boost_today > 0 %} (+{{ boost_today }} already){% endif %}:</span>
+    <span class="fl-hint">{% if boost_today > 0 %}{{ "today-more-new-boosted"|tn(boost_today) }}{% else %}{{ "today-more-new"|t }}{% endif %}</span>
     <button class="fl-btn fl-btn-sm fl-btn-secondary" type="submit" name="extra" value="5">+5</button>
     <button class="fl-btn fl-btn-sm fl-btn-secondary" type="submit" name="extra" value="10">+10</button>
     <button class="fl-btn fl-btn-sm fl-btn-secondary" type="submit" name="extra" value="20">+20</button>
@@ -26,16 +27,17 @@
 </div>
 
 <section>
-<h2>Decks</h2>
+<h2>{{ "today-decks"|t }}</h2>
 {% if decks.is_empty() %}
-<p class="muted">No decks yet. <a href="/decks">Create one</a> or <a href="/import">import</a>.</p>
+<p class="muted">{{ "today-no-decks-html"|t|safe }}</p>
 {% else %}
 <table class="fl-table" data-deck-tree>
-  <thead><tr><th>Deck</th><th>Due</th><th>New</th><th></th></tr></thead>
+  <thead><tr><th>{{ "decks-col-deck"|t }}</th><th>{{ "decks-col-goal"|t }}</th><th>{{ "decks-col-due"|t }}</th><th>{{ "decks-col-new"|t }}</th><th></th></tr></thead>
   <tbody>
   {% include "deck_rows.html" %}
   </tbody>
 </table>
+{% include "goal_dialog.html" %}
 {% endif %}
 </section>
 
@@ -43,16 +45,17 @@
 <div class="connect-cta-wrap">
   <a class="fl-card fl-card-pad connect-cta" href="/connect">
     <div>
-      <div class="connect-cta-title">Connect your AI</div>
-      <div class="connect-cta-sub">Make cards and study by voice with Claude, ChatGPT, or Grok. One-minute setup.</div>
+      <div class="connect-cta-title">{{ "today-connect"|t }}</div>
+      <div class="connect-cta-sub">{{ "today-connect-sub"|t }}</div>
     </div>
     {% include "ai_stack.html" %}
   </a>
   <form method="post" action="/connect/dismiss" class="connect-cta-x">
-    <button type="submit" aria-label="Dismiss" title="Dismiss">
+    <button type="submit" aria-label="{{ "today-connect-dismiss"|t }}" title="{{ "today-connect-dismiss"|t }}">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"></path></svg>
     </button>
   </form>
 </div>
 {% endif %}
+{{ card_html|safe }}
 {% endblock %}

@@ -1,21 +1,21 @@
 {% extends "base.html" %}
-{% block title %}Stats - Flash{% endblock %}
+{% block title %}{{ "stats-title"|t }}{% endblock %}
 {% block content %}
-<h1>Stats</h1>
+<h1>{{ "stats-heading"|t }}</h1>
 <div class="stat-grid">
-  <div class="fl-card fl-card-pad fl-stat"><span class="fl-stat-value">{{ reviews_30d }}</span><span class="fl-stat-label">reviews, last 30 days</span></div>
-  <div class="fl-card fl-card-pad fl-stat"><span class="fl-stat-value">{{ retention }}</span><span class="fl-stat-label">retention, last 30 days</span></div>
-  <div class="fl-card fl-card-pad fl-stat"><span class="fl-stat-value">{{ total_reviews }}</span><span class="fl-stat-label">reviews, all time</span></div>
-  <div class="fl-card fl-card-pad fl-stat"><span class="fl-stat-value">{{ streak }}</span><span class="fl-stat-label">day streak</span></div>
-  <div class="fl-card fl-card-pad fl-stat"><span class="fl-stat-value">{{ longest_streak }}</span><span class="fl-stat-label">longest streak</span></div>
-  <div class="fl-card fl-card-pad fl-stat"><span class="fl-stat-value">{{ mature_cards }}<span class="fl-stat-sub">/ {{ active_cards }}</span></span><span class="fl-stat-label">mature cards (of active)</span></div>
+  <div class="fl-card fl-card-pad fl-stat"><span class="fl-stat-value">{{ reviews_30d }}</span><span class="fl-stat-label">{{ "stats-reviews-30"|t }}</span></div>
+  <div class="fl-card fl-card-pad fl-stat"><span class="fl-stat-value">{{ retention }}</span><span class="fl-stat-label">{{ "stats-retention"|t }}</span></div>
+  <div class="fl-card fl-card-pad fl-stat"><span class="fl-stat-value">{{ total_reviews }}</span><span class="fl-stat-label">{{ "stats-reviews-all"|t }}</span></div>
+  <div class="fl-card fl-card-pad fl-stat"><span class="fl-stat-value">{{ streak }}</span><span class="fl-stat-label">{{ "stats-streak"|t }}</span></div>
+  <div class="fl-card fl-card-pad fl-stat"><span class="fl-stat-value">{{ longest_streak }}</span><span class="fl-stat-label">{{ "stats-longest"|t }}</span></div>
+  <div class="fl-card fl-card-pad fl-stat"><span class="fl-stat-value">{{ mature_cards }}<span class="fl-stat-sub">/ {{ active_cards }}</span></span><span class="fl-stat-label">{{ "stats-mature"|t }}</span></div>
 </div>
 
 <section>
 <div class="hm-head">
-  <h2>{% if let Some(y) = heat_year %}{{ y }}{% else %}Past year{% endif %}</h2>
+  <h2>{% if let Some(y) = heat_year %}{{ y }}{% else %}{{ "stats-past-year"|t }}{% endif %}</h2>
   {% if !year_links.is_empty() %}
-  <nav class="fl-seg hm-years" aria-label="Heatmap year">
+  <nav class="fl-seg hm-years" aria-label="{{ "stats-years"|t }}">
     {%- for l in year_links -%}
     <a class="fl-btn fl-btn-sm" href="{{ l.href }}"{% if l.current %} aria-current="true"{% endif %}>{{ l.label }}</a>
     {%- endfor -%}
@@ -32,17 +32,17 @@
     <div class="hm-grid">
       {%- for week in heat_weeks -%}
       {%- for cell in week -%}
-      <div class="hm-cell" data-level="{{ cell.level }}"{% if cell.future %} data-future="true"{% endif %}{% if cell.today %} data-today="true"{% endif %} title="{{ cell.label }}: {{ cell.count }} {% if cell.future %}due{% else %}reviews{% endif %}"></div>
+      <div class="hm-cell" data-level="{{ cell.level }}"{% if cell.future %} data-future="true"{% endif %}{% if cell.today %} data-today="true"{% endif %} title="{% if cell.future %}{{ "stats-cell-due"|tna(cell.count, "day", cell.label) }}{% else %}{{ "stats-cell-reviews"|tna(cell.count, "day", cell.label) }}{% endif %}"></div>
       {%- endfor -%}
       {%- endfor -%}
     </div>
   </div>
-  <p class="hm-legend">Daily average: <span>{{ daily_avg }} reviews</span> &middot; Days learned: <span>{{ days_learned_pct }}%</span> &middot; Longest streak: <span>{{ longest_streak }} days</span> &middot; Current streak: <span>{{ streak }} days</span></p>
+  <p class="hm-legend">{{ "stats-legend-avg-html"|tn(daily_avg)|safe }} &middot; {{ "stats-legend-learned-html"|ta("pct", days_learned_pct)|safe }} &middot; {{ "stats-legend-longest-html"|tn(longest_streak)|safe }} &middot; {{ "stats-legend-current-html"|tn(streak)|safe }}</p>
 </div>
 </section>
 
 <section>
-<h2>Reviews per day</h2>
+<h2>{{ "stats-per-day"|t }}</h2>
 <div class="fl-card" style="padding:20px 20px 12px">
   <div class="fl-bars stats-bars">
     {% for day in days %}
@@ -54,9 +54,9 @@
 </section>
 
 <section>
-<h2>Coming up</h2>
+<h2>{{ "stats-coming-up"|t }}</h2>
 <table class="fl-table">
-  <thead><tr><th>Day</th><th>Cards due</th></tr></thead>
+  <thead><tr><th>{{ "stats-col-day"|t }}</th><th>{{ "stats-col-due"|t }}</th></tr></thead>
   <tbody>
   {% for day in upcoming %}
   <tr><td>{{ day.label }}</td><td class="num">{{ day.count }}</td></tr>

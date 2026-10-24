@@ -1,9 +1,8 @@
 //! Card HTML on every path it travels: the sanitizer (with and without
-//! media), plain-text extraction, the spoken rendering, media id
-//! scanning and remapping, placeholder rewriting, the leading-prefix
-//! strippers, highlight and TTS cleanup, LaTeX delimiter conversion, and
-//! the CSS colour remap the Anki importer applies. Each must return on
-//! any string.
+//! media), plain-text extraction, media id scanning and remapping,
+//! placeholder rewriting, the leading-prefix strippers, highlight and TTS
+//! cleanup, LaTeX delimiter conversion, and the CSS colour remap the Anki
+//! importer applies. Each must return on any string.
 
 #![no_main]
 
@@ -12,7 +11,7 @@ use std::collections::HashMap;
 use flash_store::import::{parse_css_class_colors, remap_colors};
 use flash_store::richtext::{
     activate_media_refs, convert_latex_delims, html_to_text, media_ids, media_image_ids,
-    media_placeholders, remap_media_ids, sanitize_card_html, sanitize_with_media, spoken_text,
+    media_placeholders, remap_media_ids, sanitize_card_html, sanitize_with_media,
     strip_highlight_classes, strip_leading_text, strip_leading_text_html, strip_tts_wrappers,
 };
 use libfuzzer_sys::fuzz_target;
@@ -28,9 +27,6 @@ fuzz_target!(|data: &[u8]| {
     let _ = sanitize_with_media(html);
     let _ = html_to_text(html);
     let _ = html_to_text(&clean);
-    let _ = spoken_text(Some(html), head);
-    let _ = spoken_text(Some(&clean), head);
-    let _ = spoken_text(None, html);
     let ids = media_ids(html);
     let _ = media_image_ids(html);
     let map: HashMap<i64, i64> = ids.iter().map(|id| (*id, id.wrapping_add(1))).collect();

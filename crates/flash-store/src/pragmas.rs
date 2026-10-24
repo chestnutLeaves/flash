@@ -18,5 +18,16 @@ pub fn apply(conn: &Connection) -> rusqlite::Result<()> {
     // SQLite's default checkpoint cadence. A WAL replicator, if you run
     // one beside the server, takes checkpointing over on its own terms.
     conn.pragma_update(None, "wal_autocheckpoint", 1000)?;
+    conn.create_scalar_function(
+        crate::fold::SQL_NAME,
+        1,
+        rusqlite::functions::FunctionFlags::SQLITE_UTF8
+            | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
+        |ctx| {
+            Ok(ctx
+                .get::<Option<String>>(0)?
+                .map(|text| crate::fold::fold(&text)))
+        },
+    )?;
     Ok(())
 }

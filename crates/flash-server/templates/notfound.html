@@ -1,7 +1,7 @@
 {% extends "auth_base.html" %}
-{% block title %}Not found - Flash{% endblock %}
+{% block title %}{{ "notfound-title"|t }}{% endblock %}
 {% block content %}
-<h1>Page not found</h1>
-<p class="muted">Nothing lives at this address.</p>
-<p><a class="fl-btn fl-btn-secondary" href="/">Go home</a></p>
+<h1>{{ "notfound-heading"|t }}</h1>
+<p class="muted">{{ "notfound-body"|t }}</p>
+<p><a class="fl-btn fl-btn-secondary" href="/">{{ "notfound-home"|t }}</a></p>
 {% endblock %}

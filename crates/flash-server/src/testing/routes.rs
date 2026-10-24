@@ -73,7 +73,7 @@ impl Probe {
 
 /// Sends the route one request with no cookie and no bearer, from
 /// `origin` (the site's own origin unless a test asks for a foreign one),
-/// with a browser User-Agent so bot heuristics don't answer first.
+/// with a browser User-Agent, as a person's browser sends.
 pub async fn probe(app: &Router, route: &Route, origin: &str) -> Probe {
     probe_as(app, route, origin, None, None).await
 }

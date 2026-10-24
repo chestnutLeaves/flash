@@ -1,7 +1,7 @@
 # Flash Individual Contributor License Agreement
 
 Thank you for your interest in contributing to Flash ("the Project"),
-maintained by Carlos Reyes ("the Maintainer"). This agreement clarifies
+maintained by Rumbo Software LLC ("the Maintainer"). This agreement clarifies
 the terms under which you contribute so that the Project can be
 distributed under the GNU Affero General Public License and also power a
 hosted service under different terms. It is a license, not a transfer:
@@ -47,4 +47,5 @@ By submitting a Contribution you agree to the following.
    any fact that would make these representations inaccurate.
 
 Signing is done by commenting on your first pull request as the bot
-asks; the signature is recorded in the repository's `signatures` branch.
+asks; the signature is recorded in the repository's `cla-signatures`
+branch.

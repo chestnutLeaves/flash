@@ -1,0 +1,305 @@
+{
+  "cases": [
+    {
+      "out": "",
+      "rtl": false,
+      "value": ""
+    },
+    {
+      "out": "Biology",
+      "rtl": false,
+      "value": "Biology"
+    },
+    {
+      "out": "Biología 2",
+      "rtl": false,
+      "value": "Biología 2"
+    },
+    {
+      "out": "123",
+      "rtl": false,
+      "value": "123"
+    },
+    {
+      "out": "📚 Pharm",
+      "rtl": false,
+      "value": "📚 Pharm"
+    },
+    {
+      "out": "\u2068֐\u2069",
+      "rtl": false,
+      "value": "֐"
+    },
+    {
+      "out": "\u2068שלום\u2069",
+      "rtl": false,
+      "value": "שלום"
+    },
+    {
+      "out": "\u2068مرحبا\u2069",
+      "rtl": false,
+      "value": "مرحبا"
+    },
+    {
+      "out": "\u2068ࣿ\u2069",
+      "rtl": false,
+      "value": "ࣿ"
+    },
+    {
+      "out": "ऀ",
+      "rtl": false,
+      "value": "ऀ"
+    },
+    {
+      "out": "\u2068Bio 101 עברית\u2069",
+      "rtl": false,
+      "value": "Bio 101 עברית"
+    },
+    {
+      "out": "\u200Ex",
+      "rtl": false,
+      "value": "\u200Ex"
+    },
+    {
+      "out": "\u2068\u200Fx\u2069",
+      "rtl": false,
+      "value": "\u200Fx"
+    },
+    {
+      "out": "﬜",
+      "rtl": false,
+      "value": "﬜"
+    },
+    {
+      "out": "\u2068יִ\u2069",
+      "rtl": false,
+      "value": "יִ"
+    },
+    {
+      "out": "\u2068﷿\u2069",
+      "rtl": false,
+      "value": "﷿"
+    },
+    {
+      "out": "\uFE00",
+      "rtl": false,
+      "value": "\uFE00"
+    },
+    {
+      "out": "\u2068ﹰ\u2069",
+      "rtl": false,
+      "value": "ﹰ"
+    },
+    {
+      "out": "\u2068\uFEFF\u2069",
+      "rtl": false,
+      "value": "\uFEFF"
+    },
+    {
+      "out": "＀",
+      "rtl": false,
+      "value": "＀"
+    },
+    {
+      "out": "𐟿",
+      "rtl": false,
+      "value": "𐟿"
+    },
+    {
+      "out": "\u2068𐠀\u2069",
+      "rtl": false,
+      "value": "𐠀"
+    },
+    {
+      "out": "\u2068𐤀\u2069",
+      "rtl": false,
+      "value": "𐤀"
+    },
+    {
+      "out": "\u2068𐿿\u2069",
+      "rtl": false,
+      "value": "𐿿"
+    },
+    {
+      "out": "𑀀",
+      "rtl": false,
+      "value": "𑀀"
+    },
+    {
+      "out": "𞟿",
+      "rtl": false,
+      "value": "𞟿"
+    },
+    {
+      "out": "\u2068𞠀\u2069",
+      "rtl": false,
+      "value": "𞠀"
+    },
+    {
+      "out": "\u2068𞤀\u2069",
+      "rtl": false,
+      "value": "𞤀"
+    },
+    {
+      "out": "\u2068𞿿\u2069",
+      "rtl": false,
+      "value": "𞿿"
+    },
+    {
+      "out": "🀀",
+      "rtl": false,
+      "value": "🀀"
+    },
+    {
+      "out": "",
+      "rtl": true,
+      "value": ""
+    },
+    {
+      "out": "\u2068Biology\u2069",
+      "rtl": true,
+      "value": "Biology"
+    },
+    {
+      "out": "\u2068Biología 2\u2069",
+      "rtl": true,
+      "value": "Biología 2"
+    },
+    {
+      "out": "\u2068123\u2069",
+      "rtl": true,
+      "value": "123"
+    },
+    {
+      "out": "\u2068📚 Pharm\u2069",
+      "rtl": true,
+      "value": "📚 Pharm"
+    },
+    {
+      "out": "\u2068֐\u2069",
+      "rtl": true,
+      "value": "֐"
+    },
+    {
+      "out": "\u2068שלום\u2069",
+      "rtl": true,
+      "value": "שלום"
+    },
+    {
+      "out": "\u2068مرحبا\u2069",
+      "rtl": true,
+      "value": "مرحبا"
+    },
+    {
+      "out": "\u2068ࣿ\u2069",
+      "rtl": true,
+      "value": "ࣿ"
+    },
+    {
+      "out": "\u2068ऀ\u2069",
+      "rtl": true,
+      "value": "ऀ"
+    },
+    {
+      "out": "\u2068Bio 101 עברית\u2069",
+      "rtl": true,
+      "value": "Bio 101 עברית"
+    },
+    {
+      "out": "\u2068\u200Ex\u2069",
+      "rtl": true,
+      "value": "\u200Ex"
+    },
+    {
+      "out": "\u2068\u200Fx\u2069",
+      "rtl": true,
+      "value": "\u200Fx"
+    },
+    {
+      "out": "\u2068﬜\u2069",
+      "rtl": true,
+      "value": "﬜"
+    },
+    {
+      "out": "\u2068יִ\u2069",
+      "rtl": true,
+      "value": "יִ"
+    },
+    {
+      "out": "\u2068﷿\u2069",
+      "rtl": true,
+      "value": "﷿"
+    },
+    {
+      "out": "\u2068\uFE00\u2069",
+      "rtl": true,
+      "value": "\uFE00"
+    },
+    {
+      "out": "\u2068ﹰ\u2069",
+      "rtl": true,
+      "value": "ﹰ"
+    },
+    {
+      "out": "\u2068\uFEFF\u2069",
+      "rtl": true,
+      "value": "\uFEFF"
+    },
+    {
+      "out": "\u2068＀\u2069",
+      "rtl": true,
+      "value": "＀"
+    },
+    {
+      "out": "\u2068𐟿\u2069",
+      "rtl": true,
+      "value": "𐟿"
+    },
+    {
+      "out": "\u2068𐠀\u2069",
+      "rtl": true,
+      "value": "𐠀"
+    },
+    {
+      "out": "\u2068𐤀\u2069",
+      "rtl": true,
+      "value": "𐤀"
+    },
+    {
+      "out": "\u2068𐿿\u2069",
+      "rtl": true,
+      "value": "𐿿"
+    },
+    {
+      "out": "\u2068𑀀\u2069",
+      "rtl": true,
+      "value": "𑀀"
+    },
+    {
+      "out": "\u2068𞟿\u2069",
+      "rtl": true,
+      "value": "𞟿"
+    },
+    {
+      "out": "\u2068𞠀\u2069",
+      "rtl": true,
+      "value": "𞠀"
+    },
+    {
+      "out": "\u2068𞤀\u2069",
+      "rtl": true,
+      "value": "𞤀"
+    },
+    {
+      "out": "\u2068𞿿\u2069",
+      "rtl": true,
+      "value": "𞿿"
+    },
+    {
+      "out": "\u2068🀀\u2069",
+      "rtl": true,
+      "value": "🀀"
+    }
+  ],
+  "note": "Each value as a message sets it for a reader of a left-to-right (rtl false) or right-to-left (rtl true) language (crates/flash-server/src/i18n/bidi.rs). Written by crates/flash-server/tests/it/bidi_vectors_tests.rs; rerun with FLASH_WRITE_BIDI_VECTORS=1."
+}

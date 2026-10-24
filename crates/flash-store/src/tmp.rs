@@ -18,6 +18,7 @@ impl Drop for TempDir {
 /// concurrently (several users, parallel tests) and must never share a
 /// path. `prefix` names the family in the temp dir.
 pub(crate) fn tempdir(prefix: &str) -> Result<TempDir, String> {
+    // global-state: a sequence for unique names; nothing reads it back.
     static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let path = std::env::temp_dir().join(format!("{prefix}-{}-{n}", std::process::id()));

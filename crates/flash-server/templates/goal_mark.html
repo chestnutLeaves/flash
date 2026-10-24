@@ -1,0 +1,9 @@
+{# A deck's goal as a ring (a check once the date has passed) with its
+   label and the tooltip that explains it; it opens the goal dialog. The
+   deck table's Goal column and a deck page's head both draw it. Expects
+   `g` (`web_goal::GoalMark`), `goal_id`, `goal_back` and `goal_from`. #}
+<a class="goal goal-{{ g.state }}{% if g.near %} goal-near{% endif %}" href="/decks/{{ goal_id }}/settings#goal-card"
+   data-goal-open="{{ goal_id }}" data-goal-back="{{ goal_back }}" data-goal-from="{{ goal_from }}" aria-label="{{ g.head }}">
+  {% if g.passed %}<svg viewBox="0 0 16 16" width="16" height="16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="7" class="goal-check-bg"/><path d="m5 8.2 2 2 4-4.4" class="goal-check" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>{% else %}<svg class="goal-ring" width="{{ g.ring.size }}" height="{{ g.ring.size }}" viewBox="0 0 {{ g.ring.size }} {{ g.ring.size }}" aria-hidden="true"><circle class="goal-track" cx="{{ g.ring.mid }}" cy="{{ g.ring.mid }}" r="{{ g.ring.r }}" fill="none" stroke-width="{{ g.ring.stroke }}"/><circle class="goal-arc" cx="{{ g.ring.mid }}" cy="{{ g.ring.mid }}" r="{{ g.ring.r }}" fill="none" stroke-width="{{ g.ring.stroke }}" stroke-linecap="round" stroke-dasharray="{{ g.ring.dash }}"/></svg>{% endif %}<span>{{ g.label }}</span>
+  <span class="goal-tip" role="tooltip" aria-hidden="true"><b>{{ g.head }}</b>{% for line in g.lines %}<span>{{ line }}</span>{% endfor %}{% if let Some(act) = g.act %}<span class="goal-tip-act">{{ act }}</span>{% endif %}</span>
+</a>

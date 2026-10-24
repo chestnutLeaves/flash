@@ -7,7 +7,7 @@
 //! actual card templates (so multi-field and reversed layouts come out
 //! exactly as Anki shows them); notes without readable templates fall
 //! back to first-two-fields. Every card carries a dual representation:
-//! plain text (MCP/voice/CSV) and sanitized semantic HTML (web UI),
+//! plain text (MCP/CSV) and sanitized semantic HTML (web UI),
 //! plus its Anki card id (so the package's review history can follow it
 //! at commit), suspension state, and (for cloze) the original markup for
 //! round-trip export.
@@ -24,7 +24,7 @@ use super::deck_options::load_deck_options;
 use super::notetype::load_notetypes;
 use super::patterns;
 use super::template;
-use super::{ImportError, ImportRow, MediaSummary, ParsedImport};
+use super::{ImportError, ImportNote, ImportRow, MediaSummary, ParsedImport};
 use crate::media::{scan_refs, MediaKind, MediaRef};
 use crate::richtext;
 use crate::tmp::tempdir;
@@ -39,9 +39,9 @@ const QUERY_BUDGET: std::time::Duration = std::time::Duration::from_secs(20);
 /// the zip, zstd or SQLite layer actually said goes to the log through
 /// `ImportError::detail`, never to the response. The zip sentence lives
 /// with the one opener in `apkg_media`.
-const DAMAGED: &str = "the collection inside the package is damaged and could not be read";
-const UNEXPECTED_LAYOUT: &str = "the collection inside the package has an unexpected layout";
-const STAGING_FAILED: &str = "the package could not be staged for reading; try again";
+const DAMAGED: &str = "import-collection-damaged";
+const UNEXPECTED_LAYOUT: &str = "import-collection-layout";
+const STAGING_FAILED: &str = "import-staging-failed";
 
 /// The settings SQLite's own guidance prescribes for a database file
 /// received from a stranger: no schema-driven code paths, strict cell
@@ -120,10 +120,10 @@ fn open_collection(bytes: &[u8]) -> Result<Collection, ImportError> {
                     .read_to_end(&mut buf)
                     .map_err(|e| ImportError::new(DAMAGED, format!("read {name}: {e}")))?;
                 if buf.len() as u64 > MAX_COLLECTION_BYTES {
-                    return Err(ImportError::user(format!(
-                        "the collection inside the file is larger than {} MB",
-                        MAX_COLLECTION_BYTES >> 20
-                    )));
+                    return Err(ImportError::user(
+                        ImportNote::new("import-collection-large")
+                            .num("mb", MAX_COLLECTION_BYTES >> 20),
+                    ));
                 }
                 if name.ends_with('b') {
                     buf = super::apkg_media::zstd_decode_capped(&buf, MAX_COLLECTION_BYTES)
@@ -133,7 +133,7 @@ fn open_collection(bytes: &[u8]) -> Result<Collection, ImportError> {
                 break;
             }
         }
-        db_bytes.ok_or_else(|| ImportError::user("no Anki collection found inside the file"))?
+        db_bytes.ok_or_else(|| ImportError::user(ImportNote::new("import-no-collection")))?
     };
 
     // SQLite needs a file; use a temp path cleaned up on drop.
@@ -171,10 +171,8 @@ pub fn parse_apkg(bytes: &[u8]) -> Result<ParsedImport, ImportError> {
         ..Default::default()
     };
     if history > super::MAX_HISTORY_ROWS {
-        out.messages.push(format!(
-            "review history is capped at the most recent {} reviews; older ones stay in Anki",
-            super::MAX_HISTORY_ROWS
-        ));
+        out.messages
+            .push(ImportNote::new("import-history-capped").num("max", super::MAX_HISTORY_ROWS));
     }
 
     let mut cloze_notes = 0u32;
@@ -281,7 +279,7 @@ pub fn parse_apkg(bytes: &[u8]) -> Result<ParsedImport, ImportError> {
                 }
                 // The reveal shows the *completed* sentence with the
                 // hidden answer highlighted (Anki's flip behavior),
-                // plus the Extra notes. Voice/MCP keeps the concise
+                // plus the Extra notes. The plain text keeps the concise
                 // answer-only text above.
                 let filled = cz.filled(idx);
                 let back_html = html_pipeline(
@@ -462,30 +460,27 @@ pub fn parse_apkg(bytes: &[u8]) -> Result<ParsedImport, ImportError> {
 
     out.media = summarize_media(&seen_media, &packaged);
     if out.skipped > 0 {
-        out.messages.push(format!(
-            "{} notes skipped (empty or unsupported layout)",
-            out.skipped
-        ));
+        out.messages
+            .push(ImportNote::new("import-notes-skipped").num("count", out.skipped));
     }
     if cloze_notes > 0 {
-        out.messages.push(format!(
-            "{cloze_notes} cloze notes became {cloze_cards} cards"
-        ));
+        out.messages.push(
+            ImportNote::new("import-cloze-expanded")
+                .num("notes", cloze_notes)
+                .num("cards", cloze_cards),
+        );
     }
     if extra_cards > 0 {
-        out.messages.push(format!(
-            "{extra_cards} additional card layouts included (reversed etc.)"
-        ));
+        out.messages
+            .push(ImportNote::new("import-extra-layouts").num("count", extra_cards));
     }
     if suspended_cards > 0 {
-        out.messages.push(format!(
-            "{suspended_cards} cards arrive suspended, as in Anki"
-        ));
+        out.messages
+            .push(ImportNote::new("import-suspended").num("count", suspended_cards));
     }
     if extra_layouts_skipped > 0 {
-        out.messages.push(format!(
-            "{extra_layouts_skipped} extra cards skipped (unreadable note layout)"
-        ));
+        out.messages
+            .push(ImportNote::new("import-layouts-skipped").num("count", extra_layouts_skipped));
     }
     if let Some(msg) = media_message(&out.media) {
         out.messages.push(msg);
@@ -572,7 +567,7 @@ pub fn review_history(bytes: &[u8]) -> Result<Vec<super::HistoryEntry>, ImportEr
     // revlog id is the review timestamp in ms, so newest first is the
     // order the cap wants: what the LIMIT cuts is the oldest history.
     if let Ok(mut stmt) = conn.prepare(&format!(
-        "SELECT id, cid, ease FROM revlog WHERE {REPLAYABLE} ORDER BY id DESC LIMIT {}",
+        "SELECT id, cid, ease, time FROM revlog WHERE {REPLAYABLE} ORDER BY id DESC LIMIT {}",
         super::MAX_HISTORY_ROWS
     )) {
         let rows = stmt
@@ -581,11 +576,12 @@ pub fn review_history(bytes: &[u8]) -> Result<Vec<super::HistoryEntry>, ImportEr
                     r.get::<_, i64>(0)?,
                     r.get::<_, i64>(1)?,
                     r.get::<_, i64>(2)?,
+                    r.get::<_, Option<i64>>(3).ok().flatten(),
                 ))
             })
             .map_err(|e| ImportError::new(DAMAGED, format!("revlog: {e}")))?;
         for row in rows {
-            let (at_ms, anki_card_id, ease) =
+            let (at_ms, anki_card_id, ease, time) =
                 row.map_err(|e| ImportError::new(DAMAGED, format!("revlog: {e}")))?;
             // The predicate already keeps ease within the buttons; the
             // conversion just names the one pressed.
@@ -594,6 +590,8 @@ pub fn review_history(bytes: &[u8]) -> Result<Vec<super::HistoryEntry>, ImportEr
                     at_ms,
                     anki_card_id,
                     rating,
+                    // Anki's `time`: ms on the card before the answer.
+                    answer_ms: time.filter(|ms| *ms > 0),
                 });
             }
         }
@@ -733,29 +731,21 @@ fn summarize_media(
     summary
 }
 
-fn media_message(m: &MediaSummary) -> Option<String> {
+/// What the package's media come to: how many of each kind and their
+/// size in MB (the server lists the kinds there are).
+fn media_message(m: &MediaSummary) -> Option<ImportNote> {
     if m.referenced() == 0 {
         return None;
     }
-    let mut parts = Vec::new();
-    for (n, word) in [
-        (m.images, "image"),
-        (m.audio, "audio clip"),
-        (m.video, "video"),
-    ] {
-        if n > 0 {
-            parts.push(format!("{n} {word}{}", if n == 1 { "" } else { "s" }));
-        }
-    }
-    if m.unsupported > 0 {
-        parts.push(format!("{} unsupported file(s)", m.unsupported));
-    }
-    let mb = m.total_bytes as f64 / (1024.0 * 1024.0);
-    Some(format!(
-        "this deck references {} ({:.1} MB)",
-        parts.join(", "),
-        mb
-    ))
+    let mb = (m.total_bytes as f64 / (1024.0 * 1024.0) * 10.0).round() / 10.0;
+    Some(
+        ImportNote::new("import-media")
+            .num("images", m.images)
+            .num("audio", m.audio)
+            .num("video", m.video)
+            .num("unsupported", m.unsupported)
+            .num("mb", mb),
+    )
 }
 
 // ---- deck names ----
@@ -854,8 +844,6 @@ fn strip_html(html: &str) -> String {
                     (false, "br" | "hr") | (true, "div" | "p" | "tr" | "li") => out.push('\n'),
                     (false, "li") => out.push_str("\n• "),
                     (true, "td" | "th") => out.push(' '),
-                    // Collapsibles flatten to "Label: content" in plain text
-                    // (voice/MCP always hears the hint).
                     (false, "details") => out.push('\n'),
                     (true, "summary") => out.push_str(": "),
                     (true, "details") => out.push('\n'),

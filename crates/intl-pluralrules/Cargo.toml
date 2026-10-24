@@ -1,0 +1,22 @@
+[package]
+# Stands in for crates.io's intl_pluralrules (the root manifest's
+# [patch.crates-io]), so its name and its version are that crate's: Fluent
+# depends on intl_pluralrules ^7.
+name = "intl_pluralrules"
+version = "7.0.2"
+edition.workspace = true
+license = "AGPL-3.0-only"
+publish.workspace = true
+repository.workspace = true
+description = "intl_pluralrules's API, answered from ICU4X's CLDR data: Fluent's plurals follow the same, current CLDR as the rest of Flash"
+
+[lints]
+workspace = true
+
+[dependencies]
+# The type Fluent hands its language in.
+unic-langid = "0.9"
+# The rules themselves, CLDR's current release (icu_plurals_data names it).
+icu_plurals = "2.3"
+icu_locale_core = "2.3"
+fixed_decimal = "0.7.2"

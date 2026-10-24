@@ -1,18 +1,22 @@
 //! Server library: composition of config, services, and (in later phases)
 //! web, OAuth, and MCP surfaces. The binary in main.rs stays thin.
 
-pub mod ai;
+pub mod account_locale;
 pub mod api;
 pub mod auth;
 pub mod boot;
 pub mod bounds;
 pub mod captcha;
-pub mod charts;
+pub mod client_errors;
 pub mod config;
+pub mod deck_languages;
 pub mod email;
 pub mod ext;
 pub mod flows;
 pub mod http;
+pub mod i18n;
+pub mod jobs;
+pub use flash_core::languages;
 pub mod mcp;
 pub mod media;
 pub mod media_store;
@@ -25,12 +29,13 @@ pub mod service;
 pub mod state;
 #[cfg(feature = "test-support")]
 pub mod testing;
-pub mod tts;
-pub mod voice_hints;
 pub mod web;
-pub mod web_ai;
-pub mod web_voice;
 pub mod webauthn;
+pub mod when;
+
+pub use mcp::panel as mcp_panel;
+pub use service::{deck_cards, goals};
+pub use web::goal as web_goal;
 
 use axum::Router;
 use state::AppState;
@@ -54,27 +59,24 @@ pub fn build_app(state: AppState) -> Router {
             "/mcp-media/{id}",
             axum::routing::get(media::serve_media_connector),
         )
-        .nest_service(
-            "/mcp",
-            mcp::mcp_service(
-                state.services.clone(),
-                state.media.clone(),
-                state.ext.clone(),
-                public_host,
-                state.config.base_url.clone(),
-            ),
-        )
+        .nest_service("/mcp", mcp::mcp_service(state.clone(), public_host))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             oauth::require_bearer,
         ))
+        // The study panel's media: the signature is the credential (the
+        // host's sandbox frame carries no Bearer token).
+        .route(
+            "/mcp-media/{id}/s",
+            axum::routing::get(media::serve_media_signed),
+        )
         // The body limit is the transport's own (`mcp::MCP_BODY_LIMIT`,
         // set on its config); the API's per-IP budget applies here.
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             middleware::mcp_rate_limit,
         ));
-    Router::new()
+    let app = Router::new()
         // Browser surfaces: same-origin mutation guard (CSRF), and the
         // per-address budget on every mutation (rate_limit_inventory_tests
         // probes each one).
@@ -82,6 +84,8 @@ pub fn build_app(state: AppState) -> Router {
             ext.site_routes(&state)
                 .unwrap_or_else(web::site_routes)
                 .merge(web::router())
+                .merge(ext.users_routes(&state).unwrap_or_else(web::users_routes))
+                .merge(client_errors::router(&state))
                 .merge(ext.browser_routes(&state))
                 .layer(axum::middleware::from_fn_with_state(
                     state.clone(),
@@ -100,6 +104,9 @@ pub fn build_app(state: AppState) -> Router {
         ))
         // Protocol surfaces: token-authenticated, no Origin requirement.
         .merge(oauth::router().layer(rate_limit))
+        // What a policy blocked, as the browser reports it: no Origin of
+        // the page's, so outside the guard, with its own budget.
+        .merge(client_errors::csp_router(&state))
         .merge(ext.protocol_routes(&state))
         .merge(mcp_routes)
         // Bearer-authenticated JSON with its own limiter, and whatever
@@ -107,6 +114,12 @@ pub fn build_app(state: AppState) -> Router {
         .merge(api::router(&state))
         .merge(ext.well_known_routes(&state))
         .fallback(web::not_found)
+        // The session and the reader's language, worked out once for
+        // every handler and template after it (`i18n::context`).
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            i18n::context,
+        ))
         // A panic anywhere in a request is a logged 500 for that request,
         // never a dropped connection, and (with no poisonable lock in
         // the process, see lock_hygiene_tests) never anything for the
@@ -130,7 +143,21 @@ pub fn build_app(state: AppState) -> Router {
             axum::http::StatusCode::REQUEST_TIMEOUT,
             REQUEST_TIMEOUT,
         ))
-        .with_state(state)
+        // Outermost, so the status it logs is the one the client got,
+        // a timeout included. Still inside routing: it logs the route
+        // template, never the path.
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            middleware::access_log,
+        ))
+        .with_state(state.clone());
+    // Before routing: a public page's address in a language goes to the
+    // page's own route (`i18n::localize`). Every layer above runs after
+    // the router's routing, so this one wraps the whole router as its
+    // fallback, the one way in.
+    Router::new()
+        .fallback_service(app)
+        .layer(axum::middleware::from_fn_with_state(state, i18n::localize))
 }
 
 /// Upper bound on one request, body included.

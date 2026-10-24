@@ -2,5 +2,6 @@
 *
 !Cargo.toml
 !Cargo.lock
+!.cargo/config.toml
 !crates/
 crates/**/target/

@@ -1,7 +1,7 @@
 //! CSV import: header `front,back,tags,deck`; tags semicolon- or
 //! comma-separated; tags/deck columns optional.
 
-use super::{ImportError, ImportRow, ParsedImport};
+use super::{ImportError, ImportNote, ImportRow, ParsedImport};
 
 pub fn parse_csv(bytes: &[u8]) -> Result<ParsedImport, ImportError> {
     let mut reader = csv::ReaderBuilder::new()
@@ -10,13 +10,11 @@ pub fn parse_csv(bytes: &[u8]) -> Result<ParsedImport, ImportError> {
         .from_reader(bytes);
     let headers = reader
         .headers()
-        .map_err(|e| ImportError::new("the CSV's header row could not be read", e))?
+        .map_err(|e| ImportError::new(ImportNote::new("import-csv-header-unreadable"), e))?
         .clone();
     let col = |name: &str| headers.iter().position(|h| h.eq_ignore_ascii_case(name));
     let (Some(front_col), Some(back_col)) = (col("front"), col("back")) else {
-        return Err(ImportError::user(
-            "CSV needs 'front' and 'back' header columns",
-        ));
+        return Err(ImportError::user(ImportNote::new("import-csv-columns")));
     };
     let tags_col = col("tags");
     let deck_col = col("deck");
@@ -24,7 +22,7 @@ pub fn parse_csv(bytes: &[u8]) -> Result<ParsedImport, ImportError> {
     let mut out = ParsedImport::default();
     // A message per bad row, up to a point: a file of nothing but bad
     // rows reports the first hundred and counts the rest.
-    let note = |out: &mut ParsedImport, message: String| {
+    let note = |out: &mut ParsedImport, message: ImportNote| {
         if out.messages.len() < super::MAX_MESSAGES {
             out.messages.push(message);
         }
@@ -34,7 +32,12 @@ pub fn parse_csv(bytes: &[u8]) -> Result<ParsedImport, ImportError> {
             Ok(r) => r,
             Err(e) => {
                 out.skipped += 1;
-                note(&mut out, format!("row {}: {e}", i + 2));
+                note(
+                    &mut out,
+                    ImportNote::new("import-row-unreadable")
+                        .num("row", i + 2)
+                        .text("error", e.to_string()),
+                );
                 continue;
             }
         };
@@ -42,7 +45,10 @@ pub fn parse_csv(bytes: &[u8]) -> Result<ParsedImport, ImportError> {
         let back = super::clip_raw(record.get(back_col).unwrap_or("").trim());
         if front.is_empty() || back.is_empty() {
             out.skipped += 1;
-            note(&mut out, format!("row {}: empty front or back", i + 2));
+            note(
+                &mut out,
+                ImportNote::new("import-row-empty").num("row", i + 2),
+            );
             continue;
         }
         let tags = tags_col

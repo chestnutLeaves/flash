@@ -1,90 +1,258 @@
 {% extends "base.html" %}
-{% block title %}{{ deck_name }} - Flash{% endblock %}
+{% block title %}{{ "deck-title"|ta("name", deck_name) }}{% endblock %}
+{% block page_class %} page-deck{% endblock %}
 {% block content %}
-{# The head and its archived note, as one piece: unarchiving a subdeck from
-   its row below brings this deck back too, and the row's button swaps this
-   in beside its own table (`deck_rows.html`). #}
-<div id="deck-head" style="display:contents">
-{# The decks this one sits in go above the title row, not in it: a page head
-   lines its two sides up on their first line of text, which has to be the
-   title for the buttons to sit beside it. #}
-<div class="deck-title">
-{% if !crumbs.is_empty() %}
-<nav class="deck-crumbs" aria-label="Parent decks">{% for crumb in crumbs %}<a href="/decks/{{ crumb.id }}">{{ crumb.leaf }}</a> &rsaquo; {% endfor %}</nav>
-{% endif %}
-<div class="page-head">
-  <h1>{{ deck_leaf }}</h1>
-  <div class="row">
-    {# Opens and closes the subdecks panel below. An archived deck with
-       nothing under it has nothing to show there and nothing it may add,
-       so it has no button. #}
-    {% if !archived || subdeck_count > 0 %}<a class="small muted deck-subdecks-toggle" href="#subdecks" role="button" aria-expanded="false" aria-controls="subdecks" data-subdecks-toggle>Subdecks{% if subdeck_count > 0 %} ({{ subdeck_count }}){% endif %}</a>{% endif %}
-    <a class="fl-btn fl-btn-secondary" href="/decks/{{ deck_id }}/settings">Settings</a>
+{# The head: where the deck sits, its name, one quiet line of what is
+   waiting (and its goal), and three actions: what a downstream extension
+   adds, Study, and one menu for the rest. Unarchiving a subdeck
+   from its row swaps this in with the rows, because that can bring this
+   deck back too. #}
+<div id="deck-head" class="deck-head-wrap">
+<header class="deck-head">
+  <div class="deck-head-titles">
+    {% if !crumbs.is_empty() %}
+    <nav class="deck-crumbs" aria-label="{{ "deck-crumbs"|t }}">{% for crumb in crumbs %}<a href="/decks/{{ crumb.id }}" dir="auto">{{ crumb.leaf }}</a> <span class="fl-dir" aria-hidden="true">&rsaquo;</span> {% endfor %}</nav>
+    {% endif %}
+    <h1 dir="auto">{{ deck_leaf }}</h1>
+    {% if archived %}
+    <p class="fl-hint" role="status">{{ "deck-archived-hint"|t }}</p>
+    {% else %}
+    <p class="deck-meta">
+      <span><b>{{ due }}</b> {{ "deck-meta-due"|tn(due) }}</span>
+      <span><b>{{ new }}</b> {{ "deck-meta-new"|tn(new) }}</span>
+      <span><b>{{ card_total }}</b> {{ "deck-meta-cards"|tn(card_total) }}</span>
+      {% if let Some(g) = goal %}{% let goal_id = deck_id %}{% let goal_back = "deck" %}{% let goal_from = deck_id %}{% include "goal_mark.html" %}{% endif %}
+    </p>
+    {% endif %}
+  </div>
+  <div class="deck-head-acts">
+    {{ header_html|safe }}
     {% if archived %}
     <form method="post" action="/decks/{{ deck_id }}/unarchive" style="display:inline">
       <input type="hidden" name="back" value="deck">
-      <button class="fl-btn fl-btn-primary" type="submit">Unarchive</button>
+      <button class="fl-btn fl-btn-primary" type="submit">{{ "deck-unarchive"|t }}</button>
     </form>
     {% else %}
-    <a class="fl-btn fl-btn-primary" href="/study?deck={{ deck_id }}">Study this deck</a>
+    <a class="fl-btn fl-btn-primary deck-study" href="/study?deck={{ deck_id }}">{{ "deck-study-short"|t }}{% if due > 0 %} <span class="deck-study-n">{{ due }}</span>{% endif %}</a>
     {% endif %}
+    <details class="study-more deck-head-more">
+      <summary class="fl-btn fl-iconbtn fl-btn-secondary" aria-label="{{ "deck-more-label"|t }}" title="{{ "deck-more-title"|t }}">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg>
+      </summary>
+      <div class="study-more-menu">
+        {% if !archived %}
+        {% let preview_deck = deck_id %}{% include "preview_menu_item.html" %}
+        <a class="study-more-item" href="/decks/{{ deck_id }}/settings#goal-card" data-goal-open="{{ deck_id }}" data-goal-back="deck" data-goal-from="{{ deck_id }}">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 22V4a1 1 0 0 1 .4-.8A6 6 0 0 1 8 2c3 0 5 2 7.33 2q2 0 3.67-1.33a1 1 0 0 1 1.6.8v9.06a1 1 0 0 1-.4.8A6 6 0 0 1 16.67 14c-2.33 0-4.33-2-7.33-2a6 6 0 0 0-3.33 1"/></svg>
+          <span>{% if has_goal %}{{ "goal-change"|t }}{% else %}{{ "goal-set"|t }}{% endif %}</span>
+        </a>
+        {% if has_goal %}
+        <form method="post" action="/decks/{{ deck_id }}/goal">
+          <input type="hidden" name="clear" value="1">
+          <input type="hidden" name="back" value="deck">
+          <input type="hidden" name="from" value="{{ deck_id }}">
+          <button class="study-more-item" type="submit">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+            <span>{{ "goal-remove"|t }}</span>
+          </button>
+        </form>
+        {% endif %}
+        <a class="study-more-item" href="/decks/{{ deck_id }}/settings#limits-card">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+          <span>{{ "decks-more-new"|t }}</span>
+        </a>
+        {% if subs.is_empty() %}
+        <button class="study-more-item" type="button" data-subnew-open aria-controls="deck-subnew">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/></svg>
+          <span>{{ "deck-subnew-open"|t }}</span>
+        </button>
+        {% endif %}
+        <div class="study-more-sep" role="separator"></div>
+        {% endif %}
+        <a class="study-more-item" href="/decks/{{ deck_id }}/export.apkg" download>
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+          <span>{{ "deck-export-apkg"|t }}</span>
+        </a>
+        <a class="study-more-item" href="/decks/{{ deck_id }}/export.csv" download>
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+          <span>{{ "deck-export-csv"|t }}</span>
+        </a>
+        <div class="study-more-sep" role="separator"></div>
+        <a class="study-more-item" href="/decks/{{ deck_id }}/settings">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+          <span>{{ "decks-more-settings"|t }}</span>
+        </a>
+        {% if !archived %}
+        <form method="post" action="/decks/{{ deck_id }}/archive">
+          <input type="hidden" name="back" value="deck">
+          <button class="study-more-item" type="submit">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg>
+            <span>{{ "deck-archive-deck"|t }}</span>
+          </button>
+        </form>
+        {% endif %}
+      </div>
+    </details>
   </div>
-</div>
-</div>
-{% if archived %}
-<p class="fl-hint" role="status">This deck is archived. Its cards stay, but they are not in the study queue.</p>
-{% endif %}
+</header>
+{% include "deck_subdecks.html" %}
 </div>
 
-{# The panel the "Subdecks" button above opens: always here, closed as the
-   page loads. #}
-{% if !archived || subdeck_count > 0 %}{% include "deck_subdecks.html" %}{% endif %}
-
-<div id="deck-main" style="display:contents">
-<section>
-{# Generating is another way to add cards, so it sits with adding one,
-   as a quiet link across from the heading. #}
-<div class="section-head">
-  <h2>Add a card</h2>
-  {% if ai_enabled %}<a class="small muted" href="/decks/{{ deck_id }}/generate">Generate</a>{% endif %}
+<div id="deck-main" class="deck-main">
+<section class="deck-cards" data-deck-cards="{{ deck_id }}">
+{# The search, the filter (whether a card is archived, which decks,
+   which tags) and Add, in one row. The filter is kept in the page's
+   address by the list's answers. #}
+<div class="deck-tools">
+  <div class="deck-search">
+    <input class="fl-input" type="search" dir="auto" id="deck-q" name="q" placeholder="{{ "deck-search-n"|tn(card_total) }}" aria-label="{{ "deck-search"|t }}" value="{{ list.q }}" aria-keyshortcuts="/">
+    <kbd aria-hidden="true">/</kbd>
+  </div>
+  <details class="deck-filter" id="deck-filter">
+    <summary class="fl-btn fl-btn-secondary">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M7 12h10"/><path d="M10 18h4"/></svg>
+      {{ "deck-filter"|t }} <span class="deck-filter-n" id="deck-filter-n"{% if list.chips.is_empty() %} hidden{% endif %}>{{ list.chips.len() }}</span>
+    </summary>
+    <div class="study-more-menu deck-filter-menu">
+      <div class="fl-seg deck-status" role="group" aria-label="{{ "deck-filter-show"|t }}">
+        <button class="fl-btn fl-btn-sm fl-btn-secondary" type="button" data-status="active"{% if !list.archived_view %} aria-current="true"{% endif %}>{{ "deck-filter-active"|t }}</button>
+        <button class="fl-btn fl-btn-sm fl-btn-secondary" type="button" data-status="archived"{% if list.archived_view %} aria-current="true"{% endif %}>{{ "deck-filter-archived"|t }} <span class="mono small muted">{{ list.archived_count }}</span></button>
+      </div>
+      {% if !facets.is_empty() %}
+      <div class="deck-menuhead">{{ "deck-filter-decks"|t }}</div>
+      <label class="deck-opt fl-check"><input type="checkbox" data-facet="own"{% if own_checked %} checked{% endif %}><span>{{ "cards-own"|t }}</span><span class="mono">{{ own_count }}</span></label>
+      {% for f in facets %}
+      <label class="deck-opt fl-check"><input type="checkbox" data-facet="{{ f.value }}"{% if f.checked %} checked{% endif %}><span dir="auto">{{ f.label }}</span><span class="mono">{{ f.count }}</span></label>
+      {% endfor %}
+      {% endif %}
+      {% if !tags.is_empty() %}
+      <div class="deck-menuhead">{{ "deck-filter-tags"|t }}</div>
+      <input class="fl-input deck-tagq" type="search" id="deck-tagq" placeholder="{{ "deck-filter-find-tag"|t }}" aria-label="{{ "deck-filter-find-tag"|t }}">
+      {% for f in tags %}
+      <label class="deck-opt fl-check" data-tag-opt="{{ f.value }}"><input type="checkbox" data-tag="{{ f.value }}"{% if f.checked %} checked{% endif %}><span class="mono" dir="auto">{{ f.label }}</span><span class="mono">{{ f.count }}</span></label>
+      {% endfor %}
+      {% endif %}
+    </div>
+  </details>
+  {% if !archived %}
+  <div class="deck-add-split">
+    <button class="fl-btn fl-btn-secondary" type="button" data-add-open aria-expanded="false" aria-controls="deck-add" aria-keyshortcuts="n">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+      <span data-add-label>{{ "deck-add-open"|t }}</span>
+    </button>
+    <details class="study-more">
+      <summary class="fl-btn fl-btn-secondary" aria-label="{{ "deck-add-more"|t }}">
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+      </summary>
+      <div class="study-more-menu">
+        <button class="study-more-item" type="button" data-add-write>
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+          <span>{{ "deck-add-write"|t }}</span><kbd>N</kbd>
+        </button>
+        {{ add_cards|safe }}
+        <a class="study-more-item" href="/import">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3"/><path d="m7 8 5-5 5 5"/><path d="M5 21h14"/></svg>
+          <span>{{ "deck-add-import"|t }}</span>
+        </a>
+      </div>
+    </details>
+  </div>
+  {% endif %}
 </div>
 {% if let Some(msg) = editor_error %}
 <div class="fl-card fl-card-pad" style="border-color:var(--bad)" role="alert">
   <strong>{{ msg }}</strong>
 </div>
 {% endif %}
-<form class="fl-card fl-card-pad" method="post" action="/decks/{{ deck_id }}/cards" hx-boost="true" hx-push-url="false" hx-select="#deck-main" hx-target="#deck-main" hx-swap="outerHTML show:none" style="display:flex;flex-direction:column;gap:14px"
+{% if !archived %}
+{# Adding a card: closed until Add (or N) opens it. Each add swaps the
+   page's main part, and `static/deck.js` opens it again so the next card
+   follows. #}
+<form class="fl-card fl-card-pad deck-add" id="deck-add" method="post" action="/decks/{{ deck_id }}/cards" hx-boost="true" hx-push-url="false" hx-select="#deck-main" hx-target="#deck-main" hx-swap="outerHTML show:none"{% if editor_error.is_none() %} hidden{% endif %}
       data-editor-form data-basic-action="/decks/{{ deck_id }}/cards" data-notes-action="/decks/{{ deck_id }}/notes">
   <div class="field-cols" data-quick-fields>
-    <div class="fl-field"><label class="fl-label" for="card-front">Front</label><textarea class="fl-input" id="card-front" name="front" rows="2" required></textarea></div>
-    <div class="fl-field"><label class="fl-label" for="card-back">Back</label><textarea class="fl-input" id="card-back" name="back" rows="2" required></textarea></div>
+    <div class="fl-field"><label class="fl-label" for="card-front">{{ "deck-front"|t }}</label><textarea class="fl-input" dir="auto" id="card-front" name="front" rows="2" required></textarea></div>
+    <div class="fl-field"><label class="fl-label" for="card-back">{{ "deck-back"|t }}</label><textarea class="fl-input" dir="auto" id="card-back" name="back" rows="2" required></textarea></div>
   </div>
   <div class="editor-advanced" hidden>
     {% include "card_editor_body.html" %}
   </div>
   <div class="fl-field">
-    <label class="fl-label" for="card-tags">Tags</label>
-    <input class="fl-input" type="text" id="card-tags" name="tags" placeholder="exam-2, cardiac">
-    <span class="fl-hint">Comma-separated, optional.</span>
+    <label class="fl-label" for="card-tags">{{ "deck-tags"|t }}</label>
+    <input class="fl-input" type="text" dir="auto" id="card-tags" name="tags" placeholder="{{ "deck-tags-placeholder"|t }}">
+    <span class="fl-hint">{{ "deck-tags-hint"|t }}</span>
   </div>
   <div class="row">
-    <button class="fl-btn fl-btn-secondary" type="submit">Add card</button>
-    <button class="fl-btn fl-btn-ghost" type="button" data-editor-toggle aria-expanded="false" hidden>Advanced</button>
+    <button class="fl-btn fl-btn-secondary" type="submit">{{ "deck-add"|t }}</button>
+    <button class="fl-btn fl-btn-ghost" type="button" data-editor-toggle aria-expanded="false" hidden>{{ "deck-advanced"|t }}</button>
+    <button class="fl-btn fl-btn-ghost" type="button" data-add-close>{{ "deck-add-close"|t }}</button>
   </div>
 </form>
-</section>
-
-<section>
-<h2>Cards</h2>
-<input class="fl-input" type="search" name="q" placeholder="Search this deck&hellip;" value="{{ q }}"
-       hx-get="/decks/{{ deck_id }}/cards" hx-trigger="input changed delay:300ms" hx-target="#cards">
+{% endif %}
 <div id="cards">
   {% include "card_rows.html" %}
 </div>
 </section>
 </div>
 
+{# The actions on the selected cards: a bar floating at the foot of the
+   screen, over the list, so selecting moves nothing and hides nothing.
+   `static/deck.js` shows it, counts the selection and posts the action. #}
+<div class="deck-bulk" id="deck-bulk" role="toolbar" aria-label="{{ "deck-bulk-label"|t }}" hidden>
+  <span class="deck-sel"><span id="deck-sel-n"></span><button class="fl-linkbtn" type="button" data-bulk-all hidden></button></span>
+  <span class="deck-bulk-main">
+    <details class="study-more">
+      <summary class="fl-btn fl-btn-sm fl-btn-ghost" title="{{ "deck-bulk-tags"|t }}">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"/></svg><span>{{ "deck-bulk-tags"|t }}</span>
+      </summary>
+      <div class="study-more-menu deck-bulk-menu">
+        <label class="fl-label" for="deck-bulk-tags">{{ "deck-bulk-tags-label"|t }}</label>
+        <input class="fl-input" id="deck-bulk-tags" dir="auto" placeholder="{{ "deck-tags-placeholder"|t }}">
+        <div class="row">
+          <button class="fl-btn fl-btn-sm fl-btn-primary" type="button" data-bulk="tag">{{ "deck-bulk-tag-add"|t }}</button>
+          <button class="fl-btn fl-btn-sm fl-btn-ghost" type="button" data-bulk="untag">{{ "deck-bulk-tag-remove"|t }}</button>
+        </div>
+      </div>
+    </details>
+    <details class="study-more">
+      <summary class="fl-btn fl-btn-sm fl-btn-ghost" title="{{ "deck-bulk-move"|t }}">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/></svg><span>{{ "deck-bulk-move"|t }}</span>
+      </summary>
+      <div class="study-more-menu deck-bulk-menu">
+        <label class="fl-label" for="deck-bulk-to">{{ "deck-bulk-move-label"|t }}</label>
+        <select class="fl-input fl-select" id="deck-bulk-to">
+          {% for (id, path) in move_targets %}<option value="{{ id }}"{% if *id == deck_id %} selected{% endif %}>{{ path }}</option>{% endfor %}
+        </select>
+        <div class="row"><button class="fl-btn fl-btn-sm fl-btn-primary" type="button" data-bulk="move">{{ "deck-bulk-move"|t }}</button></div>
+      </div>
+    </details>
+    <button class="fl-btn fl-btn-sm fl-btn-ghost" type="button" data-bulk="archive" title="{{ "deck-bulk-archive"|t }}">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg><span>{{ "deck-bulk-archive"|t }}</span>
+    </button>
+    <button class="fl-btn fl-btn-sm fl-btn-ghost" type="button" data-bulk="unarchive" title="{{ "deck-bulk-unarchive"|t }}" hidden>
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h2"/><path d="M20 8v11a2 2 0 0 1-2 2h-2"/><path d="m9 15 3-3 3 3"/><path d="M12 12v9"/></svg><span>{{ "deck-bulk-unarchive"|t }}</span>
+    </button>
+    <button class="fl-btn fl-btn-sm fl-btn-ghost deck-bulk-danger" type="button" data-bulk="ask-delete" title="{{ "deck-bulk-delete"|t }}">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg><span>{{ "deck-bulk-delete"|t }}</span>
+    </button>
+    <span class="deck-grow"></span>
+    <button class="fl-btn fl-btn-sm fl-iconbtn fl-btn-ghost" type="button" data-bulk="clear" aria-label="{{ "deck-bulk-clear"|t }}" title="{{ "deck-bulk-clear"|t }}">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+    </button>
+  </span>
+  <span class="deck-bulk-confirm" hidden>
+    <span class="small muted deck-bulk-warn">{{ "deck-bulk-delete-warn"|t }}</span>
+    <span class="deck-grow"></span>
+    <button class="fl-btn fl-btn-sm fl-btn-ghost" type="button" data-bulk="cancel">{{ "deck-subnew-cancel"|t }}</button>
+    <button class="fl-btn fl-btn-sm fl-btn-danger" type="button" data-bulk="delete" id="deck-bulk-delete"></button>
+  </span>
+</div>
+<div class="deck-toast" id="deck-toast" role="status" aria-live="polite" hidden></div>
+
 <div id="editor-dialog"></div>
+{% include "goal_dialog.html" %}
 {# bump ?v= together with base.html when static files change #}
-<script src="/static/editor.js?v=40" defer></script>
+<script src="/static/editor.js?v=56" defer></script>
+<script src="/static/deck.js?v=7" defer></script>
 {% endblock %}
+{% block js_words %}{{ super() }}{{ "js-editor"|js_island|safe }}{{ "js-deck"|js_island|safe }}{% endblock %}

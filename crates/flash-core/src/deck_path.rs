@@ -36,10 +36,11 @@ pub fn segments(path: &str) -> Vec<&str> {
         .collect()
 }
 
-/// The path as it should be stored, or `None` when nothing is left of it.
+/// The path as it should be stored, in one Unicode form (`text::nfc`),
+/// or `None` when nothing is left of it.
 pub fn normalise(path: &str) -> Option<String> {
     let segments = segments(path);
-    (!segments.is_empty()).then(|| segments.join(SEP))
+    (!segments.is_empty()).then(|| crate::text::nfc(&segments.join(SEP)))
 }
 
 /// `child` under `parent`, normalised. Either side may be empty: an empty

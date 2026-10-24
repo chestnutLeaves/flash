@@ -2,6 +2,8 @@
 //! this module, so the algorithm can be swapped or hand-rolled without
 //! touching stores, services, or handlers.
 
+use crate::day::study_days_between;
+use crate::goal::{recall_target, GoalWindow};
 use crate::rating::{Phase, Rating};
 
 pub const MS_PER_DAY: i64 = 86_400_000;
@@ -68,17 +70,41 @@ impl std::error::Error for SchedulerError {}
 pub struct Scheduler {
     fsrs: fsrs::FSRS,
     desired_retention: f32,
+    /// The forgetting curve's decay (`w[20]`), as `FSRS::new` clamps it:
+    /// the crate keeps its parameters to itself.
+    decay: f32,
+    /// The calendar the days between reviews are counted on (`on_calendar`).
+    timezone: String,
+    cutoff_hour: u8,
 }
 
 impl Scheduler {
     /// `params`: fitted FSRS parameters, or None for the crate defaults.
     pub fn new(params: Option<&[f32]>, desired_retention: f32) -> Result<Self, SchedulerError> {
-        let fsrs = fsrs::FSRS::new(params.unwrap_or(&[]))
+        let params = params.unwrap_or(&[]);
+        let fsrs = fsrs::FSRS::new(params)
             .map_err(|e| SchedulerError(format!("invalid FSRS parameters: {e}")))?;
+        let decay = fsrs::check_and_fill_parameters(params)
+            .ok()
+            .and_then(|w| w.get(20).copied())
+            .unwrap_or(fsrs::FSRS6_DEFAULT_DECAY)
+            .clamp(0.1, 0.8);
         Ok(Self {
             fsrs,
             desired_retention,
+            decay,
+            timezone: "UTC".into(),
+            cutoff_hour: 4,
         })
+    }
+
+    /// Counts the days between reviews in an account's study days: in
+    /// `timezone`, each starting at `cutoff_hour` (`day`). Unset, they are
+    /// the default settings' days, UTC from 4am.
+    pub fn on_calendar(mut self, timezone: &str, cutoff_hour: u8) -> Self {
+        self.timezone = timezone.to_string();
+        self.cutoff_hour = cutoff_hour;
+        self
     }
 
     /// Applies one review at `now_ms` and returns the updated state.
@@ -88,11 +114,30 @@ impl Scheduler {
         rating: Rating,
         now_ms: i64,
     ) -> Result<ReviewOutcome, SchedulerError> {
+        self.review_toward(state, rating, now_ms, 0, None)
+    }
+
+    /// `review` for card `card_id` of a deck with a goal date ahead: a
+    /// review FSRS would set after the goal, for a card that would by
+    /// then be less likely than `goal::recall_target` to be remembered,
+    /// comes back on one of the goal's last days instead (`goal`).
+    pub fn review_toward(
+        &self,
+        state: &CardState,
+        rating: Rating,
+        now_ms: i64,
+        card_id: i64,
+        goal: Option<&GoalWindow>,
+    ) -> Result<ReviewOutcome, SchedulerError> {
         let elapsed_ms = state
             .last_review_ms
             .map(|last| (now_ms - last).max(0))
             .unwrap_or(0);
-        let elapsed_days = (elapsed_ms / MS_PER_DAY) as u32;
+        // Study days begun, as FSRS and Anki count them: 21:00 to 07:00
+        // the next morning is a day, not a same-day review.
+        let elapsed_days = state.last_review_ms.map_or(0, |last| {
+            study_days_between(&self.timezone, self.cutoff_hour, last, now_ms)
+        });
 
         let memory = match (state.stability, state.difficulty) {
             (Some(stability), Some(difficulty)) => Some(fsrs::MemoryState {
@@ -143,6 +188,17 @@ impl Scheduler {
                 now_ms + interval_ms(chosen.interval),
                 state.lapses,
             ),
+        };
+        let due_ms = match goal {
+            Some(goal) if phase == Phase::Review && due_ms >= goal.goal_ms => {
+                let days = (goal.goal_ms - now_ms).max(0) as f32 / MS_PER_DAY as f32;
+                let recall = fsrs::current_retrievability(chosen.memory, days, self.decay);
+                match goal.day_for(card_id) {
+                    Some(day) if recall < recall_target(self.desired_retention) => day,
+                    _ => due_ms,
+                }
+            }
+            _ => due_ms,
         };
 
         let new_state = CardState {

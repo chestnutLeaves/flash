@@ -5,6 +5,7 @@
 //! from one imported from Anki: same plain text, same precomputed cloze
 //! views, same export grouping.
 
+use flash_core::speech::{Cue, SpeechBlock};
 use flash_core::{validate_card_text, CardText};
 
 use crate::import::cloze;
@@ -77,16 +78,53 @@ fn side(html: &str) -> String {
     richtext::html_to_text(html)
 }
 
-/// Expands sanitized note fields into cards. Errors are user-facing. The
-/// fields arrive as `SanitizedHtml`, so a caller cannot hand the
-/// expansion raw editor input.
+/// Why a note could not be expanded into cards. `Display` is the English
+/// a log, a sync client or an API client reads; a page words it in its
+/// reader's language.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoteError {
+    /// A field is over `MAX_FIELD_HTML` bytes of HTML.
+    FieldTooLong,
+    /// A cloze note with no `{{c1::…}}` deletion.
+    NoCloze,
+    /// The deletion numbered so has an empty answer.
+    EmptyCloze(u32),
+    /// A card's text was refused.
+    Card(flash_core::CardTextError),
+    /// The card of the deletion numbered so was refused.
+    ClozeCard(u32, flash_core::CardTextError),
+}
+
+impl std::fmt::Display for NoteError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NoteError::FieldTooLong => write!(f, "a field exceeds {MAX_FIELD_HTML} bytes of HTML"),
+            NoteError::NoCloze => f.write_str("add at least one {{c1::…}} cloze deletion"),
+            NoteError::EmptyCloze(idx) => write!(f, "cloze c{idx} has an empty answer"),
+            NoteError::Card(e) => e.fmt(f),
+            NoteError::ClozeCard(idx, e) => write!(f, "cloze c{idx}: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for NoteError {}
+
+impl From<flash_core::CardTextError> for NoteError {
+    fn from(e: flash_core::CardTextError) -> Self {
+        NoteError::Card(e)
+    }
+}
+
+/// Expands sanitized note fields into cards. The fields arrive as
+/// `SanitizedHtml`, so a caller cannot hand the expansion raw editor
+/// input.
 pub fn generate_cards(
     kind: NoteType,
     front_html: &SanitizedHtml,
     back_html: &SanitizedHtml,
-) -> Result<Vec<GeneratedCard>, String> {
+) -> Result<Vec<GeneratedCard>, NoteError> {
     if front_html.len() > MAX_FIELD_HTML || back_html.len() > MAX_FIELD_HTML {
-        return Err(format!("a field exceeds {MAX_FIELD_HTML} bytes of HTML"));
+        return Err(NoteError::FieldTooLong);
     }
     match kind {
         NoteType::Basic | NoteType::BasicReversed | NoteType::BasicTyped => {
@@ -120,8 +158,7 @@ pub fn generate_cards(
             Ok(out)
         }
         NoteType::Cloze => {
-            let cz = cloze::parse(front_html)
-                .ok_or_else(|| "add at least one {{c1::…}} cloze deletion".to_string())?;
+            let cz = cloze::parse(front_html).ok_or(NoteError::NoCloze)?;
             let text_plain = side(front_html);
             let extra_plain = side(back_html);
             let source = format!("{text_plain}\u{1f}{extra_plain}");
@@ -132,7 +169,7 @@ pub fn generate_cards(
                 let answers = cz.answers(idx).join("; ");
                 let answer_text = side(&answers);
                 if answer_text.is_empty() {
-                    return Err(format!("cloze c{idx} has an empty answer"));
+                    return Err(NoteError::EmptyCloze(idx));
                 }
                 let back = if extra_plain.is_empty() {
                     answer_text
@@ -146,7 +183,7 @@ pub fn generate_cards(
                     format!("{filled}<br>{back_html}")
                 });
                 let text =
-                    validate_card_text(&front, &back).map_err(|e| format!("cloze c{idx}: {e}"))?;
+                    validate_card_text(&front, &back).map_err(|e| NoteError::ClozeCard(idx, e))?;
                 out.push(GeneratedCard {
                     ord: idx - 1,
                     text,
@@ -164,6 +201,91 @@ pub fn generate_cards(
     }
 }
 
+/// The speech blocks one generated card speaks, from its note's blocks
+/// (`flash_core::speech`): a basic card's are the note's; a reversed
+/// card's second slot swaps them; a cloze card's front reads its own gap
+/// as the blank cue and every other gap as its answer, and its back reads
+/// the text whole, then the note's extra. A side the note has no blocks
+/// for has none, and a cloze card's back needs the text's blocks as much
+/// as its front does.
+pub fn card_speech(
+    kind: NoteType,
+    ord: u32,
+    front: Option<&[SpeechBlock]>,
+    back: Option<&[SpeechBlock]>,
+) -> (Option<Vec<SpeechBlock>>, Option<Vec<SpeechBlock>>) {
+    match kind {
+        NoteType::Basic | NoteType::BasicTyped => {
+            (front.map(<[_]>::to_vec), back.map(<[_]>::to_vec))
+        }
+        NoteType::BasicReversed if ord == 1 => (back.map(<[_]>::to_vec), front.map(<[_]>::to_vec)),
+        NoteType::BasicReversed => (front.map(<[_]>::to_vec), back.map(<[_]>::to_vec)),
+        NoteType::Cloze => {
+            let Some(text) = front else {
+                return (None, None);
+            };
+            let active = ord + 1;
+            let asked = cloze_speech(text, Some(active));
+            let mut answered = cloze_speech(text, None);
+            if let Some(extra) = back {
+                answered.extend(extra.iter().cloned());
+            }
+            (Some(asked), Some(answered))
+        }
+    }
+}
+
+/// A cloze text's blocks with its gaps resolved: the gap numbered
+/// `active` becomes the blank cue, every other gap its answer.
+fn cloze_speech(blocks: &[SpeechBlock], active: Option<u32>) -> Vec<SpeechBlock> {
+    let mut out = Vec::new();
+    for block in blocks {
+        let SpeechBlock::Say { lang, text } = block else {
+            out.push(block.clone());
+            continue;
+        };
+        let mut words = String::new();
+        let mut rest = text.as_str();
+        while let Some(start) = rest.find("{{c") {
+            let after = &rest[start + 3..];
+            let digits: String = after.chars().take_while(char::is_ascii_digit).collect();
+            let body_at = digits.len();
+            let (Ok(n), Some(body)) = (digits.parse::<u32>(), after[body_at..].strip_prefix("::"))
+            else {
+                words.push_str(&rest[..start + 3]);
+                rest = after;
+                continue;
+            };
+            let Some(end) = body.find("}}") else {
+                break;
+            };
+            let answer = body[..end].split("::").next().unwrap_or("");
+            words.push_str(&rest[..start]);
+            if Some(n) == active {
+                push_say(&mut out, lang, &words);
+                words.clear();
+                out.push(SpeechBlock::Cue { say: Cue::Blank });
+            } else {
+                words.push_str(answer);
+            }
+            rest = &body[end + 2..];
+        }
+        words.push_str(rest);
+        push_say(&mut out, lang, &words);
+    }
+    out
+}
+
+fn push_say(out: &mut Vec<SpeechBlock>, lang: &str, words: &str) {
+    let words = words.split_whitespace().collect::<Vec<_>>().join(" ");
+    if !words.is_empty() {
+        out.push(SpeechBlock::Say {
+            lang: lang.to_string(),
+            text: words,
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -174,7 +296,7 @@ mod tests {
         kind: NoteType,
         front: &str,
         back: &str,
-    ) -> Result<Vec<GeneratedCard>, String> {
+    ) -> Result<Vec<GeneratedCard>, NoteError> {
         super::generate_cards(
             kind,
             &richtext::sanitize_with_media(front),
@@ -258,13 +380,15 @@ mod tests {
     #[test]
     fn cloze_without_markup_is_rejected() {
         let err = generate_cards(NoteType::Cloze, "no blanks here", "").unwrap_err();
-        assert!(err.contains("c1"), "{err}");
+        assert_eq!(err, NoteError::NoCloze);
+        assert!(err.to_string().contains("c1"), "{err}");
     }
 
     #[test]
     fn cloze_empty_answer_is_rejected() {
         let err = generate_cards(NoteType::Cloze, "x {{c1::}} y", "").unwrap_err();
-        assert!(err.contains("empty") || err.contains("c1"), "{err}");
+        let text = err.to_string();
+        assert!(text.contains("empty") || text.contains("c1"), "{err}");
     }
 
     #[test]
@@ -272,6 +396,68 @@ mod tests {
         assert!(generate_cards(NoteType::Basic, "", "b").is_err());
         assert!(generate_cards(NoteType::Basic, "<br>", "b").is_err());
         assert!(generate_cards(NoteType::Basic, "a", " ").is_err());
+    }
+
+    fn say(lang: &str, text: &str) -> SpeechBlock {
+        SpeechBlock::Say {
+            lang: lang.into(),
+            text: text.into(),
+        }
+    }
+
+    #[test]
+    fn each_card_speaks_its_own_sides() {
+        let front = [say("en", "How do you say cat?")];
+        let back = [say("ja", "ねこ")];
+        let (f, b) = card_speech(NoteType::Basic, 0, Some(&front), Some(&back));
+        assert_eq!((f.unwrap(), b.unwrap()), (front.to_vec(), back.to_vec()));
+        // The reversed card asks in Japanese and answers in English.
+        let (f, b) = card_speech(NoteType::BasicReversed, 1, Some(&front), Some(&back));
+        assert_eq!((f.unwrap(), b.unwrap()), (back.to_vec(), front.to_vec()));
+        // A side nobody labeled stays unlabeled.
+        let (f, b) = card_speech(NoteType::Basic, 0, Some(&front), None);
+        assert!(f.is_some() && b.is_none());
+    }
+
+    #[test]
+    fn a_cloze_card_reads_its_own_gap_as_the_blank() {
+        let text = [say(
+            "fr",
+            "{{c1::Paris}} est la capitale de la {{c2::France::pays}}.",
+        )];
+        let extra = [say("en", "Geography")];
+        let (f, b) = card_speech(NoteType::Cloze, 0, Some(&text), Some(&extra));
+        assert_eq!(
+            f.unwrap(),
+            vec![
+                SpeechBlock::Cue { say: Cue::Blank },
+                say("fr", "est la capitale de la France.")
+            ]
+        );
+        assert_eq!(
+            b.unwrap(),
+            vec![
+                say("fr", "Paris est la capitale de la France."),
+                say("en", "Geography")
+            ]
+        );
+        let (f, _) = card_speech(NoteType::Cloze, 1, Some(&text), None);
+        assert_eq!(
+            f.unwrap(),
+            vec![
+                say("fr", "Paris est la capitale de la"),
+                SpeechBlock::Cue { say: Cue::Blank },
+                say("fr", ".")
+            ]
+        );
+        // Without the text's blocks, neither side can be read.
+        assert_eq!(
+            card_speech(NoteType::Cloze, 0, None, Some(&extra)),
+            (None, None)
+        );
+        // Text that only looks like a gap passes through.
+        let odd = [say("en", "a {{cx::b}} c")];
+        assert_eq!(cloze_speech(&odd, Some(1)), odd.to_vec());
     }
 
     #[test]

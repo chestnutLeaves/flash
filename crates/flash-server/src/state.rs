@@ -1,6 +1,5 @@
 //! Shared application state for all surfaces.
 
-use std::any::Any;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -17,7 +16,10 @@ use crate::ext::ServerExtension;
 use crate::service::Services;
 
 /// Short-lived WebAuthn ceremony state, keyed by a random ceremony id
-/// (held in a cookie). In-memory: a restart just restarts the ceremony.
+/// (held in a cookie). In-memory: a restart just restarts the ceremony,
+/// a few seconds of someone's time. What a restart must not cut off (an
+/// OAuth consent screen, a provider sign-in) is a durable ceremony in
+/// the database instead (`put_durable_ceremony`).
 pub enum Ceremony {
     Registration {
         state: PasskeyRegistration,
@@ -34,26 +36,13 @@ pub enum Ceremony {
         expires_ms: i64,
     },
     Authentication {
-        state: PasskeyAuthentication,
+        state: DiscoverableAuthentication,
         expires_ms: i64,
     },
     /// A signed-in user adding a passkey (settings, web or app).
     AddPasskey {
         state: PasskeyRegistration,
         user: flash_core::UserId,
-        expires_ms: i64,
-    },
-    /// OAuth consent screen state: the validated authorize request.
-    Consent {
-        pending: crate::oauth::PendingConsent,
-        expires_ms: i64,
-    },
-    /// A round trip owned by a sign-in provider (Google, Apple): the
-    /// provider keeps its own state type and tags it with `kind`, so a
-    /// cookie from one provider's ceremony is refused by another's.
-    Ext {
-        kind: &'static str,
-        state: Box<dyn Any + Send + Sync>,
         expires_ms: i64,
     },
 }
@@ -66,6 +55,9 @@ pub struct Site {
     pub base_url: String,
     /// FLASH_SUPPORT_EMAIL; None hides every "email us" line.
     pub support_email: Option<String>,
+    /// The deployment's words (the open core's and an extension's), in
+    /// the languages it gives readers: what its mail and jobs word with.
+    pub i18n: Arc<crate::i18n::Catalog>,
 }
 
 impl Site {
@@ -76,24 +68,16 @@ impl Site {
             .trim_start_matches("http://")
     }
 
-    /// The MCP endpoint users paste into Claude, ChatGPT, Grok, or Claude Code.
+    /// The MCP endpoint users paste into Claude, ChatGPT, Grok, Mistral,
+    /// Gemini, or Claude Code.
     pub fn mcp_url(&self) -> String {
         format!("{}/mcp", self.base_url)
     }
 
-    /// The guided-setup prompt the "Set up with Claude / ChatGPT" buttons
-    /// hand to the assistant; templates URL-encode it into the deep link.
-    pub fn connect_prompt(&self) -> String {
-        format!(
-            "I want to connect Flash, my flashcard app, to you as a custom connector. \
-             Its MCP server URL is: {}\n\n\
-             Guide me through adding it on this platform, one step at a time, waiting \
-             for me to say done after each step. Steps: open the connector settings for \
-             this app; add a custom connector; paste the URL above exactly; confirm; then \
-             I will be asked to sign in to Flash with my passkey to finish. After it \
-             connects, list my decks to prove it works.",
-            self.mcp_url()
-        )
+    /// English, for mail to the people who run the server: it stays
+    /// English whoever's request sets it off.
+    pub fn english(&self) -> crate::i18n::Tr {
+        crate::i18n::Tr::english(self.i18n.clone())
     }
 }
 
@@ -102,7 +86,8 @@ pub struct AppState {
     pub services: Services,
     pub config: Arc<Config>,
     pub site: Arc<Site>,
-    /// What the hosted build plugged in; `CoreOnly` on the open server.
+    /// What a downstream extension plugged in; `CoreOnly` on the open
+    /// server.
     pub ext: Arc<dyn ServerExtension>,
     pub webauthn: Arc<Webauthn>,
     pub ceremonies: Arc<Mutex<HashMap<String, Ceremony>>>,
@@ -110,8 +95,8 @@ pub struct AppState {
     /// The looser per-IP budget for the mobile JSON API: a study session
     /// is a few requests per card, so the auth limiter would break it.
     pub api_rate_limiter: Arc<crate::middleware::RateLimiter>,
-    /// Present => self-serve signup is enabled. Tests swap in a capture
-    /// mailer; None keeps the classic invite-only behavior.
+    /// Present => mail goes out. Tests swap in a capture mailer; None
+    /// sends nothing.
     pub mailer: Option<Arc<dyn crate::email::Mailer>>,
     /// Where media bytes live: a bucket when configured, disk otherwise.
     /// Never optional: serving must always work.
@@ -136,199 +121,53 @@ pub struct AppState {
     /// The gate every heavy job (import, export, Stats) must pass; see
     /// `HeavyJobs`.
     pub heavy: Arc<HeavyJobs>,
-    /// Card generation and voice grading; None when no provider is
-    /// configured, and every generate page and voice route says so.
-    pub ai: Option<Arc<AiRuntime>>,
-    /// Natural voice through the sidecar; None when none is configured,
-    /// and every voice audio route says so.
-    pub tts: Option<Arc<crate::tts::TtsRuntime>>,
+    /// Signs the media links the MCP study panel loads, with the
+    /// deployment's key (kept in the database, so links outlive a
+    /// restart).
+    pub panel_links: crate::mcp::panel::MediaLinks,
     pub started_at_ms: i64,
+    /// Cancelled when the process is asked to stop (`boot::serve`): the
+    /// job runner stops taking jobs, and background senders hand over
+    /// what they hold before the process exits.
+    pub shutdown: tokio_util::sync::CancellationToken,
+    /// Poked when a request writes a job (`jobs::wake`), so the worker
+    /// does not wait out its poll.
+    pub jobs_wake: Arc<tokio::sync::Notify>,
+    /// Every word Flash says, in each language: the core's messages and
+    /// the extension's (`i18n`).
+    pub i18n: Arc<crate::i18n::Catalog>,
 }
 
 /// Blob reads the server performs itself at once, for blobs large enough
 /// to matter; smaller ones are not counted.
 pub const MEDIA_READS: usize = 8;
 
-/// Model calls in flight across the process: each holds a blocking
-/// thread for up to minutes, and the runner's own bound is separate.
-pub const AI_CALLS: usize = 4;
-
-/// Everything a generation or a spoken-answer grade needs that a request
-/// does not carry: the model behind one trait, what it reads (the
-/// provider's own capabilities, narrowed by what the operator listed
-/// and by whether a PDF renderer is present), the document converter
-/// when there is one, and the handles the job runner is woken and
-/// throttled through.
-pub struct AiRuntime {
-    pub provider: Arc<dyn crate::ai::provider::LlmProvider>,
-    pub capabilities: crate::ai::provider::Capabilities,
-    /// `capabilities.kinds`, the list every "which inputs" question
-    /// reads.
-    pub inputs: Vec<crate::policy::AiInput>,
-    /// One renderer, used from blocking threads one at a time: rendering
-    /// a page is CPU work that gains nothing from running twice at once.
-    #[cfg(feature = "pdf")]
-    pub pdf: Option<Mutex<crate::ai::pdf::Pdf>>,
-    /// The operator's document converter; None refuses documents.
-    pub converter: Option<crate::ai::convert::DocConverter>,
-    /// Where the converter's scratch directories go.
-    pub convert_dir: std::path::PathBuf,
-    pub calls: tokio::sync::Semaphore,
-    /// Poked when a job is queued, so the runner does not wait out its
-    /// idle interval.
-    pub wake: tokio::sync::Notify,
-    /// What clients are told to send the grader for a spoken answer;
-    /// the grader takes either shape regardless.
-    pub voice_input: crate::config::VoiceInput,
-}
-
-impl AiRuntime {
-    /// A runtime over `provider` reading what it can, narrowed to
-    /// `inputs` when the operator listed some. Err names a listed kind
-    /// the provider cannot read.
-    pub fn new(
-        provider: Arc<dyn crate::ai::provider::LlmProvider>,
-        inputs: Option<Vec<crate::policy::AiInput>>,
-        #[cfg(feature = "pdf")] pdf: Option<crate::ai::pdf::Pdf>,
-        converter: Option<crate::ai::convert::DocConverter>,
-        convert_dir: std::path::PathBuf,
-    ) -> Result<Self, String> {
-        let all = provider.capabilities();
-        let mut capabilities = match &inputs {
-            Some(listed) => all.narrowed_to(listed).map_err(|kind| {
-                format!(
-                    "FLASH_AI_INPUTS lists {kind} but the {} model does not read it",
-                    provider.describe()
-                )
-            })?,
-            None => all,
-        };
-        // Without a renderer there are no page counts, no figure crops
-        // and no cap on pages: a listed `pdf` is a boot error upstream,
-        // an implied one is simply dropped.
-        #[cfg(feature = "pdf")]
-        let pdf_ready = pdf.is_some();
-        #[cfg(not(feature = "pdf"))]
-        let pdf_ready = false;
-        if inputs.is_none() && !pdf_ready && capabilities.accepts(crate::policy::AiInput::Pdf) {
-            tracing::warn!(
-                "pdf generation is off: FLASH_PDFIUM_PATH is not set (see tools/fetch-pdfium)"
-            );
-            capabilities = capabilities.without(crate::policy::AiInput::Pdf);
-        }
-        Ok(Self {
-            provider,
-            inputs: capabilities.kinds.clone(),
-            capabilities,
-            #[cfg(feature = "pdf")]
-            pdf: pdf.map(Mutex::new),
-            converter,
-            convert_dir,
-            calls: tokio::sync::Semaphore::new(AI_CALLS),
-            wake: tokio::sync::Notify::new(),
-            voice_input: crate::config::VoiceInput::default(),
-        })
-    }
-
-    /// Builds the runtime the configuration describes: the configured
-    /// provider, the renderer loaded from `FLASH_PDFIUM_PATH` when there
-    /// is one, and the document converter when one is named. Errors
-    /// name the missing piece.
-    pub fn from_config(
-        config: &crate::config::AiConfig,
-        data_dir: &std::path::Path,
-    ) -> Result<Self, String> {
-        let provider = crate::ai::build_provider(config)?;
-        let lists_pdf = config
-            .inputs
-            .as_ref()
-            .is_some_and(|list| list.contains(&crate::policy::AiInput::Pdf));
-        #[cfg(feature = "pdf")]
-        let pdf = match &config.pdfium_path {
-            Some(path) => Some(crate::ai::pdf::load(path)?),
-            None => None,
-        };
-        #[cfg(not(feature = "pdf"))]
-        if lists_pdf {
-            return Err(
-                "FLASH_AI_INPUTS lists pdf but this binary was built without the pdf feature"
-                    .to_string(),
-            );
-        }
-        let _ = lists_pdf;
-        let converter = match &config.doc_converter {
-            Some(template) => Some(crate::ai::convert::DocConverter::parse(
-                template,
-                config.doc_converter_timeout,
-            )?),
-            None => None,
-        };
-        let convert_dir = data_dir.join("convert");
-        if converter.is_some() {
-            std::fs::create_dir_all(&convert_dir)
-                .map_err(|e| format!("{}: {e}", convert_dir.display()))?;
-        }
-        let mut runtime = Self::new(
-            provider,
-            config.inputs.clone(),
-            #[cfg(feature = "pdf")]
-            pdf,
-            converter,
-            convert_dir,
-        )?;
-        runtime.voice_input = config.voice_input;
-        Ok(runtime)
-    }
-
-    pub fn accepts(&self, input: crate::policy::AiInput) -> bool {
-        self.capabilities.accepts(input)
-    }
-
-    pub fn accepts_mime(&self, input: crate::policy::AiInput, mime: &str) -> bool {
-        self.capabilities.accepts_mime(input, mime)
-    }
-
-    /// Whether office documents can be taken: a converter is configured
-    /// and the PDF it makes can be read.
-    pub fn converts_documents(&self) -> bool {
-        self.converter.is_some() && self.accepts(crate::policy::AiInput::Pdf)
-    }
-
-    /// The renderer, when PDFs are on. Callers hold the guard only
-    /// inside a blocking task.
-    #[cfg(feature = "pdf")]
-    pub fn pdf(&self) -> Option<parking_lot::MutexGuard<'_, crate::ai::pdf::Pdf>> {
-        self.pdf.as_ref().map(|m| m.lock())
-    }
-
-    pub fn describe(&self) -> String {
-        let inputs: Vec<&str> = self.inputs.iter().map(|i| i.as_str()).collect();
-        let documents = match &self.converter {
-            Some(c) if self.converts_documents() => format!("; documents via {}", c.program()),
-            _ => String::new(),
-        };
-        format!(
-            "{} ({}{documents})",
-            self.provider.describe(),
-            inputs.join(", ")
-        )
-    }
-}
-
 /// The pages' Content-Security-Policy. Scripts stay `'self'` only; inline
 /// *style* attributes are allowed (cosmetic, no script surface). Images
 /// and media come from us, or from the media store's origin when blobs
 /// are fetched there directly: CSP applies to a redirect's target.
-/// `blob:` images are the composer's thumbnails of photos not yet
-/// uploaded, minted by the page's own script from the person's files.
+/// `blob:` images are thumbnails of photos not yet uploaded, minted by
+/// a page's own script from the person's files. `blob:` media is a file
+/// the person picked, read in the page before it is sent, as a photo's
+/// thumbnail is shown.
 pub fn page_csp(media_origin: Option<&str>) -> String {
     let media = media_origin.map(|o| format!(" {o}")).unwrap_or_default();
     format!(
         "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; \
-         img-src 'self' data: blob:{media}; media-src 'self'{media}; \
-         frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+         img-src 'self' data: blob:{media}; media-src 'self' blob:{media}; \
+         frame-ancestors 'none'; base-uri 'none'; form-action 'self'; {CSP_REPORTING}"
     )
 }
+
+/// The end of every page's policy: where a browser reports what the
+/// policy blocked (`client_errors`). `report-to` names the endpoint the
+/// `Reporting-Endpoints` header declares (`middleware::security_headers`);
+/// `report-uri` is for the browsers that only know the older form, and
+/// the ones that know both use `report-to`.
+pub const CSP_REPORTING: &str = "report-uri /client-errors/csp; report-to csp";
+
+/// The `Reporting-Endpoints` header that goes with `CSP_REPORTING`.
+pub const REPORTING_ENDPOINTS: &str = "csp=\"/client-errors/csp\"";
 
 /// How many heavy jobs the whole process runs at once. Each holds a core
 /// and up to a few hundred megabytes; the unit file caps the process at
@@ -415,45 +254,18 @@ pub enum HeavyBusy {
 }
 
 impl HeavyBusy {
-    pub fn message(self) -> &'static str {
-        match self {
-            HeavyBusy::Yours => "another import, export or stats page of yours is still running; try again in a moment",
-            HeavyBusy::Everyone => "the server is busy with other imports and exports; try again in a moment",
-        }
+    /// What the person reads, in the reader's language.
+    pub fn message(self) -> crate::i18n::Words {
+        crate::i18n::t(match self {
+            HeavyBusy::Yours => "heavy-busy-yours",
+            HeavyBusy::Everyone => "heavy-busy-everyone",
+        })
     }
 }
 
 impl IntoResponse for HeavyBusy {
     fn into_response(self) -> Response {
         (StatusCode::TOO_MANY_REQUESTS, self.message()).into_response()
-    }
-}
-
-/// No model is configured on this server.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct AiOff;
-
-impl AiOff {
-    pub const MESSAGE: &'static str = "card generation is not set up on this server";
-}
-
-impl IntoResponse for AiOff {
-    fn into_response(self) -> Response {
-        (StatusCode::NOT_FOUND, Self::MESSAGE).into_response()
-    }
-}
-
-/// No natural-voice sidecar is configured on this server.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct VoiceOff;
-
-impl VoiceOff {
-    pub const MESSAGE: &'static str = "natural voice is not set up on this server";
-}
-
-impl IntoResponse for VoiceOff {
-    fn into_response(self) -> Response {
-        (StatusCode::NOT_FOUND, Self::MESSAGE).into_response()
     }
 }
 
@@ -500,23 +312,14 @@ impl AppState {
         )?
         .into();
         tracing::info!("media store: {}", media.describe());
-        let ai = match &config.ai {
-            Some(ai_config) => {
-                let runtime = AiRuntime::from_config(ai_config, &config.data_dir)?;
-                tracing::info!("card generation: {}", runtime.describe());
-                Some(Arc::new(runtime))
-            }
-            None => None,
-        };
-        let tts = config.tts.as_ref().map(|tts_config| {
-            let runtime = crate::tts::TtsRuntime::from_config(tts_config);
-            tracing::info!("natural voice: {}", runtime.describe());
-            Arc::new(runtime)
-        });
         let csp = page_csp(media.origin().as_deref());
+        let panel_links = crate::mcp::panel::MediaLinks::stored(services.store())
+            .map_err(|e| format!("panel link key: {e}"))?;
+        let i18n = crate::i18n::server_catalog(ext.words(), &config.languages)?;
         let site = Arc::new(Site {
             base_url: config.base_url.clone(),
             support_email: config.support_email.clone(),
+            i18n: i18n.clone(),
         });
         Ok(Self {
             services,
@@ -539,21 +342,12 @@ impl AppState {
             heavy: Arc::new(HeavyJobs::new(HEAVY_GLOBAL)),
             csp,
             media_reads: Arc::new(tokio::sync::Semaphore::new(MEDIA_READS)),
-            ai,
-            tts,
+            panel_links,
             started_at_ms,
+            shutdown: tokio_util::sync::CancellationToken::new(),
+            jobs_wake: Arc::new(tokio::sync::Notify::new()),
+            i18n,
         })
-    }
-
-    /// Installs a natural-voice runtime (tests install the fake sidecar).
-    pub fn install_tts(&mut self, tts: Arc<crate::tts::TtsRuntime>) {
-        self.tts = Some(tts);
-    }
-
-    /// The voice runtime, or the refusal every voice audio route answers
-    /// with when none is configured.
-    pub fn tts(&self) -> Result<&Arc<crate::tts::TtsRuntime>, VoiceOff> {
-        self.tts.as_ref().ok_or(VoiceOff)
     }
 
     /// Swaps the media store (tests install fakes) and everything derived
@@ -561,17 +355,6 @@ impl AppState {
     pub fn install_media(&mut self, media: Arc<dyn crate::media_store::MediaStore>) {
         self.csp = page_csp(media.origin().as_deref());
         self.media = media;
-    }
-
-    /// Installs a generation runtime (tests install the fake provider).
-    pub fn install_ai(&mut self, ai: Arc<AiRuntime>) {
-        self.ai = Some(ai);
-    }
-
-    /// The generation runtime, or the refusal every AI route answers
-    /// with when none is configured.
-    pub fn ai(&self) -> Result<&Arc<AiRuntime>, AiOff> {
-        self.ai.as_ref().ok_or(AiOff)
     }
 
     /// The permit a heavy job needs: one per user at a time, a few per
@@ -592,72 +375,108 @@ impl AppState {
         map.remove(id_hash)
     }
 
-    /// Parks a provider-owned ceremony under `kind`.
-    pub fn put_ext_ceremony<T: Any + Send + Sync>(
+    /// Parks a ceremony that must outlive a restart (an OAuth consent
+    /// screen, a provider sign-in round trip) in the database under
+    /// `kind`, for `user` when it has one. False when it could not be
+    /// parked (the store failed, or is full of live ceremonies), and the
+    /// caller answers that the sign-in can't start just now.
+    pub async fn put_durable_ceremony<T: serde::Serialize>(
         &self,
         id_hash: String,
         kind: &'static str,
-        state: T,
+        user: Option<UserId>,
+        state: &T,
         expires_ms: i64,
-    ) {
-        self.put_ceremony(
-            id_hash,
-            Ceremony::Ext {
-                kind,
-                state: Box::new(state),
-                expires_ms,
-            },
-        );
-    }
-
-    /// Takes a provider-owned ceremony; None when absent, expired, or
-    /// parked by a different provider.
-    pub fn take_ext_ceremony<T: Any + Send + Sync>(
-        &self,
-        id_hash: &str,
-        kind: &'static str,
-        now_ms: i64,
-    ) -> Option<T> {
-        match self.take_ceremony(id_hash, now_ms)? {
-            Ceremony::Ext {
-                kind: found, state, ..
-            } if found == kind => state.downcast().ok().map(|b| *b),
-            _ => None,
-        }
-    }
-
-    /// Mutates a live provider-owned ceremony in place; false when there
-    /// is none of that kind.
-    pub fn update_ext_ceremony<T: Any + Send + Sync>(
-        &self,
-        id_hash: &str,
-        kind: &'static str,
-        f: impl FnOnce(&mut T),
     ) -> bool {
-        let mut found = false;
-        self.update_ceremony(id_hash, |c| {
-            if let Ceremony::Ext { kind: k, state, .. } = c {
-                if *k == kind {
-                    if let Some(s) = state.downcast_mut::<T>() {
-                        f(s);
-                        found = true;
-                    }
-                }
+        let Ok(payload) = serde_json::to_string(state) else {
+            return false;
+        };
+        let services = self.services.clone();
+        let parked = tokio::task::spawn_blocking(move || {
+            services.store().put_durable_ceremony(
+                &id_hash,
+                kind,
+                user,
+                &payload,
+                expires_ms,
+                crate::service::now_ms(),
+            )
+        })
+        .await;
+        match parked {
+            Ok(Ok(true)) => true,
+            Ok(Ok(false)) => {
+                tracing::warn!(kind, "ceremony store full; refusing a new ceremony");
+                false
             }
-        });
-        found
+            Ok(Err(e)) => {
+                tracing::error!(kind, "park ceremony: {e}");
+                false
+            }
+            Err(e) => {
+                tracing::error!(kind, "park ceremony join: {e}");
+                false
+            }
+        }
     }
 
-    /// Mutates a live ceremony in place; false when there is none.
-    pub fn update_ceremony(&self, id_hash: &str, f: impl FnOnce(&mut Ceremony)) -> bool {
-        let mut map = self.ceremonies.lock();
-        match map.get_mut(id_hash) {
-            Some(c) => {
-                f(c);
-                true
+    /// Takes a durable ceremony of `kind`, with the account it was
+    /// parked for; None when absent, expired, of another kind, or not
+    /// readable. It is gone after either way.
+    pub async fn take_durable_ceremony<T: serde::de::DeserializeOwned>(
+        &self,
+        id_hash: String,
+        kind: &'static str,
+    ) -> Option<(T, Option<UserId>)> {
+        let services = self.services.clone();
+        let taken = tokio::task::spawn_blocking(move || {
+            services
+                .store()
+                .take_durable_ceremony(&id_hash, kind, crate::service::now_ms())
+        })
+        .await;
+        match taken {
+            Ok(Ok(Some((payload, user)))) => serde_json::from_str(&payload)
+                .ok()
+                .map(|state| (state, user)),
+            Ok(Ok(None)) => None,
+            Ok(Err(e)) => {
+                tracing::error!(kind, "take ceremony: {e}");
+                None
             }
-            None => false,
+            Err(e) => {
+                tracing::error!(kind, "take ceremony join: {e}");
+                None
+            }
         }
+    }
+
+    /// Changes a live durable ceremony of `kind` in place; false when
+    /// there is none.
+    pub async fn update_durable_ceremony<T>(
+        &self,
+        id_hash: String,
+        kind: &'static str,
+        f: impl FnOnce(&mut T) + Send + 'static,
+    ) -> bool
+    where
+        T: serde::Serialize + serde::de::DeserializeOwned,
+    {
+        let services = self.services.clone();
+        let updated = tokio::task::spawn_blocking(move || {
+            services.store().update_durable_ceremony(
+                &id_hash,
+                kind,
+                crate::service::now_ms(),
+                |payload| {
+                    let mut state: T = serde_json::from_str(payload).ok()?;
+                    f(&mut state);
+                    serde_json::to_string(&state).ok()
+                },
+            )
+        })
+        .await;
+        matches!(updated, Ok(Ok(true)))
     }
 
     pub fn put_ceremony(&self, id_hash: String, ceremony: Ceremony) {
@@ -693,9 +512,7 @@ impl Ceremony {
         match self {
             Ceremony::Registration { expires_ms, .. }
             | Ceremony::Authentication { expires_ms, .. }
-            | Ceremony::AddPasskey { expires_ms, .. }
-            | Ceremony::Consent { expires_ms, .. }
-            | Ceremony::Ext { expires_ms, .. } => *expires_ms,
+            | Ceremony::AddPasskey { expires_ms, .. } => *expires_ms,
         }
     }
 }

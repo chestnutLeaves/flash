@@ -18,7 +18,7 @@ pub fn router() -> Router<AppState> {
 
 #[derive(Serialize)]
 struct DayCount {
-    label: String,
+    label: crate::i18n::Words,
     count: u32,
     /// Bar height as a percentage of the busiest day.
     pct: u32,
@@ -40,7 +40,7 @@ struct HeatCell {
     /// 0 = empty, 1-4 = intensity relative to the busiest day.
     level: u8,
     /// MM/DD.
-    label: String,
+    label: crate::i18n::Words,
     /// After today: `count` is cards due, not reviews done.
     future: bool,
     today: bool,
@@ -48,7 +48,7 @@ struct HeatCell {
 
 #[derive(Serialize)]
 struct MonthSpan {
-    label: String,
+    label: crate::i18n::Words,
     weeks: u32,
 }
 

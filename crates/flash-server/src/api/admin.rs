@@ -32,7 +32,7 @@ struct AdminUserRow {
     last_review_source: Option<String>,
     last_login_at: Option<i64>,
     mcp_clients: Vec<String>,
-    /// The extension's per-user fields (the plan).
+    /// The extension's per-user fields.
     #[serde(flatten)]
     extra: crate::ext::JsonFields,
 }

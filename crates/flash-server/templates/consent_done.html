@@ -1,0 +1,9 @@
+{% extends "auth_base.html" %}
+{% block title %}{{ "consent-done-title"|t }}{% endblock %}
+{% block content %}
+<h1>{{ "consent-done-heading"|t }}</h1>
+<div class="fl-card fl-card-pad" style="text-align:start;display:flex;flex-direction:column;gap:12px">
+  <p>{{ "consent-done-body-html"|ta("client", client_name)|safe }}</p>
+  <p><a class="fl-btn fl-btn-secondary" href="/" style="width:auto">{{ "consent-done-open"|t }}</a></p>
+</div>
+{% endblock %}

@@ -13,12 +13,14 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use flash_core::DeckId;
 use flash_store::notes::NoteType;
+use flash_store::CardStatus;
 use serde::{Deserialize, Serialize};
 
 use super::dto::{Card, Deck, DeckDetail};
 use super::today::{BoostBody, Boosted};
 use super::{call, ApiError, ApiJson, ApiResult, BearerUser, Page};
-use crate::ext::Surface;
+use crate::ext::{AccountEvent, Surface};
+use crate::service::deck_cards::DeckFilter;
 use crate::service::{now_ms, NoteInput};
 use crate::state::AppState;
 
@@ -31,6 +33,7 @@ pub fn router() -> Router<AppState> {
         .route("/decks/{id}", get(detail).patch(rename).delete(delete_deck))
         .route("/decks/{id}/move", post(move_deck))
         .route("/decks/{id}/limits", axum::routing::put(set_limits))
+        .route("/decks/{id}/goal", axum::routing::put(set_goal))
         .route("/decks/{id}/boost", post(boost))
         .route("/decks/{id}/archive", post(archive))
         .route("/decks/{id}/unarchive", post(unarchive))
@@ -72,7 +75,7 @@ async fn create(
 ) -> Result<(StatusCode, Json<Deck>), ApiError> {
     let name = body.name.trim().to_string();
     if name.is_empty() {
-        return Err(ApiError::invalid("the name can't be blank"));
+        return Err(ApiError::invalid(crate::i18n::t("deck-error-empty")));
     }
     let deck = call(state.services.clone(), move |s| {
         let now = now_ms();
@@ -87,10 +90,7 @@ async fn create(
     state.ext.account_event(
         &state.services,
         user.id,
-        "deck_created",
-        Surface::Mobile,
-        None,
-        None,
+        AccountEvent::new("deck_created", Surface::Mobile),
     );
     Ok((StatusCode::CREATED, Json(deck.into())))
 }
@@ -121,7 +121,7 @@ async fn rename(
 ) -> ApiResult<Deck> {
     let name = body.name.trim().to_string();
     if name.is_empty() {
-        return Err(ApiError::invalid("the name can't be blank"));
+        return Err(ApiError::invalid(crate::i18n::t("deck-error-empty")));
     }
     let deck = call(state.services.clone(), move |s| {
         s.rename_deck(user.id, DeckId(id), &name)?;
@@ -170,6 +170,32 @@ async fn set_limits(
 ) -> Result<StatusCode, ApiError> {
     call(state.services.clone(), move |s| {
         s.set_deck_limits(user.id, DeckId(id), body.new_per_day, body.reviews_per_day)
+    })
+    .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// A deck's goal date, `YYYY-MM-DD`; null (or absent) clears it.
+#[derive(Deserialize)]
+struct GoalBody {
+    #[serde(default, deserialize_with = "crate::bounds::opt_goal_date")]
+    goal_date: Option<String>,
+}
+
+async fn set_goal(
+    State(state): State<AppState>,
+    user: BearerUser,
+    Path(id): Path<i64>,
+    ApiJson(body): ApiJson<GoalBody>,
+) -> Result<StatusCode, ApiError> {
+    let date = match body.goal_date.as_deref() {
+        None => None,
+        Some(text) => Some(flash_core::goal::parse_date(text).ok_or_else(|| {
+            crate::service::ServiceError::Malformed("goal_date must be YYYY-MM-DD".into())
+        })?),
+    };
+    call(state.services.clone(), move |s| {
+        s.set_deck_goal(user.id, DeckId(id), date, now_ms())
     })
     .await?;
     Ok(StatusCode::NO_CONTENT)
@@ -228,11 +254,17 @@ async fn delete_deck(
         s.delete_deck(user.id, DeckId(id))
     })
     .await?;
-    crate::media::remove_orphans(
-        state.services.clone(),
-        state.media.clone(),
-        &deleted.orphan_blobs,
-    );
+    if deleted.cards > 0 {
+        state.ext.account_event(
+            &state.services,
+            user.id,
+            AccountEvent::new("cards_deleted", Surface::Mobile)
+                .detail(Some("deck"))
+                .amount(Some(deleted.cards as i64)),
+        );
+    }
+    // The deletion owes its orphaned blobs to the job worker.
+    crate::jobs::wake(&state);
     Ok(Json(DeckDeleted {
         cards_deleted: deleted.cards,
     }))
@@ -253,14 +285,19 @@ async fn cards(
     Query(query): Query<CardsQuery>,
 ) -> ApiResult<Page<Card>> {
     let per_page = query.per_page.unwrap_or(DEFAULT_PER_PAGE).clamp(1, 100);
+    // The web deck page's list, archived cards included.
+    let filter = DeckFilter {
+        search: DeckFilter::search_from(query.q.as_deref()),
+        status: CardStatus::All,
+        ..DeckFilter::default()
+    };
     let page = call(state.services.clone(), move |s| {
-        s.deck_cards_page(
+        s.deck_cards_filtered(
             user.id,
             DeckId(id),
-            query.q.as_deref(),
+            &filter,
             query.page.unwrap_or(1),
             per_page,
-            now_ms(),
         )
     })
     .await?;
@@ -305,10 +342,9 @@ async fn quick_add(
     state.ext.account_event(
         &state.services,
         user.id,
-        "cards_created",
-        Surface::Mobile,
-        Some("manual"),
-        Some(ids.len() as i64),
+        AccountEvent::new("cards_created", Surface::Mobile)
+            .detail(Some("manual"))
+            .amount(Some(ids.len() as i64)),
     );
     Ok((
         StatusCode::CREATED,
@@ -329,17 +365,36 @@ pub struct NoteBody {
     pub back_html: String,
     #[serde(default, deserialize_with = "crate::bounds::tags")]
     pub tags: Vec<String>,
+    /// The language picked for each field; absent (an app from before
+    /// the picker) leaves the note's as they are, a null clears one.
+    #[serde(default)]
+    pub langs: Option<LangsBody>,
+}
+
+/// The language picked for each field of a card, as a tag ("ja",
+/// "es-MX"); null where none is.
+#[derive(Deserialize)]
+pub struct LangsBody {
+    #[serde(default, deserialize_with = "crate::bounds::opt_keyword")]
+    pub front: Option<String>,
+    #[serde(default, deserialize_with = "crate::bounds::opt_keyword")]
+    pub back: Option<String>,
 }
 
 impl NoteBody {
     pub fn into_input(self) -> Result<NoteInput, ApiError> {
         let note_type = NoteType::parse(&self.note_type)
-            .ok_or_else(|| ApiError::invalid("unknown note type"))?;
+            .ok_or_else(|| ApiError::malformed("unknown note type"))?;
         Ok(NoteInput {
             note_type,
             front_html: self.front_html,
             back_html: self.back_html,
             tags: self.tags,
+            speech: Default::default(),
+            langs: self.langs.map(|l| flash_store::NoteLangs {
+                front: l.front,
+                back: l.back,
+            }),
         })
     }
 }
@@ -364,10 +419,7 @@ async fn create_note(
     state.ext.account_event(
         &state.services,
         user.id,
-        "note_created",
-        Surface::Mobile,
-        None,
-        None,
+        AccountEvent::new("note_created", Surface::Mobile),
     );
     Ok((
         StatusCode::CREATED,

@@ -1,25 +1,28 @@
 {% extends "base.html" %}
-{% block title %}Study - Flash{% endblock %}
+{% block title %}{{ "study-title"|t }}{% endblock %}
 {% block content %}
 <div class="row study-head">
-  <h1>Study</h1>
-  {% if voice_input.is_some() %}
-  {# Hands-free study. Hidden until static/voice.js finds a recognizer
-     in this browser, so nothing offers what it cannot do. #}
-  <button id="voice-toggle" type="button" class="fl-btn fl-btn-sm fl-btn-secondary" hidden
-          aria-pressed="false" title="Voice study (v)">
-    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>
-    Voice study
-  </button>
-  {% endif %}
+  <h1>{{ "study-heading"|t }}</h1>
+  <div class="row study-head-actions">
+    {# Opens the tag picker below, and reads the filter back so it stays
+       visible while it applies. #}
+    <span class="small muted study-head-links">
+      <a class="muted study-tags-toggle" href="#study-tags-dialog" role="button"
+         aria-haspopup="dialog" aria-controls="study-tags-dialog" data-study-tags-open>{{ tags_label }}</a>
+    </span>
+    {{ actions_html|safe }}
+  </div>
 </div>
-<div id="study" class="study-col"{% if let Some(input) = voice_input %} data-voice-input="{{ input }}" data-grading-mode="{{ grading_mode }}" data-voice-id="{{ voice_id }}" data-speech-rate="{{ speech_rate }}" data-voice-apply="{{ voice_apply }}" data-voice-cues="{% if voice_cues %}on{% else %}off{% endif %}"{% if voice_on %} data-voice-audio="1"{% endif %}{% endif %}>
+<div id="study" class="study-col">
   {% include "study_card.html" %}
 </div>
-{% if voice_input.is_some() %}{% include "study_voice.html" %}{% endif %}
+{# The card editor's dialog, opened by Edit; a save from here shows the
+   card again in place instead of reloading the page. #}
+<div id="editor-dialog" data-editor-after="study"></div>
+{% include "study_tags.html" %}
 {# bump ?v= together with base.html and auth_base.html when static files change #}
-<script src="/static/speech.js?v=63" defer></script>
-<script src="/static/study.js?v=61" defer></script>
-{% if voice_input.is_some() %}<script src="/static/glow.js?v=61" defer></script>
-<script src="/static/voice.js?v=65" defer></script>{% endif %}
+{{ foot_html|safe }}
+<script src="/static/editor.js?v=56" defer></script>
+<script src="/static/study.js?v=78" defer></script>
 {% endblock %}
+{% block js_words %}{{ super() }}{{ "js-editor"|js_island|safe }}{% endblock %}

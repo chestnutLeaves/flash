@@ -1,8 +1,7 @@
 # Contributing to Flash
 
-Thanks for looking. Flash is maintained by one person alongside the
-hosted service it powers, so the rules below exist to keep review
-cheap for both of us.
+Thanks for looking. Flash is maintained by one person, so the rules
+below exist to keep review cheap for both of us.
 
 ## Before you start
 
@@ -22,9 +21,10 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-All three must be clean; CI runs them on every pull request. On Windows
-the vendored OpenSSL needs Strawberry Perl and NASM on `PATH`; Linux and
-macOS need nothing beyond a Rust toolchain.
+All three must be clean; CI runs them on every pull request. A Rust
+toolchain is all any platform needs (on Windows, with the MSVC build
+tools rustup asks for): the cryptography is ring and RustCrypto, with no
+OpenSSL, Perl or NASM to install.
 
 The layout, briefly:
 
@@ -38,7 +38,15 @@ The layout, briefly:
   MCP tools can't drift apart. Templates are askama, behaviour is htmx.
 
 Tests are integration-style and run against an in-memory database; look
-at `crates/flash-server/tests/` for the harness (`common::*`).
+at `crates/flash-server/tests/it/` for the harness (`common::*`). Each
+crate's integration tests are modules of one test binary, `tests/it`, so
+a new test file is a new `mod` line in `tests/it/main.rs`. Run one file
+or one test with a filter:
+
+```
+cargo test -p flash-server --test it mcp_tests::
+cargo test -p flash-server --test it mcp_tests::a_name
+```
 
 ## Pull requests
 
@@ -47,11 +55,13 @@ at `crates/flash-server/tests/` for the harness (`common::*`).
   should say why, not just what.
 - Keep the diff free of formatting churn and unrelated refactors.
 
-This repository is a read-only mirror of a private monorepo that also
-holds the hosted product. Merged pull requests are applied to that
-repository with `git am`, credited to you, and appear here with the next
-sync; the pull request is then closed with a pointer to the sync commit.
-That is why history here arrives in batches rather than merge commits.
+This repository is a read-only mirror of a private repository, so
+history here arrives in batches rather than merge commits. A pull
+request we take arrives with the next sync as a commit of its own. You
+are its author when your code went in largely as written, and a
+co-author when a maintainer rewrote it from your work. If later work
+has since rewritten your change, you are a co-author of the sync's
+main commit instead. We then close the pull request with a link to that commit.
 
 ## Releases and the changelog
 
@@ -62,8 +72,7 @@ change; a refactor or a test does not. The line says what changed for
 the user, not which function moved, and ends with the issue it answers
 and who raised it: `(#12, suggested by @handle)` for an idea,
 `(#12, reported by @handle)` for a bug. A reporter's credit lives in the
-changelog and the release notes, since a mirror's history cannot carry
-it.
+changelog and the release notes.
 
 Versions follow semantic versioning. A release is a tag `vX.Y.Z` on this
 repository matching the workspace version in `Cargo.toml`; the release

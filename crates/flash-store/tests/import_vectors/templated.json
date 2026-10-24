@@ -1,0 +1,137 @@
+{
+  "history": [
+    [
+      1699222400000,
+      1700000000001,
+      3
+    ],
+    [
+      1699481600000,
+      1700000000001,
+      1
+    ],
+    [
+      1699568000000,
+      1700000000001,
+      4
+    ],
+    [
+      1699654400000,
+      1700000000002,
+      2
+    ]
+  ],
+  "parsed": {
+    "media": {
+      "audio": 1,
+      "images": 0,
+      "missing": 0,
+      "total_bytes": 12,
+      "unsupported": 0,
+      "video": 0
+    },
+    "messages": [
+      {
+        "args": [
+          [
+            "count",
+            1.0
+          ]
+        ],
+        "id": "import-extra-layouts"
+      },
+      {
+        "args": [
+          [
+            "count",
+            1.0
+          ]
+        ],
+        "id": "import-suspended"
+      },
+      {
+        "args": [
+          [
+            "count",
+            1.0
+          ]
+        ],
+        "id": "import-layouts-skipped"
+      },
+      {
+        "args": [
+          [
+            "images",
+            0.0
+          ],
+          [
+            "audio",
+            1.0
+          ],
+          [
+            "video",
+            0.0
+          ],
+          [
+            "unsupported",
+            0.0
+          ],
+          [
+            "mb",
+            0.0
+          ]
+        ],
+        "id": "import-media"
+      }
+    ],
+    "progress_reviews": 4,
+    "rows": [
+      {
+        "anki_card_id": 1700000000001,
+        "back": "to eat \\(x^2\\)\nReading: たべる",
+        "back_html": "to <i>eat</i> \\(x^2\\)<br><details><summary>Reading</summary>たべる</details>",
+        "cloze_index": null,
+        "cloze_text": null,
+        "deck": "Vocab::Japanese",
+        "front": "食べる  たべる",
+        "front_html": "食べる <span class=\"media-ref\" data-kind=\"audio\" data-media=\"taberu.mp3\">audio</span> <span class=\"hl-red\">たべる</span>",
+        "media": [
+          {
+            "filename": "taberu.mp3",
+            "kind": "audio"
+          }
+        ],
+        "suspended": false,
+        "tags": [
+          "verbs",
+          "n5"
+        ],
+        "type_answer": null
+      },
+      {
+        "anki_card_id": 1700000000002,
+        "back": "食べる\nたべる",
+        "back_html": "<hr>食べる <span class=\"media-ref\" data-kind=\"audio\" data-media=\"taberu.mp3\">audio</span><br>たべる",
+        "cloze_index": null,
+        "cloze_text": null,
+        "deck": "Vocab::Japanese",
+        "front": "to eat \\(x^2\\)",
+        "front_html": "to <i>eat</i> \\(x^2\\)",
+        "media": [
+          {
+            "filename": "taberu.mp3",
+            "kind": "audio"
+          }
+        ],
+        "suspended": true,
+        "tags": [
+          "verbs",
+          "n5"
+        ],
+        "type_answer": "食べる"
+      }
+    ],
+    "settings": null,
+    "skipped": 0
+  }
+}

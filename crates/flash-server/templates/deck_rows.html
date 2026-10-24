@@ -1,5 +1,5 @@
-{# The rows of a deck table, shared by the decks page, Today and a deck's
-   own list of subdecks. Rows come in tree order; a subdeck shows its own
+{# The rows of a deck table, shared by the decks page and Today. Rows
+   come in tree order; a subdeck shows its own
    name, indented under the deck it sits in, with the whole path on hover.
 
    Every row is in the page, shown or `hidden` as the page should load. A
@@ -15,10 +15,8 @@
    cookie that makes the next load come out the same. Without script the
    fold is a form that posts and the redirect brings the page back.
 
-   Unarchiving does change something. On the deck list and on a deck's
-   page it swaps its table in place; on a deck's page the page head is
-   swapped with it, because unarchiving a subdeck brings back the decks it
-   sits in, which may be the page's own deck.
+   Unarchiving does change something. On the deck list it swaps the
+   table in place; elsewhere the redirect brings the page back.
 
    Expects `decks` and `rows` (`DeckRowsCtx`). The table that includes
    this carries `data-deck-tree`. #}
@@ -30,30 +28,85 @@
       <input type="hidden" name="collapsed" value="{% if deck.collapsed %}0{% else %}1{% endif %}">
       <input type="hidden" name="back" value="{{ rows.back }}">
       {% if rows.from != 0 %}<input type="hidden" name="from" value="{{ rows.from }}">{% endif %}
-      <button type="submit" aria-expanded="{% if deck.collapsed %}false{% else %}true{% endif %}" aria-label="Subdecks of {{ deck.leaf }}" title="{% if deck.collapsed %}Show{% else %}Hide{% endif %} subdecks">
+      <button type="submit" aria-expanded="{% if deck.collapsed %}false{% else %}true{% endif %}" aria-label="{{ "decks-fold-label"|ta("name", deck.leaf) }}" title="{% if deck.collapsed %}{{ "decks-fold-show"|t }}{% else %}{{ "decks-fold-hide"|t }}{% endif %}">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
       </button>
     </form>
     {# A list where something folds keeps every name in one column. #}
     {% else if rows.folds %}<span class="deck-fold" aria-hidden="true"></span>{% endif %}
-    <a href="/decks/{{ deck.id }}" title="{{ deck.path }}">{{ deck.leaf }}</a>{% if deck.archived_at.is_some() %} <span class="archived-note">(archived)</span>{% endif %}
+    <a href="/decks/{{ deck.id }}" title="{{ deck.path }}" dir="auto">{{ deck.leaf }}</a>{% if deck.archived_at.is_some() %} <span class="archived-note">{{ "decks-archived-note"|t }}</span>{% endif %}
+    {% if let Some(g) = deck.goal %}{% if g.passed && deck.archived_at.is_none() %}
+    <div class="goal-passed">
+      <span>{{ "goal-passed"|t }}</span>
+      <form method="post" action="/decks/{{ deck.id }}/archive" style="display:inline">
+        <input type="hidden" name="back" value="{{ rows.back }}">
+        {% if rows.from != 0 %}<input type="hidden" name="from" value="{{ rows.from }}">{% endif %}
+        <button class="fl-btn fl-btn-sm fl-btn-secondary" type="submit">{{ "goal-archive"|t }}</button>
+      </form>
+      <form method="post" action="/decks/{{ deck.id }}/goal" style="display:inline">
+        <input type="hidden" name="clear" value="1">
+        <input type="hidden" name="back" value="{{ rows.back }}">
+        {% if rows.from != 0 %}<input type="hidden" name="from" value="{{ rows.from }}">{% endif %}
+        <button class="fl-btn fl-btn-sm fl-btn-ghost" type="submit">{{ "goal-keep"|t }}</button>
+      </form>
+    </div>
+    {% endif %}{% endif %}
   </td>
+  {# Every deck in study has a Goal cell: its ring, or an empty one that
+     sets a goal date through the same dialog. #}
+  <td class="goal-cell">{% if deck.archived_at.is_none() %}{% if let Some(g) = deck.goal %}
+    {% let goal_id = deck.id %}{% let goal_back = rows.back %}{% let goal_from = rows.from %}{% include "goal_mark.html" %}
+  {% else %}
+    <a class="goal goal-none" href="/decks/{{ deck.id }}/settings#goal-card" data-goal-open="{{ deck.id }}" data-goal-back="{{ rows.back }}" data-goal-from="{{ rows.from }}" aria-label="{{ "goal-set"|t }}" title="{{ "goal-set"|t }}"><svg class="goal-ring" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle class="goal-track" cx="8" cy="8" r="6.75" fill="none" stroke-width="2.5"/></svg></a>
+  {% endif %}{% endif %}</td>
   {% if deck.archived_at.is_some() %}
   <td class="num"></td>
   <td class="num"></td>
-  <td style="text-align:right">
+  <td style="text-align:end">
     {% if rows.unarchive %}
-    <form method="post" action="/decks/{{ deck.id }}/unarchive" style="display:inline"{% if rows.back == "decks" %} hx-boost="true" hx-push-url="false" hx-select="#decks-main" hx-target="#decks-main" hx-swap="outerHTML show:none"{% else if rows.back == "deck" %} hx-boost="true" hx-push-url="false" hx-select="#subdecks-body" hx-target="#subdecks-body" hx-select-oob="#deck-head" hx-swap="outerHTML show:none"{% endif %}>
+    <form method="post" action="/decks/{{ deck.id }}/unarchive" style="display:inline"{% if rows.back == "decks" %} hx-boost="true" hx-push-url="false" hx-select="#decks-main" hx-target="#decks-main" hx-swap="outerHTML show:none"{% endif %}>
       <input type="hidden" name="back" value="{{ rows.back }}">
       {% if rows.from != 0 %}<input type="hidden" name="from" value="{{ rows.from }}">{% endif %}
-      <button class="small muted fl-linkbtn" type="submit">unarchive</button>
+      <button class="small muted fl-linkbtn" type="submit">{{ "decks-unarchive"|t }}</button>
     </form>
     {% endif %}
   </td>
   {% else %}
   <td class="num">{{ deck.due_count }}</td>
   <td class="num">{{ deck.new_count }}</td>
-  <td style="text-align:right"><a class="small muted" href="/study?deck={{ deck.id }}">study</a></td>
+  <td style="text-align:end;white-space:nowrap"><span class="deck-acts"><a class="small muted" href="/study?deck={{ deck.id }}">{{ "decks-study"|t }}</a>
+    <details class="study-more deck-more">
+      <summary class="study-more-btn" aria-label="{{ "decks-more-label"|ta("name", deck.leaf) }}" title="{{ "decks-more-title"|t }}">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg>
+      </summary>
+      <div class="study-more-menu">
+        {% let preview_deck = deck.id %}{% let preview_cards = deck.card_count %}{% include "preview_menu_item.html" %}
+        <a class="study-more-item" href="/decks/{{ deck.id }}/settings#goal-card" data-goal-open="{{ deck.id }}" data-goal-back="{{ rows.back }}" data-goal-from="{{ rows.from }}">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 22V4a1 1 0 0 1 .4-.8A6 6 0 0 1 8 2c3 0 5 2 7.33 2q2 0 3.67-1.33a1 1 0 0 1 1.6.8v9.06a1 1 0 0 1-.4.8A6 6 0 0 1 16.67 14c-2.33 0-4.33-2-7.33-2a6 6 0 0 0-3.33 1"/></svg>
+          <span>{% if deck.has_goal %}{{ "goal-change"|t }}{% else %}{{ "goal-set"|t }}{% endif %}</span>
+        </a>
+        {% if deck.has_goal %}
+        <form method="post" action="/decks/{{ deck.id }}/goal">
+          <input type="hidden" name="clear" value="1">
+          <input type="hidden" name="back" value="{{ rows.back }}">
+          {% if rows.from != 0 %}<input type="hidden" name="from" value="{{ rows.from }}">{% endif %}
+          <button class="study-more-item" type="submit">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+            <span>{{ "goal-remove"|t }}</span>
+          </button>
+        </form>
+        {% endif %}
+        <a class="study-more-item" href="/decks/{{ deck.id }}/settings#limits-card">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+          <span>{{ "decks-more-new"|t }}</span>
+        </a>
+        <div class="study-more-sep" role="separator"></div>
+        <a class="study-more-item" href="/decks/{{ deck.id }}/settings">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+          <span>{{ "decks-more-settings"|t }}</span>
+        </a>
+      </div>
+    </details></span></td>
   {% endif %}
 </tr>
 {% endfor %}

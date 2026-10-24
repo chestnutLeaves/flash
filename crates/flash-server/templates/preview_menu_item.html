@@ -1,0 +1,10 @@
+{# A deck's ⋯ menu opens with its preview, when it has cards to go
+   through, then a separator. Expects `preview_deck` (the deck's id) and
+   `preview_cards` (`DeckRow::card_count`) set before the include. #}
+{% if preview_cards.clone() > 0 %}
+<a class="study-more-item preview-menu-item" href="/decks/{{ preview_deck }}/preview">
+  {% include "preview_icon.html" %}
+  <span class="preview-menu-text"><span>{{ "preview-menu"|tn(preview_cards.clone()) }}</span><span class="preview-menu-sub">{{ "preview-menu-sub"|t }}</span></span>
+</a>
+<div class="study-more-sep" role="separator"></div>
+{% endif %}

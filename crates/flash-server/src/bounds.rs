@@ -39,14 +39,20 @@ pub const FIELD_HTML: usize = flash_store::notes::MAX_FIELD_HTML;
 /// cannot match; anything longer than this makes LIKE expensive.
 pub const SEARCH: usize = 100;
 pub const TIMEZONE: usize = 64;
+/// A deck's goal date, `YYYY-MM-DD`, with room for stray spaces.
+pub const GOAL_DATE: usize = 16;
+/// A BCP 47 language tag as a client sends it ("es-MX", "zh-Hant-TW").
+pub const LOCALE: usize = flash_core::locale::MAX_TAG;
 /// Enum-shaped strings: a theme, a grading mode, a note type, a colour
 /// choice, a decision, a saved-flag.
 pub const KEYWORD: usize = 32;
-/// A local path to return to after sign-in.
-pub const NEXT_PATH: usize = 512;
-/// OAuth request parameters (RFC 6749 leaves these unbounded; a real
-/// client's are a few hundred bytes).
-pub const OAUTH_STATE: usize = 512;
+/// A local path to return to after sign-in. A signed-out connector's
+/// whole `/oauth/authorize` request lands here, so it is as long as any
+/// request `URI` may be.
+pub const NEXT_PATH: usize = URI;
+/// OAuth request parameters (RFC 6749 leaves these unbounded). A
+/// client's `state` can be a signed blob well past a kilobyte.
+pub const OAUTH_STATE: usize = 4_096;
 pub const OAUTH_SCOPE: usize = 256;
 pub const OAUTH_RESOURCE: usize = 500;
 /// RFC 7636: 43 to 128 characters of unreserved ASCII.
@@ -56,80 +62,56 @@ pub const REDIRECT_URI: usize = 2_048;
 pub const CLIENT_NAME: usize = 200;
 /// A comma-separated tag list typed into a web form.
 pub const TAG_LIST_TEXT: usize = TAGS_PER_CARD * (TAG + 1);
-/// A signed token from an identity or store provider (a JWT, a JWS
-/// transaction): three base64url segments, a few kilobytes at most.
-pub const SIGNED_TOKEN: usize = 8 * 1024;
-/// An opaque token a provider or the server minted and the client
-/// echoes back (a purchase token, a push token, a referral code).
+/// The tags a study scope names, comma-joined into one query parameter.
+pub const SCOPE_TAG_TEXT: usize = TAGS_PER_SCOPE * (TAG + 1);
+/// An opaque value a client mints and echoes back (an install id).
 pub const OPAQUE: usize = 1_024;
-/// A title of something a person names (a shared deck).
+/// A title of something a person names.
 pub const TITLE: usize = 200;
-/// Free text a person writes about something (a report reason).
+/// Free text a person writes about something (a reason).
 pub const REASON: usize = 2_000;
-/// A captcha response token (Turnstile documents up to 2,048 characters).
+/// A captcha widget's response token, up to 2,048 characters.
 pub const CAPTCHA_TOKEN: usize = 2_048;
+/// One field of a page's error report (the message, the script, the
+/// page): the page sends at most 300 characters of each, which the
+/// server shortens again before it counts them.
+pub const CLIENT_ERROR_TEXT: usize = 2_048;
+/// A page's whole error report.
+pub const CLIENT_ERROR_BODY_BYTES: usize = 8 * 1024;
+/// A browser's policy violation report: its own JSON, which carries the
+/// whole policy and a sample of the blocked code, a few to the request.
+pub const CSP_REPORT_BODY_BYTES: usize = 32 * 1024;
 /// Path plus query of any request, enforced by `middleware::uri_length`
 /// before routing: the bound on every `Path<String>` and `RawQuery`.
-pub const URI: usize = 2_048;
+/// The longest legitimate URL is a signed-out connector's sign-in link,
+/// `/login?next=` plus its whole `/oauth/authorize` request encoded, with
+/// a directory's `state` blob inside; nginx's default is the same size.
+pub const URI: usize = 8_192;
 /// A filename a client attaches to an upload, before the store shortens
 /// it to what it keeps.
 pub const FILENAME: usize = 255;
-/// What speech recognition heard: a spoken answer or a question about
-/// the card. A minute of talking is a few hundred bytes.
-pub const TRANSCRIPT: usize = 2_000;
-/// A spoken answer as a recording, decoded: half a minute of 16 kHz
-/// 16-bit WAV is under a megabyte, and a compressed clip a tenth of that.
-pub const VOICE_AUDIO_BYTES: usize = 1_500_000;
-/// The same recording as the base64 text a request carries.
-pub const VOICE_AUDIO_B64: usize = 2_048_000;
-/// A whole spoken-answer request: the base64 above plus form encoding,
-/// which spells three of the alphabet's characters as three bytes each.
-pub const VOICE_BODY_BYTES: usize = 3 * 1024 * 1024;
-/// A recording's type as the client names it (`audio/webm;codecs=opus`).
-pub const AUDIO_MIME: usize = 64;
-/// The recording types the grader is handed, matched after the type is
-/// lower-cased and its parameters dropped. Independent of the source
-/// kinds card generation takes: an eight-second answer is not a lecture.
-pub const VOICE_AUDIO_MIMES: &[&str] = &[
-    "audio/wav",
-    "audio/webm",
-    "audio/mp4",
-    "audio/ogg",
-    "audio/mpeg",
-    "audio/x-m4a",
-];
-/// The free-text steering a person gives card generation.
-pub const AI_INSTRUCTION: usize = 2_000;
-/// Text pasted as a generation source. Larger than the word cap needs
-/// (a long passage in a wide script), so the cap's own sentence is what
-/// the person reads rather than a byte count.
-pub const AI_TEXT_SOURCE: usize = 200_000;
-/// A video link handed to generation.
-pub const YOUTUBE_URL: usize = 512;
-
-/// What one generation may read. Past these the preflight says no
-/// before any model is called: a book is not a study session, and a
-/// two-hour recording costs more than a month of a free account.
-pub const AI_MAX_WORDS: u32 = 15_000;
-pub const AI_MAX_IMAGES: u32 = 20;
-pub const AI_MAX_PAGES: u32 = 150;
-pub const AI_MAX_MEDIA_SECONDS: u32 = 90 * 60;
-/// What a whole set of sources may weigh together: held in memory
-/// while the model reads it.
-pub const AI_MAX_SET_BYTES: u64 = 200 * 1024 * 1024;
-/// Sources in one generation, and sources a person may have waiting in
-/// the composer before generating from any of them.
-pub const AI_SOURCES_PER_JOB: usize = 40;
-pub const AI_UNATTACHED_SOURCES_PER_USER: u32 = 40;
-/// A comma-joined list of source ids, as a web form carries one.
-pub const SOURCE_ID_LIST: usize = AI_SOURCES_PER_JOB * 21;
+/// Ids the server minted that a client echoes back in one request, as a
+/// JSON list or, from a web form, comma-joined into one field.
+pub const IDS_PER_CALL: usize = 20;
+pub const ID_LIST: usize = IDS_PER_CALL * 21;
 
 /// Per-request count limits.
 pub const TAGS_PER_CARD: usize = flash_store::MAX_TAGS_PER_CARD;
+/// Tags one study scope may name; more than this is a filter nobody
+/// picked by hand, and every extra name costs the queue a lookup.
+pub const TAGS_PER_SCOPE: usize = flash_core::queue::MAX_SCOPE_TAGS;
 pub const CARDS_PER_CALL: usize = 500;
+/// Decks one deck page's filter names (`own` or a subdeck's id each).
+pub const DECKS_PER_FILTER: usize = 50;
+pub const DECK_FILTER_TEXT: usize = DECKS_PER_FILTER * 21;
+/// Card ids one action on a deck page's cards names: the store's cap,
+/// comma-joined.
+pub const BULK_ID_LIST: usize = flash_store::MAX_BULK_CARDS * 21;
+/// What an Undo carries back: the cards an action changed and, for a
+/// move or a tag, where each was or which tag. An action whose record
+/// is larger offers no Undo.
+pub const UNDO_RECORD: usize = 512 * 1024;
 pub const REDIRECT_URIS_PER_CLIENT: usize = 10;
-/// Draft ids named in one keep call; a job holds sixty drafts at most.
-pub const DRAFT_IDS_PER_CALL: usize = 500;
 
 /// Per-account limits on stored state, enforced where the row is
 /// created: decks in the store's `create_deck`, so an import naming a
@@ -138,15 +120,16 @@ pub const DRAFT_IDS_PER_CALL: usize = 500;
 pub const DECKS_PER_USER: u32 = flash_store::MAX_DECKS_PER_USER;
 pub const MEDIA_OBJECTS_PER_USER: u64 = 20_000;
 
-fn too_long<E: Error>(what: &str, max: usize) -> E {
+pub fn too_long<E: Error>(what: &str, max: usize) -> E {
     E::custom(format!("{what} is longer than {max} bytes"))
 }
 
-fn too_many<E: Error>(what: &str, max: usize) -> E {
+pub fn too_many<E: Error>(what: &str, max: usize) -> E {
     E::custom(format!("more than {max} {what}"))
 }
 
-fn text<'de, D: Deserializer<'de>>(d: D, what: &str, max: usize) -> Result<String, D::Error> {
+/// A string of at most `max` bytes, named `what` when refused.
+pub fn text<'de, D: Deserializer<'de>>(d: D, what: &str, max: usize) -> Result<String, D::Error> {
     let s = String::deserialize(d)?;
     if s.len() > max {
         return Err(too_long(what, max));
@@ -154,7 +137,8 @@ fn text<'de, D: Deserializer<'de>>(d: D, what: &str, max: usize) -> Result<Strin
     Ok(s)
 }
 
-fn opt_text<'de, D: Deserializer<'de>>(
+/// `text`, when the field may be absent.
+pub fn opt_text<'de, D: Deserializer<'de>>(
     d: D,
     what: &str,
     max: usize,
@@ -215,17 +199,13 @@ text_hook!(keyword, "value", KEYWORD);
 text_hook!(tag_list_text, "tag list", TAG_LIST_TEXT);
 text_hook!(redirect_uri, "redirect_uri", REDIRECT_URI);
 text_hook!(client_name, "client_name", CLIENT_NAME);
-text_hook!(signed_token, "token", SIGNED_TOKEN);
-text_hook!(opaque, "token", OPAQUE);
 text_hook!(title, "title", TITLE);
 text_hook!(reason, "reason", REASON);
 text_hook!(description, "description", DECK_DESCRIPTION);
 text_hook!(captcha_token, "captcha token", CAPTCHA_TOKEN);
 text_hook!(next_path, "next", NEXT_PATH);
-text_hook!(transcript, "transcript", TRANSCRIPT);
-text_hook!(instruction, "instruction", AI_INSTRUCTION);
-text_hook!(audio_mime, "audio type", AUDIO_MIME);
-text_hook!(audio_b64, "audio", VOICE_AUDIO_B64);
+text_hook!(timezone, "timezone", TIMEZONE);
+text_hook!(filename, "file name", FILENAME);
 
 opt_text_hook!(opt_deck_name, "deck name", DECK_NAME);
 opt_text_hook!(opt_deck_description, "deck description", DECK_DESCRIPTION);
@@ -233,8 +213,10 @@ opt_text_hook!(opt_tag, "tag", TAG);
 opt_text_hook!(opt_password, "password", PASSWORD);
 opt_text_hook!(opt_token, "token", TOKEN);
 opt_text_hook!(opt_typed_answer, "typed answer", TYPED_ANSWER);
+opt_text_hook!(opt_card_side, "card side", CARD_SIDE);
 opt_text_hook!(opt_search, "search", SEARCH);
 opt_text_hook!(opt_timezone, "timezone", TIMEZONE);
+opt_text_hook!(opt_locale, "locale", LOCALE);
 opt_text_hook!(opt_keyword, "value", KEYWORD);
 opt_text_hook!(opt_next_path, "next", NEXT_PATH);
 opt_text_hook!(opt_oauth_state, "state", OAUTH_STATE);
@@ -244,43 +226,57 @@ opt_text_hook!(opt_code_challenge, "code_challenge", CODE_CHALLENGE);
 opt_text_hook!(opt_code_verifier, "code_verifier", CODE_VERIFIER);
 opt_text_hook!(opt_redirect_uri, "redirect_uri", REDIRECT_URI);
 opt_text_hook!(opt_client_name, "client_name", CLIENT_NAME);
-opt_text_hook!(opt_signed_token, "token", SIGNED_TOKEN);
 opt_text_hook!(opt_opaque, "token", OPAQUE);
 opt_text_hook!(opt_display_name, "name", DISPLAY_NAME);
 opt_text_hook!(opt_email, "email address", EMAIL);
-opt_text_hook!(opt_instruction, "instruction", AI_INSTRUCTION);
 opt_text_hook!(opt_field_html, "field", FIELD_HTML);
-opt_text_hook!(text_source, "text", AI_TEXT_SOURCE);
-opt_text_hook!(youtube_url, "youtube_url", YOUTUBE_URL);
-opt_text_hook!(opt_transcript, "transcript", TRANSCRIPT);
-opt_text_hook!(opt_audio_mime, "audio type", AUDIO_MIME);
-opt_text_hook!(opt_audio_b64, "audio", VOICE_AUDIO_B64);
+opt_text_hook!(opt_client_error_text, "error report", CLIENT_ERROR_TEXT);
+opt_text_hook!(opt_id_list, "ids", ID_LIST);
+opt_text_hook!(opt_scope_tag_text, "tags", SCOPE_TAG_TEXT);
+opt_text_hook!(opt_goal_date, "goal date", GOAL_DATE);
+opt_text_hook!(opt_deck_filter, "decks", DECK_FILTER_TEXT);
+opt_text_hook!(opt_tag_list_text, "tags", TAG_LIST_TEXT);
+opt_text_hook!(opt_bulk_ids, "ids", BULK_ID_LIST);
+opt_text_hook!(opt_undo_record, "undo", UNDO_RECORD);
 
-/// The source ids a generation reads, at most `AI_SOURCES_PER_JOB`.
-pub fn source_ids<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<i64>, D::Error> {
+/// A goal date a client may leave out (keep the one stored: an app from
+/// before goals), send as null (clear it) or send: absent is None, null
+/// `Some(None)`. Pair it with `#[serde(default)]`.
+pub fn present_goal_date<'de, D: Deserializer<'de>>(
+    d: D,
+) -> Result<Option<Option<String>>, D::Error> {
+    opt_text(d, "goal date", GOAL_DATE).map(Some)
+}
+
+/// Ids a client echoes back in one request.
+pub fn ids<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<i64>, D::Error> {
     let v = Vec::<i64>::deserialize(d)?;
-    if v.len() > AI_SOURCES_PER_JOB {
-        return Err(too_many("sources", AI_SOURCES_PER_JOB));
+    if v.len() > IDS_PER_CALL {
+        return Err(too_many("ids", IDS_PER_CALL));
     }
     Ok(v)
-}
-
-/// The same list as a web form sends it: one comma-joined field.
-pub fn source_id_list<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
-    text(d, "source_ids", SOURCE_ID_LIST)
-}
-
-/// The draft ids a keep call names: absent means every open draft.
-pub fn opt_draft_ids<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Vec<i64>>, D::Error> {
-    match Option::<Vec<i64>>::deserialize(d)? {
-        Some(v) if v.len() > DRAFT_IDS_PER_CALL => Err(too_many("draft ids", DRAFT_IDS_PER_CALL)),
-        other => Ok(other),
-    }
 }
 
 /// A card's tags: at most `TAGS_PER_CARD`, each at most `TAG` bytes.
 pub fn tags<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
     texts(d, "tags", TAGS_PER_CARD, TAG)
+}
+
+/// The tags a study scope names: at most `TAGS_PER_SCOPE`, each at most
+/// `TAG` bytes.
+pub fn scope_tags<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
+    texts(d, "tags", TAGS_PER_SCOPE, TAG)
+}
+
+pub fn opt_scope_tags<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Vec<String>>, D::Error> {
+    match Option::<Vec<String>>::deserialize(d)? {
+        None => Ok(None),
+        Some(v) => scope_tags(serde::de::value::SeqDeserializer::<_, D::Error>::new(
+            v.into_iter()
+                .map(serde::de::value::StringDeserializer::<D::Error>::new),
+        ))
+        .map(Some),
+    }
 }
 
 pub fn opt_tags<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Vec<String>>, D::Error> {
@@ -298,6 +294,51 @@ pub fn opt_tags<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Vec<String>>, 
     }
 }
 
+/// A deck's language hints, before they are checked against the known
+/// codes (`deck_languages::LANGUAGE_CODES`): a short list of short codes
+/// (twice the stored cap, so a list with duplicates still reaches the
+/// check that names the problem).
+pub fn language_hints<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
+    texts(
+        d,
+        "language hints",
+        crate::deck_languages::MAX_LANGUAGE_HINTS * 2,
+        KEYWORD,
+    )
+}
+
+/// A side's speech blocks: at most `flash_core::speech::MAX_BLOCKS` (each
+/// block bounds its own fields).
+pub fn opt_speech<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
+    d: D,
+) -> Result<Option<Vec<T>>, D::Error> {
+    match Option::<Vec<T>>::deserialize(d)? {
+        Some(v) if v.len() > flash_core::speech::MAX_BLOCKS => {
+            Err(too_many("speech blocks", flash_core::speech::MAX_BLOCKS))
+        }
+        other => Ok(other),
+    }
+}
+
+/// The languages a deck is declared with: a short list of short tags.
+pub fn opt_languages<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Vec<String>>, D::Error> {
+    match Option::<Vec<String>>::deserialize(d)? {
+        None => Ok(None),
+        Some(v) => {
+            if v.len() > crate::deck_languages::MAX_LANGUAGE_HINTS * 2 {
+                return Err(too_many(
+                    "languages",
+                    crate::deck_languages::MAX_LANGUAGE_HINTS * 2,
+                ));
+            }
+            if v.iter().any(|s| s.len() > KEYWORD) {
+                return Err(too_long("language", KEYWORD));
+            }
+            Ok(Some(v))
+        }
+    }
+}
+
 /// A client registration's redirect URIs.
 pub fn redirect_uris<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
     texts(d, "redirect_uris", REDIRECT_URIS_PER_CLIENT, REDIRECT_URI)
@@ -309,6 +350,35 @@ pub fn cards<'de, D: Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<Vec
     let v = Vec::<T>::deserialize(d)?;
     if v.len() > CARDS_PER_CALL {
         return Err(too_many("cards in one call", CARDS_PER_CALL));
+    }
+    Ok(v)
+}
+
+/// Most bytes a JSON value taken whole may take once encoded: room for
+/// a card with both rich sides and its cloze text at their own bounds.
+pub const JSON_VALUE: usize = 256 * 1024;
+/// Most numbers in one list of parameters.
+pub const NUMBERS_PER_FIELD: usize = 64;
+
+/// A JSON value taken whole, for a handler that reads it through its
+/// own bounded types once it knows which (a downstream extension's
+/// changes carry one per kind), at most `JSON_VALUE` bytes encoded.
+pub fn opt_json<'de, D: Deserializer<'de>>(d: D) -> Result<Option<serde_json::Value>, D::Error> {
+    let v = Option::<serde_json::Value>::deserialize(d)?;
+    if let Some(value) = &v {
+        let size = serde_json::to_vec(value).map_or(usize::MAX, |b| b.len());
+        if size > JSON_VALUE {
+            return Err(too_long("value", JSON_VALUE));
+        }
+    }
+    Ok(v)
+}
+
+/// A list of at most `NUMBERS_PER_FIELD` numbers (scheduler parameters).
+pub fn opt_numbers<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Vec<f32>>, D::Error> {
+    let v = Option::<Vec<f32>>::deserialize(d)?;
+    if v.as_ref().is_some_and(|n| n.len() > NUMBERS_PER_FIELD) {
+        return Err(too_many("numbers", NUMBERS_PER_FIELD));
     }
     Ok(v)
 }

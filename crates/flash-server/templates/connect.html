@@ -1,84 +1,138 @@
 {% import "_public_head.html" as head %}
 <!doctype html>
-<html lang="en" data-theme="{{ theme }}">
+<html lang="{{ ""|html_lang }}" dir="{{ ""|html_dir }}" data-script="{{ ""|html_script }}" data-theme="{{ theme }}">
 <head>
 {% call head::meta(
   site,
-  "Connect your AI - Flash",
-  "Attach Flash to Claude, ChatGPT, Grok, or Claude Code in about a minute.",
+  "connect-title"|t,
+  "connect-description"|t,
   "/connect",
-  "Attach Flash to Claude, ChatGPT, Grok, or Claude Code in about a minute."
+  "connect-description"|t
 ) %}{% endcall %}
-<script src="/static/ui.js?v=43" defer></script>
+<script src="/static/ui.js?v=58" defer></script>
 {{ head_html|safe }}
 </head>
 <body>
 <div class="ld-page">
 
+{{ ""|offer_link|safe }}
 <header class="ld-wrap ld-header">
-  <a class="ld-brand cn-brand-link" href="/">
+  <a class="ld-brand cn-brand-link" href="{{ "/"|href }}">
     <svg viewBox="0 0 64 64" fill="none" aria-hidden="true"><g transform="translate(32 32) scale(1.25) translate(-32 -32)"><g stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M47.5 27.9 51.8 26.7 M51.8 26.7 51.6 17.2 M51.8 26.7 56.3 35"></path><path d="M36.1 16.5 37.3 12.2 M37.3 12.2 29 7.7 M37.3 12.2 46.7 12.4"></path><path d="M20.7 20.7 17.5 17.5 M17.5 17.5 9.4 22.4 M17.5 17.5 22.4 9.4"></path><path d="M16.5 36.1 12.2 37.3 M12.2 37.3 12.4 46.7 M12.2 37.3 7.7 29"></path><path d="M27.9 47.5 26.7 51.8 M26.7 51.8 35 56.3 M26.7 51.8 17.2 51.6"></path><path d="M43.3 43.3 46.5 46.5 M46.5 46.5 54.6 41.6 M46.5 46.5 41.6 54.6"></path></g><path fill="currentColor" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round" d="M49.4 27.3 Q38.7 25.3 36.7 14.6 Q29.5 22.8 19.3 19.3 Q22.8 29.5 14.6 36.7 Q25.3 38.7 27.3 49.4 Q34.5 41.2 44.7 44.7 Q41.2 34.5 49.4 27.3 Z"></path></g></svg>
     <span class="ld-brand-name">Flash</span>
   </a>
   <div class="ld-header-actions">
     {% if signed_in %}
-    <a class="fl-btn fl-btn-ghost" href="/">Back to Flash</a>
+    <a class="fl-btn fl-btn-ghost" href="/">{{ "connect-back"|t }}</a>
     {% else %}
-    <a class="fl-btn fl-btn-ghost" href="/login">Log in</a>
+    <a class="fl-btn fl-btn-ghost" href="{{ "/login"|href }}">{{ "connect-log-in"|t }}</a>
     {% endif %}
   </div>
 </header>
 
 <main class="ld-wrap cn-main">
   <section class="cn-hero">
-    <h1 class="cn-title">Connect your AI</h1>
-    <p class="ld-sub">One click below, then your AI walks you through the rest, about a minute. You'll sign in to Flash with your passkey along the way.</p>
+    <h1 class="cn-title">{{ "connect-heading"|t }}</h1>
+    <p class="ld-sub">{{ "connect-sub"|t }}</p>
   </section>
 
   <div class="cn-stack">
     <div class="fl-card fl-card-pad cn-card">
       <div>
-        <div class="cn-card-title">Claude</div>
-        <div class="cn-card-body">Opens a Claude chat that guides you click by click, then lists your decks to prove it worked.</div>
+        <div class="cn-card-title">{{ "connect-step-copy"|t }}</div>
+        <div class="cn-card-body">{{ "connect-step-copy-body"|t }}</div>
       </div>
-      <div class="cn-card-actions">
-        <a class="fl-btn fl-btn-primary fl-btn-lg" target="_blank" rel="noopener" href="https://claude.ai/new?q={{ site.connect_prompt()|urlencode_strict }}">Set up with Claude</a>
-        <a class="cn-alt" href="claude://claude.ai/new?q={{ site.connect_prompt()|urlencode_strict }}">open in the desktop app instead</a>
+      <div translate="no" class="token-box cn-token" id="mcp-url">{{ site.mcp_url() }}</div>
+      <div><button type="button" class="fl-btn fl-btn-sm fl-btn-primary" data-copy-target="mcp-url">{{ "connect-copy-url"|t }}</button></div>
+    </div>
+
+    <div class="fl-card fl-card-pad cn-card">
+      <div>
+        <div class="cn-card-title">{{ "connect-step-add"|t }}</div>
+        <div class="cn-card-body">{{ "connect-step-add-body"|t }}</div>
+      </div>
+      <div class="cn-app">
+        <div class="cn-app-name">Claude</div>
+        <ol class="cn-steps">
+          <li>{{ "connect-claude-1-html"|t|safe }}</li>
+          <li>{{ "connect-claude-2-html"|t|safe }}</li>
+          <li>{{ "connect-claude-3-html"|t|safe }}</li>
+          <li>{{ "connect-sign-in"|t }}</li>
+          <li>{{ "connect-claude-5-html"|t|safe }}</li>
+        </ol>
+        <div class="cn-note">{{ "connect-claude-note"|t }}</div>
+      </div>
+      <div class="cn-app">
+        <div class="cn-app-name">ChatGPT</div>
+        {% if !app_steps_html.is_empty() %}
+        {{ app_steps_html|safe }}
+        {% else %}
+        <div class="cn-warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 3.4 1.7 18a2 2 0 0 0 1.7 3h17.2a2 2 0 0 0 1.7-3L13.7 3.4a2 2 0 0 0-3.4 0Z"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg><div>{{ "connect-chatgpt-warn-html"|t|safe }}</div></div>
+        <ol class="cn-steps">
+          <li>{{ "connect-chatgpt-1-html"|t|safe }}</li>
+          <li>{{ "connect-chatgpt-2"|t }}</li>
+          <li>{{ "connect-chatgpt-3-html"|t|safe }}</li>
+          <li>{{ "connect-chatgpt-4-html"|t|safe }}</li>
+          <li>{{ "connect-chatgpt-5-html"|t|safe }}</li>
+        </ol>
+        {% endif %}
+      </div>
+      <div class="cn-app">
+        <div class="cn-app-name">Grok</div>
+        <ol class="cn-steps">
+          <li>{{ "connect-grok-1-html"|t|safe }}</li>
+          <li>{{ "connect-grok-2-html"|t|safe }}</li>
+          <li>{{ "connect-grok-3"|t }}</li>
+        </ol>
+      </div>
+      <div class="cn-app">
+        <div class="cn-app-name">Mistral</div>
+        <ol class="cn-steps">
+          <li>{{ "connect-mistral-1-html"|t|safe }}</li>
+          <li>{{ "connect-mistral-2-html"|t|safe }}</li>
+          <li>{{ "connect-sign-in"|t }}</li>
+          <li>{{ "connect-mistral-4-html"|t|safe }}</li>
+        </ol>
+        <div class="cn-note">{{ "connect-mistral-note"|t }}</div>
+      </div>
+      <div class="cn-app">
+        <div class="cn-app-name">Gemini</div>
+        <ol class="cn-steps">
+          <li>{{ "connect-gemini-1-html"|t|safe }}</li>
+          <li>{{ "connect-gemini-2-html"|t|safe }}</li>
+          <li>{{ "connect-gemini-3-html"|t|safe }}</li>
+          <li>{{ "connect-gemini-4-html"|t|safe }}</li>
+        </ol>
+        <div class="cn-note">{{ "connect-gemini-note"|t }}</div>
       </div>
     </div>
 
     <div class="fl-card fl-card-pad cn-card">
       <div>
-        <div class="cn-card-title">ChatGPT</div>
-        <div class="cn-card-body">Same guided setup in a ChatGPT chat. Custom apps need a paid plan (Plus or higher) with Developer&nbsp;mode turned on.</div>
+        <div class="cn-card-title">{{ "connect-claude-code"|t }}</div>
+        <div class="cn-card-body">{{ "connect-claude-code-body-html"|t|safe }}</div>
       </div>
-      <div class="cn-card-actions">
-        <a class="fl-btn fl-btn-secondary fl-btn-lg" target="_blank" rel="noopener" href="https://chatgpt.com/?q={{ site.connect_prompt()|urlencode_strict }}">Set up with ChatGPT</a>
-      </div>
+      {# The commands are typed as they are, in any language. #}
+      <div translate="no" class="token-box cn-token" id="cc-cmd">{{ "claude mcp add --transport http flash" }} {{ site.mcp_url() }}</div>
+      <div><button type="button" class="fl-btn fl-btn-sm fl-btn-secondary" data-copy-target="cc-cmd">{{ "connect-copy-command"|t }}</button></div>
     </div>
 
     <div class="fl-card fl-card-pad cn-card">
       <div>
-        <div class="cn-card-title">Grok</div>
-        <div class="cn-card-body">On grok.com, open <strong>Connectors &rarr; New Connector &rarr; Custom</strong>, paste the URL below, and sign in with your passkey. Works in Grok's voice mode too.</div>
+        <div class="cn-card-title">{{ "connect-codex"|t }}</div>
+        <div class="cn-card-body">{{ "connect-codex-body"|t }}</div>
       </div>
-      <div class="token-box cn-token" id="grok-url">{{ site.mcp_url() }}</div>
-      <div><button type="button" class="fl-btn fl-btn-sm fl-btn-secondary" data-copy-target="grok-url">Copy URL</button></div>
+      <div translate="no" class="token-box cn-token" id="cx-add">{{ "codex mcp add flash --url" }} {{ site.mcp_url() }}</div>
+      <div><button type="button" class="fl-btn fl-btn-sm fl-btn-secondary" data-copy-target="cx-add">{{ "connect-copy-command"|t }}</button></div>
+      <div translate="no" class="token-box cn-token" id="cx-login">{{ "codex mcp login flash" }}</div>
+      <div><button type="button" class="fl-btn fl-btn-sm fl-btn-secondary" data-copy-target="cx-login">{{ "connect-copy-command"|t }}</button></div>
     </div>
 
     <div class="fl-card fl-card-pad cn-card">
       <div>
-        <div class="cn-card-title">Claude Code</div>
-        <div class="cn-card-body">Paste this in your terminal, then run <span class="cn-mono">/mcp</span> inside Claude Code to sign in.</div>
+        <div class="cn-card-title">{{ "connect-other"|t }}</div>
+        <div class="cn-card-body">{{ "connect-other-body"|t }}</div>
       </div>
-      <div class="token-box cn-token" id="cc-cmd">claude mcp add --transport http flash {{ site.mcp_url() }}</div>
-      <div><button type="button" class="fl-btn fl-btn-sm fl-btn-secondary" data-copy-target="cc-cmd">Copy command</button></div>
-    </div>
-
-    <div class="cn-manual">
-      <p class="cn-card-body">Prefer to do it yourself? In Claude: Settings &rarr; Connectors &rarr; Add custom connector. In ChatGPT: Settings &rarr; Plugins &rarr; <strong>+</strong>. In Grok: Connectors &rarr; New Connector &rarr; Custom. Either way, paste:</p>
-      <div class="token-box cn-token" id="mcp-url">{{ site.mcp_url() }}</div>
-      <div><button type="button" class="fl-btn fl-btn-sm fl-btn-secondary" data-copy-target="mcp-url">Copy URL</button></div>
     </div>
   </div>
 </main>
@@ -89,7 +143,7 @@
       <svg viewBox="0 0 64 64" fill="none" aria-hidden="true"><g transform="translate(32 32) scale(1.25) translate(-32 -32)"><g stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M47.5 27.9 51.8 26.7 M51.8 26.7 51.6 17.2 M51.8 26.7 56.3 35"></path><path d="M36.1 16.5 37.3 12.2 M37.3 12.2 29 7.7 M37.3 12.2 46.7 12.4"></path><path d="M20.7 20.7 17.5 17.5 M17.5 17.5 9.4 22.4 M17.5 17.5 22.4 9.4"></path><path d="M16.5 36.1 12.2 37.3 M12.2 37.3 12.4 46.7 M12.2 37.3 7.7 29"></path><path d="M27.9 47.5 26.7 51.8 M26.7 51.8 35 56.3 M26.7 51.8 17.2 51.6"></path><path d="M43.3 43.3 46.5 46.5 M46.5 46.5 54.6 41.6 M46.5 46.5 41.6 54.6"></path></g><path fill="currentColor" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round" d="M49.4 27.3 Q38.7 25.3 36.7 14.6 Q29.5 22.8 19.3 19.3 Q22.8 29.5 14.6 36.7 Q25.3 38.7 27.3 49.4 Q34.5 41.2 44.7 44.7 Q41.2 34.5 49.4 27.3 Z"></path></g></svg>
       <span class="ld-footer-name">Flash</span>
     </div>
-    <div class="ld-mono-dim">{{ site.host() }} &middot; free</div>
+    <div class="ld-mono-dim">{{ "connect-footer"|ta("host", site.host()) }}</div>
   </div>
 </footer>
 

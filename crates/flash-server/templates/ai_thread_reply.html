@@ -1,9 +1,0 @@
-{# What a send or a poll of the thread answers with: the thread block,
-   and, once no pass is running, the review body out of band so the
-   changed drafts and the model's reply land in one swap. #}
-{% include "ai_thread.html" %}
-{% if let Some(review) = review %}
-<div id="review" style="display:contents" hx-swap-oob="true">
-{% include "ai_review_body.html" %}
-</div>
-{% endif %}

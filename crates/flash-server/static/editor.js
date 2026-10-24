@@ -10,420 +10,546 @@
 (function () {
   "use strict";
 
-  var MAX_UPLOAD = 100 * 1024 * 1024;
-  var LABELS = {
-    basic: ["Front", "Back", "Question", "Answer"],
-    basic_reversed: ["Front", "Back", "Question", "Answer"],
-    basic_typed: ["Front", "Back", "Question", "Answer to type"],
-    cloze: ["Text", "Extra", "Sentence with {{c1::blanks}}", "Shown with the answer (optional)"],
-  };
+  /**
+   * @param {string} id
+   * @param {Record<string, string | number>} [vars]
+   * @returns {string}
+   */
+  const tx = (id, vars) => (window.flashT === undefined ? id : window.flashT(id, vars));
 
-  function escapeHtml(s) {
-    return String(s)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
+  const MAX_UPLOAD = 100 * 1024 * 1024;
+  /** @typedef {readonly [front: string, back: string, frontHint: string, backHint: string]} Labels */
+  /** @type {Labels} */
+  const BASIC = ["js-editor-front", "js-editor-back", "js-editor-question", "js-editor-answer"];
+  /** @type {ReadonlyMap<string, Labels>} */
+  const LABELS = new Map([
+    ["basic", BASIC],
+    ["basic_reversed", BASIC],
+    ["basic_typed", ["js-editor-front", "js-editor-back", "js-editor-question", "js-editor-answer-to-type"]],
+    ["cloze", ["js-editor-text", "js-editor-extra", "js-editor-cloze-hint", "js-editor-extra-hint"]],
+  ]);
+
+  /**
+   * The browser's editing commands. Deprecated as an API, but there is no
+   * standard replacement that edits a contenteditable field and keeps its
+   * undo history, so every editor on the web still uses it: here, through
+   * this one function.
+   * @param {string} command
+   * @param {string} [value]
+   */
+  function exec(command, value) {
+    // eslint-disable-next-line @typescript-eslint/no-deprecated -- contenteditable has no other way to edit that keeps undo
+    return document.execCommand(command, false, value);
   }
+
+  const { all, maybe, composing, postMedia } = window.flashDom;
+
+  /** @param {string} s */
+  function escapeHtml(s) {
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+  /** @param {string} t */
   function textToHtml(t) {
     return escapeHtml(t).replace(/\r?\n/g, "<br>");
   }
 
-  // Pasted HTML: keep structure, drop every attribute (styles, classes,
-  // handlers, external srcs). The server sanitizes again regardless.
+  /**
+   * Pasted HTML: keep structure, drop every attribute (styles, classes,
+   * handlers, external srcs). The server sanitizes again regardless.
+   * @param {string} html
+   */
   function cleanHtml(html) {
-    var tpl = document.createElement("template");
+    const tpl = document.createElement("template");
     tpl.innerHTML = html;
-    var walker = document.createTreeWalker(tpl.content, NodeFilter.SHOW_ELEMENT);
-    var nodes = [];
-    while (walker.nextNode()) nodes.push(walker.currentNode);
-    nodes.forEach(function (el) {
-      var tag = el.tagName.toLowerCase();
+    const walker = document.createTreeWalker(tpl.content, NodeFilter.SHOW_ELEMENT);
+    /** @type {Element[]} */
+    const nodes = [];
+    while (walker.nextNode() !== null) {
+      if (walker.currentNode instanceof Element) nodes.push(walker.currentNode);
+    }
+    for (const el of nodes) {
+      const tag = el.tagName.toLowerCase();
       if (tag === "script" || tag === "style" || tag === "meta" || tag === "link" || tag === "iframe") {
         el.remove();
-        return;
+        continue;
       }
-      var keepSrc = (tag === "img" || tag === "audio" || tag === "video") && /^\/media\/\d+$/.test(el.getAttribute("src") || "");
-      if ((tag === "img" || tag === "audio" || tag === "video") && !keepSrc) {
+      const media = tag === "img" || tag === "audio" || tag === "video";
+      const keepSrc = media && /^\/media\/\d+$/.test(el.getAttribute("src") ?? "");
+      if (media && !keepSrc) {
         el.remove();
-        return;
+        continue;
       }
-      Array.prototype.slice.call(el.attributes).forEach(function (a) {
-        if (keepSrc && (a.name === "src" || a.name === "controls")) return;
+      for (const a of Array.from(el.attributes)) {
+        if (keepSrc && (a.name === "src" || a.name === "controls")) continue;
         el.removeAttribute(a.name);
-      });
-    });
+      }
+    }
     return tpl.innerHTML;
   }
 
+  /**
+   * Where a drop lands, as a collapsed range inside `within`, or null.
+   * caretPositionFromPoint is the standard; Safari before 18.4 has only
+   * caretRangeFromPoint.
+   * @param {number} x
+   * @param {number} y
+   * @param {Node} within
+   */
   function caretFromPoint(x, y, within) {
-    var range = null;
-    if (document.caretRangeFromPoint) {
-      range = document.caretRangeFromPoint(x, y);
-    } else if (document.caretPositionFromPoint) {
-      var pos = document.caretPositionFromPoint(x, y);
-      if (pos) {
+    /** @type {{ caretPositionFromPoint?: Document["caretPositionFromPoint"], caretRangeFromPoint?: (x: number, y: number) => Range | null }} */
+    const doc = document;
+    /** @type {Range | null} */
+    let range = null;
+    if (doc.caretPositionFromPoint !== undefined) {
+      const pos = doc.caretPositionFromPoint(x, y);
+      if (pos !== null) {
         range = document.createRange();
         range.setStart(pos.offsetNode, pos.offset);
         range.collapse(true);
       }
+    } else if (doc.caretRangeFromPoint !== undefined) {
+      range = doc.caretRangeFromPoint(x, y);
     }
-    if (range && !within.contains(range.startContainer)) return null;
+    if (range !== null && !within.contains(range.startContainer)) return null;
     return range;
   }
 
+  /** @param {Element} el */
   function unwrap(el) {
-    var parent = el.parentNode;
-    while (el.firstChild) parent.insertBefore(el.firstChild, el);
+    const parent = el.parentNode;
+    if (parent === null) return;
+    while (el.firstChild !== null) parent.insertBefore(el.firstChild, el);
     parent.removeChild(el);
   }
 
+  /** @param {Range} range */
+  function select(range) {
+    const sel = window.getSelection();
+    if (sel === null) return;
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+
+  /** @param {HTMLElement} root */
   function initEditor(root) {
-    if (root.dataset.editorInit) return;
-    root.dataset.editorInit = "1";
-    var form = root.closest("form");
-    var fields = Array.prototype.slice.call(root.querySelectorAll(".editor-field"));
-    var typeSel = root.querySelector("[data-editor-type]");
-    var status = root.querySelector("[data-editor-status]");
-    var fileInput = root.querySelector("[data-editor-file]");
-    var lastField = fields[0];
+    if (root.dataset["editorInit"] !== undefined) return;
+    root.dataset["editorInit"] = "1";
+    const form = root.closest("form");
+    const fields = all(root, ".editor-field", HTMLElement);
+    const found = fields[0];
+    if (found === undefined) return;
+    const first = found;
+    const typeSel = maybe(root, "[data-editor-type]", HTMLSelectElement);
+    const status = maybe(root, "[data-editor-status]", HTMLElement);
+    const fileInput = maybe(root, "[data-editor-file]", HTMLInputElement);
+    let lastField = first;
 
-    try { document.execCommand("styleWithCSS", false, false); } catch (e) { /* older engines */ }
+    try {
+      exec("styleWithCSS", "false");
+    } catch {
+      // Older engines.
+    }
 
-    function hiddenFor(field) {
-      return root.querySelector('input[name="' + field.dataset.field + '_html"]');
-    }
-    function sourceFor(field) {
-      return root.querySelector('[data-source-for="' + field.dataset.field + '"]');
-    }
+    /** @param {HTMLElement} field */
+    const nameOf = (field) => field.dataset["field"] ?? "";
+    /** @param {HTMLElement} field */
+    const hiddenFor = (field) => maybe(root, `input[name="${nameOf(field)}_html"]`, HTMLInputElement);
+    /** @param {HTMLElement} field */
+    const sourceFor = (field) => maybe(root, `[data-source-for="${nameOf(field)}"]`, HTMLTextAreaElement);
+    /** @param {HTMLElement} field */
     function sync(field) {
-      var src = sourceFor(field);
-      if (src && !src.hidden) field.innerHTML = src.value;
-      var hidden = hiddenFor(field);
-      if (hidden) hidden.value = field.innerHTML;
+      const src = sourceFor(field);
+      if (src !== null && src.hidden === false) field.innerHTML = src.value;
+      const hidden = hiddenFor(field);
+      if (hidden !== null) hidden.value = field.innerHTML;
     }
-    function syncAll() { fields.forEach(sync); }
+    function syncAll() {
+      for (const field of fields) sync(field);
+    }
+    /** @param {string} msg */
     function note(msg) {
-      if (!status) return;
-      status.textContent = msg || "";
-      status.hidden = !msg;
-      if (msg) setTimeout(function () { if (status.textContent === msg) { status.hidden = true; } }, 6000);
+      if (status === null) return;
+      status.textContent = msg;
+      status.hidden = msg === "";
+      if (msg !== "") {
+        setTimeout(() => {
+          if (status.textContent === msg) status.hidden = true;
+        }, 6000);
+      }
     }
-    function fieldOf(node) {
-      while (node && node !== root) {
-        if (node.nodeType === 1 && node.classList.contains("editor-field")) return node;
+    /** @param {Node | null} start */
+    function fieldOf(start) {
+      let node = start;
+      while (node !== null && node !== root) {
+        if (node instanceof HTMLElement && node.classList.contains("editor-field")) return node;
         node = node.parentNode;
       }
       return null;
     }
     function activeField() {
-      var sel = window.getSelection();
-      var f = sel && sel.anchorNode ? fieldOf(sel.anchorNode) : null;
-      return f || lastField;
+      return fieldOf(window.getSelection()?.anchorNode ?? null) ?? lastField;
     }
+    /** @param {HTMLElement} field */
     function selectionIn(field) {
-      var sel = window.getSelection();
-      if (!sel || !sel.rangeCount) return null;
-      var range = sel.getRangeAt(0);
+      const sel = window.getSelection();
+      if (sel === null || sel.rangeCount === 0) return null;
+      const range = sel.getRangeAt(0);
       if (fieldOf(range.commonAncestorContainer) !== field) return null;
       return range;
     }
+    /** @param {HTMLElement} field */
     function placeCaretAtEnd(field) {
-      var r = document.createRange();
+      const r = document.createRange();
       r.selectNodeContents(field);
       r.collapse(false);
-      var sel = window.getSelection();
-      sel.removeAllRanges();
-      sel.addRange(r);
+      select(r);
     }
 
     // ---- type picker ----
     function applyType() {
-      var t = typeSel ? typeSel.value : root.dataset.type;
-      root.dataset.type = t;
-      var l = LABELS[t] || LABELS.basic;
-      var fl = root.querySelector("[data-front-label]");
-      var bl = root.querySelector("[data-back-label]");
-      if (fl) fl.textContent = l[0];
-      if (bl) bl.textContent = l[1];
-      if (fields[0]) fields[0].dataset.placeholder = l[2];
-      if (fields[1]) fields[1].dataset.placeholder = l[3];
+      const t = typeSel === null ? (root.dataset["type"] ?? "basic") : typeSel.value;
+      root.dataset["type"] = t;
+      const ids = LABELS.get(t) ?? BASIC;
+      const [front, back, frontHint, backHint] = [tx(ids[0]), tx(ids[1]), tx(ids[2]), tx(ids[3])];
+      const fl = root.querySelector("[data-front-label]");
+      const bl = root.querySelector("[data-back-label]");
+      if (fl !== null) fl.textContent = front;
+      if (bl !== null) bl.textContent = back;
+      first.dataset["placeholder"] = frontHint;
+      const second = fields[1];
+      if (second !== undefined) second.dataset["placeholder"] = backHint;
     }
-    if (typeSel) typeSel.addEventListener("change", applyType);
+    if (typeSel !== null) typeSel.addEventListener("change", applyType);
     applyType();
 
     // ---- fields ----
-    fields.forEach(function (field) {
-      field.addEventListener("input", function () { sync(field); });
-      field.addEventListener("focus", function () { lastField = field; });
-      field.addEventListener("paste", function (e) {
-        var cd = e.clipboardData;
-        if (!cd) return;
-        if (cd.files && cd.files.length) {
+    for (const field of fields) {
+      field.addEventListener("input", () => {
+        sync(field);
+      });
+      field.addEventListener("focus", () => {
+        lastField = field;
+      });
+      field.addEventListener("paste", (e) => {
+        const cd = e.clipboardData;
+        if (cd === null) return;
+        if (cd.files.length > 0) {
           e.preventDefault();
-          Array.prototype.forEach.call(cd.files, function (f) { upload(field, f, null); });
+          for (const f of cd.files) uploadLater(field, f, null);
           return;
         }
-        var html = cd.getData("text/html");
-        var text = cd.getData("text/plain");
-        if (html) {
+        const html = cd.getData("text/html");
+        const text = cd.getData("text/plain");
+        if (html !== "") {
           e.preventDefault();
-          document.execCommand("insertHTML", false, cleanHtml(html));
-        } else if (text) {
+          exec("insertHTML", cleanHtml(html));
+        } else if (text !== "") {
           e.preventDefault();
-          document.execCommand("insertText", false, text);
+          exec("insertText", text);
         }
         sync(field);
       });
-      var depth = 0;
-      field.addEventListener("dragenter", function (e) {
+      let depth = 0;
+      field.addEventListener("dragenter", (e) => {
         e.preventDefault();
         depth++;
         field.classList.add("is-drag");
       });
-      field.addEventListener("dragover", function (e) { e.preventDefault(); });
-      field.addEventListener("dragleave", function () {
+      field.addEventListener("dragover", (e) => {
+        e.preventDefault();
+      });
+      field.addEventListener("dragleave", () => {
         depth = Math.max(0, depth - 1);
         if (depth === 0) field.classList.remove("is-drag");
       });
-      field.addEventListener("drop", function (e) {
+      field.addEventListener("drop", (e) => {
         depth = 0;
         field.classList.remove("is-drag");
-        var files = e.dataTransfer && e.dataTransfer.files;
-        if (!files || !files.length) return;
+        const files = e.dataTransfer?.files;
+        if (files === undefined || files.length === 0) return;
         e.preventDefault();
-        var range = caretFromPoint(e.clientX, e.clientY, field);
-        Array.prototype.forEach.call(files, function (f) { upload(field, f, range); });
+        const range = caretFromPoint(e.clientX, e.clientY, field);
+        for (const f of files) uploadLater(field, f, range);
       });
-      field.addEventListener("keydown", function (e) {
-        var mod = e.ctrlKey || e.metaKey;
+      field.addEventListener("keydown", (e) => {
+        if (composing(e)) return;
+        const mod = e.ctrlKey || e.metaKey;
         if (mod && e.shiftKey && (e.key === "C" || e.key === "c")) {
           e.preventDefault();
           insertCloze(field, e.altKey);
         } else if (mod && e.key === "Enter") {
           e.preventDefault();
-          if (form) {
-            if (form.requestSubmit) form.requestSubmit();
-            else form.submit();
-          }
+          form?.requestSubmit();
         }
       });
-    });
-    root.querySelectorAll(".editor-source").forEach(function (src) {
-      src.addEventListener("input", function () {
-        var field = root.querySelector('.editor-field[data-field="' + src.dataset.sourceFor + '"]');
-        if (field) sync(field);
+    }
+    for (const src of all(root, ".editor-source", HTMLTextAreaElement)) {
+      src.addEventListener("input", () => {
+        const field = maybe(root, `.editor-field[data-field="${src.dataset["sourceFor"] ?? ""}"]`, HTMLElement);
+        if (field !== null) sync(field);
       });
-    });
+    }
 
     // ---- media ----
-    function upload(field, file, range) {
-      if (!file) return;
-      if (file.size > MAX_UPLOAD) { note(file.name + " is larger than 100 MB."); return; }
+    /**
+     * @param {HTMLElement} field
+     * @param {File} file
+     * @param {Range | null} range
+     */
+    async function upload(field, file, range) {
+      if (file.size > MAX_UPLOAD) {
+        note(`${file.name} is larger than 100 MB.`);
+        return;
+      }
       field.focus();
       lastField = field;
-      if (range) {
-        var sel = window.getSelection();
-        sel.removeAllRanges();
-        sel.addRange(range);
-      } else if (!selectionIn(field)) {
+      if (range !== null) {
+        select(range);
+      } else if (selectionIn(field) === null) {
         placeCaretAtEnd(field);
       } else {
         // Never swallow a highlighted selection: attach after it.
-        window.getSelection().collapseToEnd();
+        window.getSelection()?.collapseToEnd();
       }
-      var id = "up" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-      document.execCommand(
+      const id = `up${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+      exec(
         "insertHTML",
-        false,
-        '<span class="editor-uploading" id="' + id + '" contenteditable="false">Uploading ' + escapeHtml(file.name) + "…</span>&nbsp;"
+        `<span class="editor-uploading" id="${id}" contenteditable="false">${escapeHtml(tx("js-editor-uploading", { name: file.name }))}</span>&nbsp;`,
       );
       sync(field);
-      var fd = new FormData();
-      fd.append("file", file, file.name);
-      fetch("/media", { method: "POST", body: fd, credentials: "same-origin" })
-        .then(function (r) {
-          return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, status: r.status, j: j }; });
-        })
-        .then(function (res) {
-          var ph = document.getElementById(id);
-          if (!res.ok) throw new Error(res.j.error || ("upload failed (" + res.status + ")"));
-          var el;
-          if (res.j.kind === "image") {
-            el = document.createElement("img");
-            el.src = "/media/" + res.j.id;
-            el.alt = "";
-          } else {
-            el = document.createElement(res.j.kind === "video" ? "video" : "audio");
-            el.controls = true;
-            el.preload = "none";
-            el.src = "/media/" + res.j.id;
-          }
-          if (ph) ph.replaceWith(el); else field.appendChild(el);
-          sync(field);
-        })
-        .catch(function (err) {
-          var ph = document.getElementById(id);
-          if (ph) ph.remove();
-          sync(field);
-          note(err.message || "Upload failed.");
-        });
+      try {
+        const reply = await postMedia(file, "upload");
+        if ("error" in reply) throw new Error(reply.error ?? tx("js-editor-upload-failed"));
+        const { id: mediaId, kind } = reply;
+        /** @type {HTMLElement} */
+        let el;
+        if (kind === "image") {
+          const img = document.createElement("img");
+          img.src = `/media/${mediaId}`;
+          img.alt = "";
+          el = img;
+        } else {
+          const player = document.createElement(kind === "video" ? "video" : "audio");
+          player.controls = true;
+          player.preload = "none";
+          player.src = `/media/${mediaId}`;
+          el = player;
+        }
+        const ph = document.getElementById(id);
+        if (ph === null) field.appendChild(el);
+        else ph.replaceWith(el);
+        sync(field);
+      } catch (err) {
+        document.getElementById(id)?.remove();
+        sync(field);
+        note(err instanceof Error && err.message !== "" ? err.message : tx("js-editor-upload-failed"));
+      }
     }
-    var attach = root.querySelector("[data-attach]");
-    if (attach && fileInput) {
-      attach.addEventListener("mousedown", function (e) { e.preventDefault(); });
-      attach.addEventListener("click", function () { fileInput.click(); });
-      fileInput.addEventListener("change", function () {
-        var field = activeField();
-        Array.prototype.forEach.call(fileInput.files, function (f) { upload(field, f, null); });
+    /**
+     * @param {HTMLElement} field
+     * @param {File} file
+     * @param {Range | null} range
+     */
+    function uploadLater(field, file, range) {
+      upload(field, file, range).catch((err) => {
+        console.error("editor.js: uploading:", err);
+      });
+    }
+    const attach = root.querySelector("[data-attach]");
+    if (attach !== null && fileInput !== null) {
+      attach.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+      });
+      attach.addEventListener("click", () => {
+        fileInput.click();
+      });
+      fileInput.addEventListener("change", () => {
+        const field = activeField();
+        for (const f of fileInput.files ?? []) uploadLater(field, f, null);
         fileInput.value = "";
       });
     }
 
     // ---- formatting ----
+    /**
+     * @param {string} tag
+     * @param {string} cls
+     * @param {string} prefix
+     */
     function wrapSelection(tag, cls, prefix) {
-      var field = activeField();
-      var range = selectionIn(field);
-      if (!range || range.collapsed) { note("Select some text first."); return; }
+      const field = activeField();
+      const range = selectionIn(field);
+      if (range === null || range.collapsed) {
+        note(tx("js-editor-select-first"));
+        return;
+      }
       // Toggle/swap when the whole selection already sits inside a match.
-      var node = range.commonAncestorContainer;
-      while (node && node !== field) {
-        if (node.nodeType === 1 && node.tagName.toLowerCase() === tag) {
-          var has = prefix
-            ? Array.prototype.some.call(node.classList, function (c) { return c.indexOf(prefix) === 0 && (prefix !== "hl-" || c.indexOf("hl-bg-") !== 0); })
-            : true;
+      /** @type {Node | null} */
+      let node = range.commonAncestorContainer;
+      while (node !== null && node !== field) {
+        if (node instanceof Element && node.tagName.toLowerCase() === tag) {
+          const has =
+            prefix === "" ||
+            Array.from(node.classList).some((c) => c.startsWith(prefix) && (prefix !== "hl-" || !c.startsWith("hl-bg-")));
           if (has) {
-            if (cls && node.className !== cls) node.className = cls; else unwrap(node);
+            if (cls !== "" && node.className !== cls) node.className = cls;
+            else unwrap(node);
             sync(field);
             return;
           }
         }
         node = node.parentNode;
       }
-      if (!cls && prefix) { clearWithin(field, range, 'span[class^="' + prefix + '"]', prefix); sync(field); return; }
-      var el = document.createElement(tag);
-      if (cls) el.className = cls;
+      if (cls === "" && prefix !== "") {
+        clearWithin(field, range, `span[class^="${prefix}"]`, prefix);
+        sync(field);
+        return;
+      }
+      const el = document.createElement(tag);
+      if (cls !== "") el.className = cls;
       try {
         range.surroundContents(el);
-      } catch (e) {
-        var frag = range.extractContents();
-        el.appendChild(frag);
+      } catch {
+        el.appendChild(range.extractContents());
         range.insertNode(el);
       }
-      var sel = window.getSelection();
-      var r = document.createRange();
+      const r = document.createRange();
       r.selectNodeContents(el);
-      sel.removeAllRanges();
-      sel.addRange(r);
+      select(r);
       sync(field);
     }
+    /**
+     * @param {HTMLElement} field
+     * @param {Range} range
+     * @param {string} selector
+     * @param {string} prefix
+     */
     function clearWithin(field, range, selector, prefix) {
-      Array.prototype.slice.call(field.querySelectorAll(selector)).forEach(function (el) {
-        if (!range.intersectsNode(el)) return;
+      for (const el of field.querySelectorAll(selector)) {
+        if (!range.intersectsNode(el)) continue;
         if (prefix === "hl-") {
           // Text-color clear must leave highlight spans alone and vice versa.
-          var isBg = el.className.indexOf("hl-bg-") === 0;
-          if (selector.indexOf("hl-bg-") >= 0 ? !isBg : isBg) return;
+          const isBg = el.className.startsWith("hl-bg-");
+          if (selector.includes("hl-bg-") ? !isBg : isBg) continue;
         }
         unwrap(el);
-      });
+      }
     }
+    /** @param {HTMLElement} field */
     function clearFormatting(field) {
-      var range = selectionIn(field);
-      if (!range || range.collapsed) { note("Select some text first."); return; }
-      document.execCommand("removeFormat", false, null);
-      range = selectionIn(field) || range;
-      Array.prototype.slice.call(field.querySelectorAll('span[class^="hl-"], s, sup, sub, b, i, u, strong, em')).forEach(function (el) {
+      const before = selectionIn(field);
+      if (before === null || before.collapsed) {
+        note(tx("js-editor-select-first"));
+        return;
+      }
+      exec("removeFormat");
+      const range = selectionIn(field) ?? before;
+      for (const el of field.querySelectorAll('span[class^="hl-"], s, sup, sub, b, i, u, strong, em')) {
         if (range.intersectsNode(el)) unwrap(el);
-      });
+      }
     }
-    root.querySelectorAll("[data-cmd]").forEach(function (btn) {
-      btn.addEventListener("mousedown", function (e) { e.preventDefault(); });
-      btn.addEventListener("click", function () {
-        var field = activeField();
-        if (!field) return;
+    for (const btn of all(root, "[data-cmd]", HTMLElement)) {
+      btn.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+      });
+      btn.addEventListener("click", () => {
+        const field = activeField();
         field.focus();
-        var cmd = btn.dataset.cmd;
+        const cmd = btn.dataset["cmd"] ?? "";
         if (cmd === "strike") wrapSelection("s", "", "");
         else if (cmd === "clear") clearFormatting(field);
-        else document.execCommand(cmd, false, null);
+        else exec(cmd);
         sync(field);
       });
-    });
-    root.querySelectorAll(".editor-hues").forEach(function (details) {
-      var summary = details.querySelector("summary");
-      summary.addEventListener("mousedown", function (e) { e.preventDefault(); });
-      details.querySelectorAll(".editor-swatch").forEach(function (sw) {
-        sw.addEventListener("mousedown", function (e) { e.preventDefault(); });
-        sw.addEventListener("click", function () {
-          var bg = sw.hasAttribute("data-hl-bg");
-          var hue = bg ? sw.dataset.hlBg : sw.dataset.hl;
-          var prefix = bg ? "hl-bg-" : "hl-";
-          wrapSelection("span", hue ? prefix + hue : "", prefix);
+    }
+    for (const details of all(root, ".editor-hues", HTMLDetailsElement)) {
+      details.querySelector("summary")?.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+      });
+      for (const sw of all(details, ".editor-swatch", HTMLElement)) {
+        sw.addEventListener("mousedown", (e) => {
+          e.preventDefault();
+        });
+        sw.addEventListener("click", () => {
+          const bg = sw.hasAttribute("data-hl-bg");
+          const hue = (bg ? sw.dataset["hlBg"] : sw.dataset["hl"]) ?? "";
+          const prefix = bg ? "hl-bg-" : "hl-";
+          wrapSelection("span", hue === "" ? "" : prefix + hue, prefix);
           details.open = false;
         });
-      });
-    });
-    document.addEventListener("click", function (e) {
-      root.querySelectorAll(".editor-hues[open]").forEach(function (d) {
-        if (!d.contains(e.target)) d.open = false;
-      });
+      }
+    }
+    document.addEventListener("click", (e) => {
+      for (const d of all(root, ".editor-hues[open]", HTMLDetailsElement)) {
+        if (!(e.target instanceof Node) || !d.contains(e.target)) d.open = false;
+      }
     });
 
     // ---- cloze ----
+    /**
+     * @param {HTMLElement} field
+     * @param {boolean} reuse
+     */
     function insertCloze(field, reuse) {
-      if (root.dataset.type !== "cloze" && typeSel) {
+      if (root.dataset["type"] !== "cloze" && typeSel !== null) {
         typeSel.value = "cloze";
         applyType();
       }
-      var range = selectionIn(field);
-      if (!range) { field.focus(); placeCaretAtEnd(field); range = selectionIn(field); }
-      if (!range) return;
-      var max = 0, m, re = /\{\{c(\d+)::/g;
-      while ((m = re.exec(field.innerHTML))) max = Math.max(max, parseInt(m[1], 10));
-      var n = reuse ? Math.max(1, max) : max + 1;
-      var frag = range.extractContents();
+      let range = selectionIn(field);
+      if (range === null) {
+        field.focus();
+        placeCaretAtEnd(field);
+        range = selectionIn(field);
+      }
+      if (range === null) return;
+      let max = 0;
+      for (const m of field.innerHTML.matchAll(/\{\{c(\d+)::/g)) max = Math.max(max, Number(m[1]));
+      const n = reuse ? Math.max(1, max) : max + 1;
+      const frag = range.extractContents();
       // Word selections (double-click, Ctrl+Shift+Arrow) drag the trailing
       // space along; keep it outside the blank so the sentence reads on.
-      var trailing = "";
-      var last = frag.lastChild;
-      while (last && last.lastChild) last = last.lastChild;
-      if (last && last.nodeType === 3) {
-        var m2 = /\s+$/.exec(last.data);
-        if (m2 && m2[0].length < last.data.length) {
-          trailing = m2[0];
+      let trailing = "";
+      let last = frag.lastChild;
+      while (last?.lastChild != null) last = last.lastChild;
+      if (last instanceof Text) {
+        const space = /\s+$/.exec(last.data)?.[0];
+        if (space !== undefined && space.length < last.data.length) {
+          trailing = space;
           last.data = last.data.slice(0, -trailing.length);
         }
       }
-      var wrap = document.createDocumentFragment();
-      wrap.appendChild(document.createTextNode("{{c" + n + "::"));
-      var empty = !frag.textContent;
+      const wrap = document.createDocumentFragment();
+      wrap.appendChild(document.createTextNode(`{{c${n}::`));
+      const empty = frag.textContent === "";
       wrap.appendChild(frag);
-      var close = document.createTextNode("}}" + trailing);
+      const close = document.createTextNode(`}}${trailing}`);
       wrap.appendChild(close);
       range.insertNode(wrap);
-      var sel = window.getSelection();
-      var r = document.createRange();
-      if (empty) r.setStart(close, 0); else r.setStartAfter(close);
+      const r = document.createRange();
+      if (empty) r.setStart(close, 0);
+      else r.setStartAfter(close);
       r.collapse(true);
-      sel.removeAllRanges();
-      sel.addRange(r);
+      select(r);
       sync(field);
     }
-    var clozeBtn = root.querySelector("[data-cloze]");
-    if (clozeBtn) {
-      clozeBtn.addEventListener("mousedown", function (e) { e.preventDefault(); });
-      clozeBtn.addEventListener("click", function () { insertCloze(activeField(), false); });
+    const clozeBtn = root.querySelector("[data-cloze]");
+    if (clozeBtn !== null) {
+      clozeBtn.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+      });
+      clozeBtn.addEventListener("click", () => {
+        insertCloze(activeField(), false);
+      });
     }
 
     // ---- HTML source view ----
-    var srcBtn = root.querySelector("[data-source]");
-    if (srcBtn) {
-      srcBtn.addEventListener("click", function () {
-        var on = !srcBtn.classList.contains("is-active");
-        fields.forEach(function (field) {
-          var src = sourceFor(field);
-          if (!src) return;
+    const srcBtn = root.querySelector("[data-source]");
+    if (srcBtn !== null) {
+      srcBtn.addEventListener("click", () => {
+        const on = !srcBtn.classList.contains("is-active");
+        for (const field of fields) {
+          const src = sourceFor(field);
+          if (src === null) continue;
           if (on) {
             src.value = field.innerHTML;
             src.hidden = false;
@@ -434,103 +560,165 @@
             field.hidden = false;
           }
           sync(field);
-        });
+        }
         srcBtn.classList.toggle("is-active", on);
       });
     }
 
     // ---- submit ----
-    if (form) {
-      form.addEventListener("submit", function (e) {
-        syncAll();
-        if (root.closest("[hidden]")) return; // basic mode: the editor is dormant
-        if (root.querySelector(".editor-uploading")) {
-          e.preventDefault();
-          e.stopImmediatePropagation();
-          note("Wait for the upload to finish.");
-        }
-      }, true);
+    if (form !== null) {
+      form.addEventListener(
+        "submit",
+        (e) => {
+          syncAll();
+          if (root.closest("[hidden]") !== null) return; // basic mode: the editor is dormant
+          if (root.querySelector(".editor-uploading") !== null) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            note(tx("js-editor-wait-upload"));
+          }
+        },
+        true,
+      );
     }
-    root.flashSync = syncAll;
   }
 
-  // Deck page: the Advanced toggle turns the quick form into the editor.
+  /**
+   * Deck page: the Advanced toggle turns the quick form into the editor.
+   * @param {HTMLFormElement} form
+   */
   function initToggle(form) {
-    var btn = form.querySelector("[data-editor-toggle]");
-    var quick = form.querySelector("[data-quick-fields]");
-    var adv = form.querySelector(".editor-advanced");
-    if (!btn || !quick || !adv || form.dataset.toggleInit) return;
-    form.dataset.toggleInit = "1";
-    var textareas = quick.querySelectorAll("textarea");
-    var fields = adv.querySelectorAll(".editor-field");
+    const btn = maybe(form, "[data-editor-toggle]", HTMLElement);
+    const quick = maybe(form, "[data-quick-fields]", HTMLElement);
+    const adv = maybe(form, ".editor-advanced", HTMLElement);
+    if (btn === null || quick === null || adv === null || form.dataset["toggleInit"] !== undefined) return;
+    form.dataset["toggleInit"] = "1";
+    toggle(form, btn, quick, adv);
+  }
+
+  /**
+   * @param {HTMLFormElement} form
+   * @param {HTMLElement} btn the Advanced / Simple button
+   * @param {HTMLElement} quick the plain fields
+   * @param {HTMLElement} adv the rich editor
+   */
+  function toggle(form, btn, quick, adv) {
+    const textareas = Array.from(quick.querySelectorAll("textarea"));
+    const fields = all(adv, ".editor-field", HTMLElement);
+    /**
+     * @param {boolean} on
+     * @param {boolean} focus
+     */
     function set(on, focus) {
       adv.hidden = !on;
       quick.hidden = on;
       btn.setAttribute("aria-expanded", on ? "true" : "false");
-      btn.textContent = on ? "Simple" : "Advanced";
-      form.action = on ? form.dataset.notesAction : form.dataset.basicAction;
-      textareas.forEach(function (t) { t.required = !on; });
+      btn.textContent = on ? tx("js-editor-simple") : tx("js-editor-advanced");
+      form.action = (on ? form.dataset["notesAction"] : form.dataset["basicAction"]) ?? form.action;
+      for (const t of textareas) t.required = !on;
       if (on) {
         // Carry anything already typed into the rich fields, once.
-        textareas.forEach(function (t, i) {
-          var f = fields[i];
-          if (f && !f.textContent.trim() && t.value.trim()) {
+        textareas.forEach((t, i) => {
+          const f = fields[i];
+          if (f?.textContent.trim() === "" && t.value.trim() !== "") {
             f.innerHTML = textToHtml(t.value);
             f.dispatchEvent(new Event("input"));
           }
         });
-        if (focus && fields[0]) fields[0].focus();
+        if (focus) fields[0]?.focus();
       } else {
-        fields.forEach(function (f, i) {
-          var t = textareas[i];
-          if (t && !t.value.trim() && f.textContent.trim()) t.value = f.textContent;
+        fields.forEach((f, i) => {
+          const t = textareas[i];
+          if (t?.value.trim() === "" && f.textContent.trim() !== "") t.value = f.textContent;
         });
       }
       try {
         if (on) localStorage.setItem("flash.editor.advanced", "1");
         else localStorage.removeItem("flash.editor.advanced");
-      } catch (e) { /* storage blocked */ }
+      } catch {
+        // Storage blocked: the choice lasts as long as the page.
+      }
     }
+    // The form is boosted, and htmx records a boosted form's path when it
+    // first processes the form: the action set above would never be used,
+    // and the rich fields went to the plain route, which refused them for
+    // their empty plain twins. The request takes the form's action here.
+    form.addEventListener("htmx:configRequest", (e) => {
+      if (e.detail.elt === form) e.detail.path = form.getAttribute("action") ?? e.detail.path;
+    });
     btn.hidden = false;
-    btn.addEventListener("click", function () { set(adv.hidden, true); });
-    var remembered = false;
-    try { remembered = localStorage.getItem("flash.editor.advanced") === "1"; } catch (e) { /* storage blocked */ }
+    btn.addEventListener("click", () => {
+      set(adv.hidden !== false, true);
+    });
+    let remembered = false;
+    try {
+      remembered = localStorage.getItem("flash.editor.advanced") === "1";
+    } catch {
+      // Storage blocked: the simple form, as on a first visit.
+    }
     if (remembered) set(true, false);
   }
 
   // Edit dialog lifecycle.
   function closeDialog() {
-    var host = document.getElementById("editor-dialog");
-    if (host) host.innerHTML = "";
-  }
-  function initDialog(host) {
-    host.querySelectorAll("[data-editor-close]").forEach(function (b) {
-      b.addEventListener("click", closeDialog);
-    });
-    var overlay = host.querySelector("[data-editor-overlay]");
-    if (overlay) {
-      overlay.addEventListener("mousedown", function (e) { if (e.target === overlay) closeDialog(); });
+    const host = document.getElementById("editor-dialog");
+    if (host === null) return;
+    // A restore already saved the card, so the rows behind the dialog
+    // are out of date: closing reloads them, as a save does. The study
+    // page shows its card again instead (study.js), keeping its session.
+    const changed = host.querySelector("[data-editor-changed]");
+    host.replaceChildren();
+    // Tell the page how the dialog closed (nothing saved, or the card changed)
+    // so a page showing a card can pick up where it was.
+    if (changed === null) {
+      host.dispatchEvent(new CustomEvent("flash:editor-closed", { bubbles: true }));
+    } else if (host.dataset["editorAfter"] === "study") {
+      host.dispatchEvent(new CustomEvent("flash:card-changed", { bubbles: true }));
+    } else {
+      window.location.reload();
     }
-    var first = host.querySelector(".editor-field");
-    if (first) first.focus();
   }
-  document.addEventListener("keydown", function (e) {
-    if (e.key === "Escape" && document.querySelector("#editor-dialog [data-editor-overlay]")) {
-      var open = document.querySelector("#editor-dialog .editor-hues[open]");
-      if (open) { open.open = false; return; }
+  // A save from the study page answers with this event (HX-Trigger), not
+  // a reload: the dialog closes and study.js shows the card again.
+  document.addEventListener("flash:card-saved", () => {
+    document.getElementById("editor-dialog")?.replaceChildren();
+  });
+  /** @param {HTMLElement} host */
+  function initDialog(host) {
+    host.dispatchEvent(new CustomEvent("flash:editor-opened", { bubbles: true }));
+    for (const b of host.querySelectorAll("[data-editor-close]")) b.addEventListener("click", closeDialog);
+    const overlay = host.querySelector("[data-editor-overlay]");
+    if (overlay !== null) {
+      overlay.addEventListener("mousedown", (e) => {
+        if (e.target === overlay) closeDialog();
+      });
+    }
+    maybe(host, ".editor-field", HTMLElement)?.focus();
+  }
+  document.addEventListener("keydown", (e) => {
+    if (composing(e)) return;
+    if (e.key === "Escape" && document.querySelector("#editor-dialog [data-editor-overlay]") !== null) {
+      e.preventDefault();
+      const open = maybe(document, "#editor-dialog .editor-hues[open]", HTMLDetailsElement);
+      if (open !== null) {
+        open.open = false;
+        return;
+      }
       closeDialog();
     }
   });
 
+  /** @param {ParentNode} scope */
   function init(scope) {
-    scope.querySelectorAll("[data-editor]").forEach(initEditor);
-    scope.querySelectorAll("form[data-editor-toggle], form[data-basic-action]").forEach(initToggle);
+    for (const root of all(scope, "[data-editor]", HTMLElement)) initEditor(root);
+    for (const form of all(scope, "form[data-editor-toggle], form[data-basic-action]", HTMLFormElement)) initToggle(form);
   }
-  document.addEventListener("DOMContentLoaded", function () {
+  document.addEventListener("DOMContentLoaded", () => {
     init(document);
-    document.body.addEventListener("htmx:afterSwap", function (e) {
+    document.body.addEventListener("htmx:afterSwap", (e) => {
+      if (!(e.target instanceof HTMLElement)) return;
       init(e.target);
-      if (e.target && e.target.id === "editor-dialog") initDialog(e.target);
+      if (e.target.id === "editor-dialog") initDialog(e.target);
     });
   });
 })();

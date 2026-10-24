@@ -26,16 +26,8 @@ id_type!(SessionId);
 id_type!(MediaId);
 id_type!(NoteId);
 id_type!(
-    /// A file, text or link a user handed to card generation.
-    AiSourceId
-);
-id_type!(
-    /// One run of the generation pipeline over a source.
-    AiJobId
-);
-id_type!(
-    /// A generated card awaiting the user's keep or discard.
-    AiDraftId
+    /// An earlier version of a note's text, kept so an edit can be undone.
+    RevisionId
 );
 
 /// A user's row id and, unlike the other ids, a capability.

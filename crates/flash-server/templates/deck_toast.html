@@ -1,0 +1,13 @@
+{# What an action on a deck's cards did, swapped in beside the list it
+   came back with, and an Undo when one can put it back. The Undo posts
+   the record of what changed to the same address. #}
+<div class="deck-toast" id="deck-toast" role="status" aria-live="polite" hx-swap-oob="true">
+  <span>{{ toast.message }}</span>
+  {% if let Some(record) = toast.undo %}
+  <form hx-post="{{ list.bulk_link() }}" hx-target="#cards">
+    <input type="hidden" name="action" value="undo">
+    <input type="hidden" name="undo" value="{{ record }}">
+    <button class="fl-btn fl-btn-sm fl-btn-ghost" type="submit">{{ "cards-bulk-undo"|t }}</button>
+  </form>
+  {% endif %}
+</div>

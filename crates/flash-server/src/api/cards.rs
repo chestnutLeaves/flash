@@ -7,11 +7,13 @@ use axum::routing::get;
 use axum::{Json, Router};
 use flash_core::CardId;
 use flash_store::notes::NoteType;
+use flash_store::RevisionSource;
 use serde::{Deserialize, Serialize};
 
 use super::decks::NoteBody;
 use super::dto::{Card, EditorSeed};
 use super::{call, ApiError, ApiJson, ApiResult, BearerUser};
+use crate::ext::{AccountEvent, Surface};
 use crate::service::{now_ms, ServiceError};
 use crate::state::AppState;
 
@@ -63,6 +65,11 @@ async fn delete(
         s.delete_card(user.id, CardId(id), now_ms())
     })
     .await?;
+    state.ext.account_event(
+        &state.services,
+        user.id,
+        AccountEvent::new("cards_deleted", Surface::Mobile).amount(Some(1)),
+    );
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -96,7 +103,8 @@ async fn save_editor(
 ) -> ApiResult<EditorSaved> {
     let input = body.into_input()?;
     let saved = call(state.services.clone(), move |s| {
-        let (note, ids) = s.save_card_editor(user.id, CardId(id), &input, now_ms())?;
+        let (note, ids) =
+            s.save_card_editor(user.id, CardId(id), &input, RevisionSource::Api, now_ms())?;
         let seed = s.editor_seed(user.id, CardId(id))?;
         Ok::<_, ServiceError>(EditorSaved {
             note_id: note.0,

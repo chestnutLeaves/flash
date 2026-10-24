@@ -234,7 +234,7 @@ pub(crate) fn decode_ref(raw: &str) -> String {
 
 /// Lowercased element name of a tag body (`/` for closing tags skipped):
 /// `"IMG src=x"` and `"/img"` both give `"img"`.
-pub(crate) fn tag_name(body: &str) -> String {
+pub fn tag_name(body: &str) -> String {
     body.trim_start_matches('/')
         .chars()
         .take_while(|c| c.is_ascii_alphanumeric())
@@ -249,7 +249,7 @@ pub(crate) fn tag_name(body: &str) -> String {
 /// `attr=` that sits *inside* another attribute's quoted value is never
 /// mistaken for the attribute itself. The first attribute with that name
 /// and a value wins.
-pub(crate) fn attr_value<'a>(tag_body: &'a str, attr: &str) -> Option<&'a str> {
+pub fn attr_value<'a>(tag_body: &'a str, attr: &str) -> Option<&'a str> {
     let bytes = tag_body.as_bytes();
     let is_space = |b: u8| b.is_ascii_whitespace();
     let mut i = 0;

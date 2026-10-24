@@ -6,6 +6,7 @@
 use flash_core::UserId;
 use flash_store::Store;
 
+use super::account::{replace_password_tx, KeepSession};
 use crate::auth::{hash_token, new_token};
 use crate::email::{self, Mailer};
 use crate::service::Result;
@@ -25,20 +26,19 @@ pub fn request(
     email: &str,
     now_ms: i64,
 ) -> Result<()> {
-    let Ok(email) = crate::webauthn::normalize_email(email) else {
+    let Some((email, user)) = account(store, email)? else {
         return Ok(());
     };
-    let Some(login) = store.user_by_email(&email)? else {
-        return Ok(());
-    };
-    if store.recent_password_resets(login.user, now_ms - COOLDOWN_MS)? > 0
-        || store.recent_password_resets(login.user, now_ms - DAY_MS)? >= DAILY_CAP
+    if store.recent_password_resets(user, now_ms - COOLDOWN_MS)? > 0
+        || store.recent_password_resets(user, now_ms - DAY_MS)? >= DAILY_CAP
     {
         return Ok(());
     }
-    let token = new_token();
-    store.create_password_reset(&hash_token(&token), login.user, now_ms, now_ms + TTL_MS)?;
-    let mut mail = email::password_reset_email(site, &token);
+    let token = mint(store, user, now_ms)?;
+    // In the account's language; one it never set reads in the language
+    // of the page that asked.
+    let reader = crate::i18n::for_account(store, user, &crate::i18n::tr());
+    let mut mail = crate::i18n::scoped(reader, || email::password_reset_email(site, &token));
     mail.to = email;
     if let Err(e) = mailer.send(&mail) {
         tracing::error!("reset mail: {e}");
@@ -47,20 +47,51 @@ pub fn request(
     Ok(())
 }
 
-/// Consumes the reset token and installs `phc`. `Ok(None)` when the
-/// token is invalid, expired, or already used.
-pub fn confirm(store: &Store, token_hash: &str, phc: &str, now_ms: i64) -> Result<Option<UserId>> {
-    let Some(user) = store.lookup_password_reset(token_hash, now_ms)? else {
+/// The link `flash-server reset-link` prints, for an operator whose
+/// instance sends no mail: the mailed link and token, without the mail's
+/// rate limits (the operator already holds the database). `None` when no
+/// account has the address.
+pub fn link_for(store: &Store, base_url: &str, email: &str, now_ms: i64) -> Result<Option<String>> {
+    let Some((_, user)) = account(store, email)? else {
         return Ok(None);
     };
-    store.consume_password_reset(token_hash, now_ms)?;
-    store.set_password_hash(user, Some(phc))?;
-    store.clear_password_failures(user)?;
-    // The other links this user may hold (up to the daily cap) die with
-    // this one; a saved link is not a second chance at the account.
-    store.delete_unused_password_resets(user)?;
-    store.delete_sessions_for_user(user, None)?;
-    // Every grant, including connectors (see flows::account).
-    store.revoke_all_tokens_for_user(user, None, now_ms)?;
-    Ok(Some(user))
+    Ok(Some(link(base_url, &mint(store, user, now_ms)?)))
+}
+
+pub fn link(base_url: &str, token: &str) -> String {
+    format!("{base_url}/reset/{token}")
+}
+
+/// The normalized address and its account, when it has one.
+fn account(store: &Store, email: &str) -> Result<Option<(String, UserId)>> {
+    let Ok(email) = crate::webauthn::normalize_email(email) else {
+        return Ok(None);
+    };
+    Ok(store
+        .user_by_email(&email)?
+        .map(|login| (email, login.user)))
+}
+
+fn mint(store: &Store, user: UserId, now_ms: i64) -> Result<String> {
+    let token = new_token();
+    store.create_password_reset(&hash_token(&token), user, now_ms, now_ms + TTL_MS)?;
+    Ok(token)
+}
+
+/// Consumes the reset token and installs `phc`. `Ok(None)` when the
+/// token is invalid, expired, or already used.
+///
+/// One transaction: the new password and the end of every old session
+/// and grant land together. A reset is how someone locks an intruder out,
+/// and a crash between the two must not leave the intruder signed in.
+pub fn confirm(store: &Store, token_hash: &str, phc: &str, now_ms: i64) -> Result<Option<UserId>> {
+    Ok(store.with_tx(|tx| {
+        let Some(user) = flash_store::lookup_password_reset_tx(tx, token_hash, now_ms)? else {
+            return Ok(None);
+        };
+        flash_store::consume_password_reset_tx(tx, token_hash, now_ms)?;
+        // Nothing kept: the reset's premise is a possibly-stolen password.
+        replace_password_tx(store, tx, user, phc, &KeepSession::default(), now_ms)?;
+        Ok(Some(user))
+    })?)
 }

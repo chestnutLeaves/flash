@@ -171,11 +171,104 @@ pub async fn auth_rate_limit(
     next: Next,
 ) -> Response {
     let ip = client_ip(&request, state.config.client_ip_header.as_deref());
-    let key = format!("{ip}:{}", route_key(&request));
+    let route = route_key(&request);
+    let key = format!("{ip}:{route}");
     if !state.rate_limiter.allow(&key) {
+        // An assistant's server connects every one of its users from a
+        // few addresses, so a throttled OAuth route can strand sign-ins.
+        // Only those routes are logged: a scanner on /login is noise.
+        if route.starts_with("/oauth/") {
+            tracing::warn!(route = ?route, "oauth request rate limited");
+        }
         return (StatusCode::TOO_MANY_REQUESTS, "slow down").into_response();
     }
     next.run(request).await
+}
+
+/// FLASH_ACCESS_LOG: one line per request, for following a client
+/// through a flow that fails between two requests (an assistant that
+/// never comes back for its code). The route is the *template*
+/// (`/unsubscribe/{token}`), never the path or the query, which carry
+/// tokens, codes and OAuth state. A public page asked for at its address
+/// in a language logs its own route and that language (`language`;
+/// absent otherwise). Static files and the health check are left out.
+pub async fn access_log(State(state): State<AppState>, request: Request, next: Next) -> Response {
+    if !state.config.access_log {
+        return next.run(request).await;
+    }
+    let path = request.uri().path();
+    if path.starts_with("/static/") || path == "/healthz" {
+        return next.run(request).await;
+    }
+    let route = request
+        .extensions()
+        .get::<axum::extract::MatchedPath>()
+        .map(|m| m.as_str().to_string())
+        .unwrap_or_else(|| "unmatched".to_string());
+    let language = request
+        .extensions()
+        .get::<crate::i18n::Localized>()
+        .map(|l| l.locale.tag());
+    let method = request.method().clone();
+    let client = client_ip(&request, state.config.client_ip_header.as_deref());
+    let user_agent: String = request
+        .headers()
+        .get(header::USER_AGENT)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .chars()
+        .take(256)
+        .collect();
+    // An assistant's connect starts with a signed-out /oauth/authorize,
+    // the one request that still carries the page it came from: a web app
+    // sends its origin, a desktop or phone app sends none. Only the origin
+    // is kept, never the path or query behind it.
+    let referer_origin = route
+        .starts_with("/oauth/")
+        .then(|| referer_origin(request.headers()));
+    let started = std::time::Instant::now();
+    let response = next.run(request).await;
+    let status = response.status().as_u16();
+    let ms = started.elapsed().as_millis() as u64;
+    match referer_origin {
+        Some(referer_origin) => tracing::info!(
+            target: "flash::access",
+            method = %method,
+            route = ?route,
+            language,
+            status,
+            ms,
+            client = ?client,
+            user_agent = ?user_agent,
+            referer_origin = ?referer_origin,
+            "request"
+        ),
+        None => tracing::info!(
+            target: "flash::access",
+            method = %method,
+            route = ?route,
+            language,
+            status,
+            ms,
+            client = ?client,
+            user_agent = ?user_agent,
+            "request"
+        ),
+    }
+    response
+}
+
+/// The Referer's origin (`scheme://host[:port]`), or "-" when there is
+/// none or it is not a URL.
+fn referer_origin(headers: &axum::http::HeaderMap) -> String {
+    headers
+        .get(header::REFERER)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| url::Url::parse(v).ok())
+        .map(|u| u.origin().ascii_serialization())
+        .filter(|o| o != "null")
+        .map(|o| o.chars().take(100).collect())
+        .unwrap_or_else(|| "-".to_string())
 }
 
 /// Applied to /api/v1 (all but its auth routes): the generous per-IP
@@ -253,17 +346,16 @@ pub async fn api_auth_rate_limit(
     next.run(request).await
 }
 
-/// Paths whose responses are safe to cache: immutable assets and public,
-/// content-addressed blobs. Everything else is either personal or
-/// session-dependent and must not survive a logout in a shared browser.
+/// Paths whose responses are safe to cache: immutable assets and the
+/// site-root files, plus whatever the extension says of its own paths
+/// (`ServerExtension::cacheable_path`). Everything else is either
+/// personal or session-dependent and must not survive a logout in a
+/// shared browser.
 fn cacheable_path(path: &str) -> bool {
     path.starts_with("/static/")
-        || path.starts_with("/public/")
         || path.starts_with("/.well-known/")
         || path == "/favicon.ico"
         || path == "/robots.txt"
-        || path == "/sitemap.xml"
-        || (path.starts_with("/s/") && path.contains("/m/"))
 }
 
 pub async fn security_headers(
@@ -271,7 +363,8 @@ pub async fn security_headers(
     request: Request,
     next: Next,
 ) -> Response {
-    let cacheable = cacheable_path(request.uri().path());
+    let path = request.uri().path();
+    let cacheable = cacheable_path(path) || state.ext.cacheable_path(path);
     let mut response = next.run(request).await;
     let h = response.headers_mut();
     // Handlers that know better (media with its own TTL, the API's
@@ -288,6 +381,11 @@ pub async fn security_headers(
             h.insert(header::CONTENT_SECURITY_POLICY, value);
         }
     }
+    // Where the policies' `report-to` sends what they block.
+    h.insert(
+        header::HeaderName::from_static("reporting-endpoints"),
+        HeaderValue::from_static(crate::state::REPORTING_ENDPOINTS),
+    );
     h.insert(
         header::X_CONTENT_TYPE_OPTIONS,
         HeaderValue::from_static("nosniff"),
@@ -361,7 +459,11 @@ pub fn panic_response(err: Box<dyn std::any::Any + Send + 'static>) -> Response 
         "non-string panic payload"
     };
     tracing::error!(panic = ?message, "request handler panicked");
-    (StatusCode::INTERNAL_SERVER_ERROR, "internal error").into_response()
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        crate::i18n::t("error-internal"),
+    )
+        .into_response()
 }
 
 #[cfg(test)]

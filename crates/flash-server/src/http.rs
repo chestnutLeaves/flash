@@ -1,24 +1,29 @@
-//! The one outbound HTTPS client configuration. Every external call the
-//! server makes (Resend, the media bucket, a captcha verifier, and whatever
-//! an extension adds) builds its agent here so TLS provider and timeouts
-//! can never drift between them.
+//! The one outbound HTTP client configuration. Every external call the
+//! server makes over ureq (Resend, the media bucket, a captcha verifier,
+//! and an extension's own) gets its agent here, so the TLS provider, the
+//! trust decision and the timeouts can never drift between them.
 
 use std::time::Duration;
 
-/// Native TLS on purpose: the vendored OpenSSL is already linked
-/// (webauthn-rs) and ureq 3 would otherwise pull in rustls as well.
-/// The roots are the platform's own, not ureq's bundled Mozilla set:
-/// handing native TLS a specific root list makes Windows' verifier
-/// insist the chain end in one of them, and it refuses Google's with
-/// "unable to find any user-specified roots". Connecting gets 5 s
-/// everywhere; `global_timeout` bounds the whole exchange.
+/// rustls on ring, with the platform's own verifier and roots rather than
+/// ureq's bundled Mozilla set, so a host's trust store (and, on Windows,
+/// its certificate policy) decides what a server may present, as it did
+/// under native TLS. Connecting gets 5 s everywhere; `global_timeout`
+/// bounds the whole exchange.
 /// `status_as_error = false` hands 4xx/5xx replies back as responses so
 /// callers can read the JSON error body.
 pub fn agent(global_timeout: Duration, status_as_error: bool) -> ureq::Agent {
+    config(global_timeout, status_as_error).into()
+}
+
+/// `agent`'s settings, for an agent the test harness builds on an
+/// in-memory transport (`testing::MemoryHost`): the same timeouts and
+/// status handling as production's, so the two cannot drift.
+pub(crate) fn config(global_timeout: Duration, status_as_error: bool) -> ureq::config::Config {
     ureq::Agent::config_builder()
         .tls_config(
             ureq::tls::TlsConfig::builder()
-                .provider(ureq::tls::TlsProvider::NativeTls)
+                .provider(ureq::tls::TlsProvider::Rustls)
                 .root_certs(ureq::tls::RootCerts::PlatformVerifier)
                 .build(),
         )
@@ -26,5 +31,4 @@ pub fn agent(global_timeout: Duration, status_as_error: bool) -> ureq::Agent {
         .timeout_global(Some(global_timeout))
         .http_status_as_error(status_as_error)
         .build()
-        .into()
 }

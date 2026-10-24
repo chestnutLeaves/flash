@@ -1,6 +1,7 @@
 # Dependency vulnerability scan: runs on every push/PR that touches the
 # lockfile, and daily so newly published RustSec advisories against
-# already-locked versions still get flagged.
+# already-locked versions still get flagged. That happens in the public
+# repository; anywhere else the scan runs when started by hand.
 name: cargo audit
 
 on:
@@ -18,9 +19,14 @@ permissions:
 
 jobs:
   audit:
+    # By owner, not by the repository's visibility: a scheduled run's
+    # event carries no repository to read it from.
+    if: ${{ github.repository_owner == 'flash-cards' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          # Each ignore carries its reason in deny.toml [advisories].
+          ignore: RUSTSEC-2023-0071,RUSTSEC-2026-0374

@@ -1,0 +1,5 @@
+# `fallback/` holds partials a downstream extension may answer with its
+# own: an include finds a file beside the including template before any
+# directory here, so these stay out of `templates/` itself.
+[general]
+dirs = ["templates", "templates/fallback"]

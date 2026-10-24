@@ -1,0 +1,33 @@
+{# The form that sets a deck's goal date (`web_goal::GoalFormView`): in
+   the dialog over a deck table, and as the Goal date card of the deck's
+   settings page, which is where the dialog's links lead without script.
+   The date field asks for the plan again as it changes (and when a quick
+   pick sets it: `static/ui.js` sends `goal-pick`). Expects `goal`. #}
+<form class="goal-form" method="post" action="/decks/{{ goal.deck_id }}/goal">
+  <input type="hidden" name="back" value="{{ goal.back }}">
+  {% if goal.from != 0 %}<input type="hidden" name="from" value="{{ goal.from }}">{% endif %}
+  {% if goal.dialog %}
+  <div class="goal-form-head">
+    <h2 id="goal-dialog-title">{% if goal.has_goal %}{{ "goal-heading-change"|t }}{% else %}{{ "goal-heading-set"|t }}{% endif %}</h2>
+    <p class="small muted" dir="auto">{{ goal.deck_name }}</p>
+  </div>
+  {% endif %}
+  <div class="fl-field">
+    <label class="fl-label" for="goal-date-{{ goal.deck_id }}">{{ "goal-date-label"|t }}</label>
+    <input class="fl-input" type="date" id="goal-date-{{ goal.deck_id }}" name="goal_date"
+           value="{{ goal.value }}" min="{{ goal.min }}" max="{{ goal.max }}" required data-goal-date
+           hx-get="/decks/{{ goal.deck_id }}/goal/plan" hx-trigger="input changed delay:150ms, goal-pick"
+           hx-target="#goal-plan-{{ goal.deck_id }}" hx-swap="innerHTML">
+    <div class="goal-chips" role="group" aria-label="{{ "goal-picks"|t }}">
+      {% for chip in goal.chips %}<button type="button" class="goal-chip" data-goal-pick="{{ chip.date }}" aria-pressed="{% if chip.date == goal.value %}true{% else %}false{% endif %}">{{ chip.label }}</button>{% endfor %}
+    </div>
+  </div>
+  <div class="goal-plan" id="goal-plan-{{ goal.deck_id }}" aria-live="polite">{% let plan = goal.plan %}{% include "goal_plan.html" %}</div>
+  <div class="goal-foot">
+    {% if goal.has_goal %}<button class="fl-btn fl-btn-sm fl-btn-ghost" type="submit" name="clear" value="1" formnovalidate>{{ "goal-remove"|t }}</button>{% endif %}
+    <div class="row goal-foot-end">
+      {% if goal.dialog %}<button class="fl-btn fl-btn-secondary" type="button" data-goal-close>{{ "goal-cancel"|t }}</button>{% endif %}
+      <button class="fl-btn fl-btn-primary" type="submit">{{ "goal-save"|t }}</button>
+    </div>
+  </div>
+</form>

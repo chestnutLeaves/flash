@@ -1,5 +1,5 @@
 //! The captcha gate on the public email-sending forms (password reset
-//! here; signup in the hosted product). One trait, implemented by the
+//! here, and any an extension adds). One trait, implemented by the
 //! extension; no verifier means no captcha at all (dev / self-host).
 
 pub trait CaptchaVerifier: Send + Sync {
@@ -19,7 +19,8 @@ pub async fn require_captcha(
     let Some(verifier) = state.ext.captcha_verifier(state) else {
         return Ok(());
     };
-    const MSG: &str = "Please complete the verification check and try again.";
+    // A message id: the page shows it in its reader's language.
+    const MSG: &str = "auth-captcha";
     if token.is_empty() {
         return Err(MSG);
     }
@@ -33,7 +34,7 @@ pub async fn require_captcha(
         .and_then(|v| v.to_str().ok())
         .map(|s| s.trim().to_string());
     let outcome =
-        tokio::task::spawn_blocking(move || verifier.verify(&token, remote_ip.as_deref())).await;
+        crate::i18n::blocking(move || verifier.verify(&token, remote_ip.as_deref())).await;
     match outcome {
         Ok(Ok(true)) => Ok(()),
         Ok(Ok(false)) => Err(MSG),

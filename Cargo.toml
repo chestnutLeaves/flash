@@ -8,7 +8,7 @@ members = ["crates/*"]
 exclude = ["fuzz"]
 
 [workspace.package]
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 publish = false
 repository = "https://github.com/flash-cards/flash"
@@ -22,14 +22,43 @@ repository = "https://github.com/flash-cards/flash"
 # SQLite. Clippy 1.98 started flagging this shape.
 result_large_err = "allow"
 
-# Debug builds carry line tables only, and the dependencies none: a panic
-# still names file and line, while the pdbs and the link step shrink to a
-# fraction of what full debuginfo costs on MSVC. Full debuginfo is a
-# `--config profile.dev.debug=2` away when a debugger is really needed.
+# Everyday builds and tests carry no debuginfo at all. A failed assert or
+# a panic still names its file and line (that comes from the panic
+# location, not from debuginfo); what goes is the symbolized backtrace and
+# the stepping debugger, and with them the pdbs that were most of the disk
+# and most of the link time on MSVC.
 [profile.dev]
-debug = "line-tables-only"
+debug = 0
+strip = "debuginfo"
 
-[profile.dev.package."*"]
+# The few dependencies the tests spend their CPU in, compiled optimized
+# even in debug builds. The tests still run production's code and
+# parameters (Argon2id at 64 MiB and three passes, 2048-bit RSA keys,
+# the full source scans); unoptimized, those dominated the suite. Our own
+# crates stay at opt-level 0.
+[profile.dev.package.argon2]
+opt-level = 3
+[profile.dev.package.blake2]
+opt-level = 3
+[profile.dev.package.rsa]
+opt-level = 3
+[profile.dev.package.num-bigint-dig]
+opt-level = 3
+[profile.dev.package.syn]
+opt-level = 3
+[profile.dev.package.proc-macro2]
+opt-level = 3
+
+# Debugging on demand: `cargo test --profile dev-debug` (or `cargo build
+# --profile dev-debug`) builds with full debuginfo for the workspace crates
+# into its own target/dev-debug, so switching back and forth never throws
+# away the everyday build.
+[profile.dev-debug]
+inherits = "dev"
+debug = "full"
+strip = "none"
+
+[profile.dev-debug.package."*"]
 debug = 0
 
 # Fully optimized release builds: what a tagged release and the Docker
@@ -59,3 +88,10 @@ inherits = "release"
 lto = "thin"
 codegen-units = 16
 incremental = true
+
+# Fluent picks a message's plural form through intl_pluralrules, whose
+# rules date from CLDR 36 (2019). This crate keeps its API and answers
+# from ICU4X's current CLDR data instead, so the server picks the same
+# form a browser and a phone pick for the same number.
+[patch.crates-io]
+intl_pluralrules = { path = "crates/intl-pluralrules" }

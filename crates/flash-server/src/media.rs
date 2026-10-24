@@ -4,7 +4,7 @@
 //! becomes a path or key, identical files dedupe across users, and a blob
 //! is removed only when the last DB row naming its hash goes away.
 //!
-//! Media is a native feature on every plan. The only storage rule is a
+//! Media is a native feature for every account. The only storage rule is a
 //! silent per-user abuse valve (`MEDIA_SOFT_CAP_BYTES`); nothing in the UI
 //! shows a quota, matching AnkiWeb.
 //!
@@ -15,7 +15,6 @@
 //! a 100 MiB file never has to be buffered whole for a scrub.
 
 use std::path::{Path as FsPath, PathBuf};
-use std::sync::Arc;
 
 use axum::extract::{Multipart, Path, State};
 use axum::http::{header, HeaderMap, StatusCode};
@@ -51,23 +50,27 @@ pub struct ValidatedMedia {
 /// (SVG and unknowns are rejected, since scriptable content must never
 /// be served from our origin), size caps, and magic bytes that actually
 /// match the claimed format so HTML-as-.jpg dies here.
-pub fn validate_media(filename: &str, bytes: &[u8]) -> Result<ValidatedMedia, String> {
+pub fn validate_media(filename: &str, bytes: &[u8]) -> Result<ValidatedMedia, crate::i18n::Words> {
     let filename = sanitize_filename(filename);
+    let refused = |id: &str| crate::i18n::ta(id, &[("filename", filename.as_str().into())]);
     let (kind, mime) = classify(&filename);
     if kind == MediaKind::Unsupported {
-        return Err(format!("{filename}: format not supported"));
+        return Err(refused("media-error-format"));
     }
     if bytes.is_empty() {
-        return Err(format!("{filename}: empty file"));
+        return Err(refused("media-error-empty"));
     }
     if bytes.len() as u64 > MEDIA_MAX_FILE_BYTES {
-        return Err(format!(
-            "{filename}: over the {} MB per-file limit",
-            MEDIA_MAX_FILE_BYTES / (1024 * 1024)
+        return Err(crate::i18n::ta(
+            "media-error-too-large",
+            &[
+                ("filename", filename.as_str().into()),
+                ("mb", (MEDIA_MAX_FILE_BYTES / (1024 * 1024)).into()),
+            ],
         ));
     }
     if !content_matches(kind, bytes) {
-        return Err(format!("{filename}: content does not match its extension"));
+        return Err(refused("media-error-mismatch"));
     }
     let sha256 = hex(&Sha256::digest(bytes));
     Ok(ValidatedMedia {
@@ -93,9 +96,7 @@ pub fn ingest_media(
     if !is_admin {
         if services.store().media_count(user)? >= crate::bounds::MEDIA_OBJECTS_PER_USER {
             tracing::warn!(user = user.raw(), "media object cap reached");
-            return Err(Failure::user(
-                "media file limit reached. Remove some files first",
-            ));
+            return Err(Failure::user(crate::i18n::t("media-error-count")));
         }
         let used = services.store().media_bytes_used(user)?;
         if used.saturating_add(bytes.len() as u64) > MEDIA_SOFT_CAP_BYTES {
@@ -104,9 +105,7 @@ pub fn ingest_media(
                 used_mb = used / (1024 * 1024),
                 "media soft cap reached"
             );
-            return Err(Failure::user(
-                "media storage limit reached. Contact support",
-            ));
+            return Err(Failure::user(crate::i18n::t("media-error-storage")));
         }
     }
     if !services
@@ -192,7 +191,7 @@ async fn upload_media_for(
     }
     let services = state.services.clone();
     let store = state.media.clone();
-    let result = tokio::task::spawn_blocking(move || {
+    let result = crate::i18n::blocking(move || {
         let id = ingest_media(
             &services,
             store.as_ref(),
@@ -218,11 +217,17 @@ async fn upload_media_for(
         Ok(Err(Failure::User(msg))) => upload_error(StatusCode::BAD_REQUEST, &msg),
         Ok(Err(Failure::Internal(detail))) => {
             tracing::error!(user = user.raw(), "media upload failed: {detail}");
-            upload_error(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
+            upload_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &crate::i18n::t("error-internal"),
+            )
         }
         Err(e) => {
             tracing::error!("join: {e}");
-            upload_error(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
+            upload_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &crate::i18n::t("error-internal"),
+            )
         }
     }
 }
@@ -248,8 +253,8 @@ pub fn ingest_package_media(
 ) -> std::collections::HashMap<String, MediaId> {
     let user = permit.user();
     // Two, not more: each worker holds a decompressed file (up to the
-    // per-file cap) next to the whole package, and the process shares
-    // 1 GiB with everything else.
+    // per-file cap) next to the whole package, on a server whose memory
+    // everything else shares.
     const WORKERS: usize = 2;
     let wanted: std::collections::HashSet<&str> = rows
         .iter()
@@ -295,6 +300,14 @@ pub fn ingest_package_media(
         }
     }
     let written = std::sync::atomic::AtomicU64::new(0);
+    // Opened once: each worker's clone shares the parsed directory.
+    let archive = match flash_store::import::open_package(package) {
+        Ok(archive) => archive,
+        Err(e) => {
+            tracing::warn!(user = user.raw(), "media package: {e}");
+            return std::collections::HashMap::new();
+        }
+    };
 
     // Phase 1 (parallel): extract + validate + upload. Order is kept so
     // row ids are assigned deterministically.
@@ -306,31 +319,35 @@ pub fn ingest_package_media(
         .collect();
     std::thread::scope(|scope| {
         for _ in 0..WORKERS.min(entries.len().max(1)) {
-            scope.spawn(|| loop {
-                let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                let Some(entry) = entries.get(i) else { break };
-                let outcome =
-                    flash_store::import::extract_media_file(package, entry, MEDIA_MAX_FILE_BYTES)
-                        .map_err(|e| format!("extract: {e}"))
-                        .and_then(|bytes| {
-                            let v = validate_media(&entry.filename, &bytes)?;
-                            let so_far = written.fetch_add(
-                                bytes.len() as u64,
-                                std::sync::atomic::Ordering::Relaxed,
-                            );
-                            if so_far.saturating_add(bytes.len() as u64) > budget {
-                                return Err("media storage limit reached".to_string());
-                            }
-                            // Content-addressed: a blob any user already holds is
-                            // already in the store, so no upload needed.
-                            if !services.store().blob_known(&v.sha256).unwrap_or(false) {
-                                store
-                                    .put(&v.sha256, v.mime, &bytes)
-                                    .map_err(|e| e.to_string())?;
-                            }
-                            Ok((v, bytes.len() as u64))
-                        });
-                *results[i].lock() = Some(outcome);
+            scope.spawn(|| {
+                let mut zip = archive.clone();
+                loop {
+                    let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let Some(entry) = entries.get(i) else { break };
+                    let outcome = flash_store::import::extract_media_file(
+                        &mut zip,
+                        entry,
+                        MEDIA_MAX_FILE_BYTES,
+                    )
+                    .map_err(|e| format!("extract: {e}"))
+                    .and_then(|bytes| {
+                        let v = validate_media(&entry.filename, &bytes)?;
+                        let so_far = written
+                            .fetch_add(bytes.len() as u64, std::sync::atomic::Ordering::Relaxed);
+                        if so_far.saturating_add(bytes.len() as u64) > budget {
+                            return Err("media storage limit reached".to_string());
+                        }
+                        // Content-addressed: a blob any user already holds is
+                        // already in the store, so no upload needed.
+                        if !services.store().blob_known(&v.sha256).unwrap_or(false) {
+                            store
+                                .put(&v.sha256, v.mime, &bytes)
+                                .map_err(|e| e.to_string())?;
+                        }
+                        Ok((v, bytes.len() as u64))
+                    });
+                    *results[i].lock() = Some(outcome);
+                }
             });
         }
     });
@@ -387,105 +404,74 @@ pub fn ingest_package_media(
     map
 }
 
-/// Deletes a media row and, when no row anywhere still references the
-/// blob, the blob itself.
-pub fn delete_media(
-    services: &Services,
-    store: &dyn MediaStore,
-    user: UserId,
-    id: MediaId,
-) -> Result<(), String> {
-    let row = services
-        .store()
-        .get_media(user, id)
-        .map_err(|e| e.to_string())?
-        .ok_or("media not found")?;
-    let remaining = services
-        .store()
-        .delete_media(user, id)
-        .map_err(|e| e.to_string())?;
-    if remaining == 0 {
-        store.delete(&row.sha256).map_err(|e| e.to_string())?;
-    }
-    Ok(())
-}
-
-/// Removes blobs the store reported as unreferenced (deck or account
-/// deletion), in the background. The DB rows are already gone, so the
-/// user's request never waits on network deletes (a big deck is hundreds
-/// of them). Best effort: a failed delete is logged, never surfaced.
-pub fn remove_orphans(services: Services, store: Arc<dyn MediaStore>, hashes: &[String]) {
-    if hashes.is_empty() {
-        return;
-    }
-    let hashes = hashes.to_vec();
-    tokio::task::spawn_blocking(move || {
-        let started = std::time::Instant::now();
-        let mut failed = 0u32;
-        for sha in &hashes {
-            // An import that ran meanwhile may have adopted the blob (the
-            // store is content-addressed and skips known uploads).
-            if services.store().blob_known(sha).unwrap_or(true) {
+/// The `delete_blobs` job: removes from storage the blobs a deck or
+/// account deletion left unreferenced. The deletion wrote the job in its
+/// own transaction, so the request never waits on network deletes (a big
+/// deck is hundreds of them) and a restart or a storage outage loses
+/// none. A delete of a blob already gone succeeds, so a retry of the
+/// whole list is safe.
+pub fn delete_blobs_job(
+    state: &AppState,
+    job: &flash_store::JobRow,
+    _now: i64,
+) -> crate::jobs::Outcome {
+    use crate::jobs::Outcome;
+    let Ok(hashes) = serde_json::from_str::<Vec<String>>(&job.payload) else {
+        return Outcome::Fail("a blob list that does not parse".into());
+    };
+    let store = state.services.store();
+    let mut failed = 0u32;
+    let mut last_error = String::new();
+    for sha in &hashes {
+        // An import that ran meanwhile may have adopted the blob (the
+        // store is content-addressed and skips known uploads).
+        match store.blob_unreferenced(sha) {
+            Ok(false) => continue,
+            Ok(true) => {}
+            Err(e) => {
+                failed += 1;
+                last_error = e.to_string();
                 continue;
             }
-            if let Err(e) = store.delete(sha) {
-                failed += 1;
-                tracing::warn!("orphan blob {sha}: {e}");
-            }
         }
-        tracing::info!(
-            removed = hashes.len() as u32 - failed,
-            failed,
-            ms = started.elapsed().as_millis() as u64,
-            "orphan media blobs removed"
-        );
-    });
+        if let Err(e) = state.media.delete(sha) {
+            failed += 1;
+            last_error = e.to_string();
+        }
+    }
+    tracing::info!(blobs = hashes.len(), failed, "orphan media blobs removed");
+    if failed > 0 {
+        Outcome::Retry(format!("{failed} of {} blobs: {last_error}", hashes.len()))
+    } else {
+        Outcome::Done
+    }
 }
 
-/// Largest total of media one export bundles. It is a budget on the
-/// package written to disk, not on memory (blobs pass through one at a
-/// time); past it, the remaining refs export as plain filenames.
-pub const EXPORT_MEDIA_MAX_TOTAL: u64 = 512 * 1024 * 1024;
-
-/// What an .apkg export must bundle, decided from the rows alone: names
-/// made unique per export (Anki keys media by name) and the blob hashes.
-/// `truncated` says the budget cut the list short, so the caller can log
-/// it once for the account.
-pub struct ExportPlan {
-    pub media: ExportMediaPlan,
-    pub truncated: bool,
-}
-
-pub fn plan_export_media(services: &Services, user: UserId) -> ExportPlan {
-    let mut plan = ExportPlan {
-        media: ExportMediaPlan::default(),
-        truncated: false,
-    };
-    let rows = match services.store().media_for_export(user) {
-        Ok(rows) => rows,
-        Err(e) => {
-            tracing::warn!("export media rows: {e}");
-            return plan;
-        }
-    };
-    let mut total = 0u64;
+/// What an .apkg export must bundle, decided from the rows alone: every
+/// file the cards show, under names made unique per export (Anki keys
+/// media by name), with the blob hashes; for the cards of `deck` and its
+/// subdecks when given, so a deck's own export bundles only what its
+/// cards show. No budget: only the names and hashes are held here, and
+/// the package goes to disk one blob at a time, however large the
+/// collection.
+pub fn plan_export_media_in(
+    services: &Services,
+    user: UserId,
+    deck: Option<flash_core::DeckId>,
+) -> crate::service::Result<ExportMediaPlan> {
+    let mut plan = ExportMediaPlan::default();
     let mut taken: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for row in rows {
-        if total.saturating_add(row.size) > EXPORT_MEDIA_MAX_TOTAL {
-            plan.truncated = true;
-            break;
-        }
-        total += row.size;
+    for row in services.store().media_for_export_in(user, deck)? {
         let name = unique_name(&row.filename, &taken);
         taken.insert(name.clone());
-        plan.media.names.insert(row.id.0, name.clone());
-        plan.media.entries.push(ExportMediaEntry {
+        plan.names.insert(row.id.0, name.clone());
+        plan.entries.push(ExportMediaEntry {
             name,
             sha256: row.sha256,
             size: row.size,
         });
     }
-    plan
+    Ok(plan)
 }
 
 /// `cat.png`, then `cat-2.png`, `cat-3.png`… when a user has different
@@ -564,6 +550,52 @@ pub async fn serve_media_connector(
     headers: HeaderMap,
 ) -> Response {
     serve_media_for(state, method, user, id, headers, false).await
+}
+
+/// The signed link on a study panel's card (`mcp::panel::MediaLinks`).
+#[derive(serde::Deserialize)]
+pub struct SignedLink {
+    e: i64,
+    #[serde(deserialize_with = "crate::bounds::token")]
+    s: String,
+}
+
+/// GET /mcp-media/{id}/s: media for the MCP study panel, whose sandboxed
+/// frame has no credentials. The signature covers the id, the owner the
+/// store holds for it and the expiry; anything else is a 403, a missing
+/// row included, so the route tells nothing about which ids exist.
+pub async fn serve_media_signed(
+    State(state): State<AppState>,
+    method: axum::http::Method,
+    Path(id): Path<i64>,
+    axum::extract::Query(link): axum::extract::Query<SignedLink>,
+    headers: HeaderMap,
+) -> Response {
+    let app = state.clone();
+    let owner = crate::i18n::blocking(move || {
+        let owner = app
+            .services
+            .store()
+            .media_owner(MediaId(id))
+            .ok()
+            .flatten()?;
+        app.panel_links
+            .verify(
+                owner,
+                MediaId(id),
+                link.e,
+                &link.s,
+                crate::service::now_ms(),
+            )
+            .then_some(owner)
+    })
+    .await
+    .ok()
+    .flatten();
+    match owner {
+        Some(owner) => serve_media_for(state, method, owner, id, headers, false).await,
+        None => StatusCode::FORBIDDEN.into_response(),
+    }
 }
 
 /// How long a presigned media URL stays valid, and how long a client may
@@ -672,7 +704,7 @@ async fn serve_media_for(
     let range = parse_range(&headers);
     let head = method == axum::http::Method::HEAD;
     let app = state.clone();
-    let result = tokio::task::spawn_blocking(
+    let result = crate::i18n::blocking(
         move || -> Result<(flash_store::MediaRow, Served), StatusCode> {
             let row = app
                 .services
@@ -713,7 +745,11 @@ async fn serve_media_for(
         Ok(Err(code)) => status_response(code),
         Err(e) => {
             tracing::error!("media join: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, "internal error").into_response()
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                crate::i18n::t("error-internal"),
+            )
+                .into_response()
         }
     }
 }
@@ -728,7 +764,7 @@ pub async fn media_location(
     Path(id): Path<i64>,
 ) -> Response {
     let app = state.clone();
-    let result = tokio::task::spawn_blocking(move || -> Result<_, StatusCode> {
+    let result = crate::i18n::blocking(move || -> Result<_, StatusCode> {
         let row = app
             .services
             .store()

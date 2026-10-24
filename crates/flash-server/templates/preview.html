@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}{{ "preview-title"|t }}{% endblock %}
+{% block content %}
+{# A deck's preview (web/preview.rs): every card in the page, hidden but
+   the one on screen, and static/preview.js walks them. Nothing is sent
+   back, so spaced repetition never hears of it. #}
+<div class="row study-head">
+  <h1>{{ "preview-heading"|t }}</h1>
+  <div class="row study-head-actions">
+    <span class="preview-tag">{% include "preview_icon.html" %}{{ "preview-unaffected"|t }}</span>
+    {% if !cards.is_empty() %}<button type="button" class="fl-linkbtn small muted" data-preview-end>{{ "preview-end"|t }}</button>{% endif %}
+  </div>
+</div>
+<div id="preview" class="study-col" data-preview>
+{% if cards.is_empty() %}
+<div class="fl-card study-done study-empty">
+  <p class="muted">{{ "preview-empty"|t }}</p>
+  <a class="fl-btn fl-btn-secondary" href="/decks/{{ deck_id }}" dir="auto">{{ "preview-go-deck"|ta("name", deck_leaf) }}</a>
+</div>
+{% else %}
+<div class="fl-progress" data-preview-progress><div data-preview-bar></div></div>
+{% for card in cards %}
+<div class="fl-card study-card" data-preview-card hidden>
+  <div class="front" dir="auto">{% if let Some(html) = card.front_html %}<div class="card-rich" dir="auto">{{ html|safe }}</div>{% else %}{{ card.front }}{% endif %}</div>
+  <div class="study-back" dir="auto" data-preview-back hidden>{% if let Some(html) = card.back_html %}<div class="card-rich" dir="auto">{{ html|safe }}</div>{% else %}{{ card.back }}{% endif %}</div>
+</div>
+{% endfor %}
+<div class="row" data-preview-show-row>
+  <button type="button" class="fl-btn fl-btn-primary" aria-keyshortcuts="Space" data-preview-show>{{ "study-show-answer"|t }}</button>
+  <kbd>{{ "study-key-space"|t }}</kbd>
+</div>
+<div class="row preview-grades" data-preview-grade-row hidden>
+  <button type="button" class="fl-btn fl-btn-danger" aria-keyshortcuts="1" data-preview-grade="missed">{{ "preview-missed"|t }}</button>
+  <button type="button" class="fl-btn fl-btn-secondary" aria-keyshortcuts="2" data-preview-grade="got">{{ "preview-got"|t }}</button>
+</div>
+<div class="fl-card study-done" data-preview-done hidden>
+  <div class="done-hero">
+    <div>
+      <h2 data-preview-score></h2>
+      <p class="muted">{{ "preview-unaffected-line"|t }}{% if let Some(o) = outlook %} {{ o }}{% endif %}</p>
+    </div>
+  </div>
+  <div class="preview-score">
+    <div class="fl-progress"><div data-preview-score-bar></div></div>
+    <span class="preview-pct" data-preview-pct></span>
+  </div>
+  <div class="done-acts">
+    <button type="button" class="fl-btn fl-btn-primary" data-preview-missed></button>
+    <button type="button" class="fl-btn fl-btn-secondary" data-preview-restart>{{ "preview-start-over"|t }}</button>
+    <a class="fl-btn fl-btn-secondary" href="/" data-preview-back-today>{{ "study-back-today"|t }}</a>
+  </div>
+</div>
+{% endif %}
+</div>
+<script src="/static/preview.js?v=3" defer></script>
+{% endblock %}
+{% block js_words %}{{ super() }}{{ "js-preview"|js_island|safe }}{% endblock %}

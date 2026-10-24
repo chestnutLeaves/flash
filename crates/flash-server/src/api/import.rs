@@ -9,7 +9,7 @@ use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 
 use super::{call, ApiError, ApiJson, ApiResult, BearerUser};
-use crate::ext::Surface;
+use crate::ext::{AccountEvent, Surface};
 use crate::flows::import_flow;
 use crate::state::AppState;
 
@@ -27,7 +27,7 @@ fn busy() -> ApiError {
     ApiError::new(
         StatusCode::TOO_MANY_REQUESTS,
         "busy",
-        "another import is running; try again in a moment",
+        crate::i18n::t("import-busy"),
     )
 }
 
@@ -40,7 +40,7 @@ struct Preview {
     /// will merge into it: what a client that does not send `keep_decks`
     /// shows.
     deck: String,
-    deck_note: Option<String>,
+    deck_note: Option<crate::i18n::Words>,
     /// The decks the file names, in its order. More than one, and a client
     /// can send `keep_decks` to keep them, with `deck` as an optional deck
     /// to put them under, prefilled from `parent`.
@@ -48,7 +48,7 @@ struct Preview {
     parent: String,
     warnings: u32,
     sample: Vec<SampleRow>,
-    messages: Vec<String>,
+    messages: Vec<crate::i18n::Words>,
     token: String,
     progress_reviews: usize,
     settings_desc: Option<String>,
@@ -90,7 +90,7 @@ async fn preview(
                     Err(e) if e.status() == StatusCode::PAYLOAD_TOO_LARGE => {
                         return Err(ApiError::payload_too_large());
                     }
-                    Err(e) => return Err(ApiError::invalid(format!("upload: {e}"))),
+                    Err(e) => return Err(ApiError::malformed(format!("upload: {e}"))),
                 }
             }
             Some("deck") => {
@@ -98,17 +98,17 @@ async fn preview(
                 // The one text field of the form, bounded at the edge like
                 // a request struct's field would be.
                 if deck.len() > crate::bounds::DECK_NAME {
-                    return Err(ApiError::invalid("deck name is too long"));
+                    return Err(ApiError::invalid(crate::i18n::t("api-deck-name-long")));
                 }
             }
             _ => {}
         }
     }
     let Some((filename, bytes)) = file else {
-        return Err(ApiError::invalid("no file"));
+        return Err(ApiError::malformed("no file"));
     };
     if filename.len() > crate::bounds::FILENAME {
-        return Err(ApiError::invalid("the file's name is too long"));
+        return Err(ApiError::invalid(crate::i18n::t("api-file-name-long")));
     }
     let Ok(_permit) = state.import_semaphore.clone().try_acquire_owned() else {
         return Err(busy());
@@ -122,10 +122,7 @@ async fn preview(
     state.ext.account_event(
         &state.services,
         user.id,
-        "import_preview",
-        Surface::Mobile,
-        None,
-        None,
+        AccountEvent::new("import_preview", Surface::Mobile),
     );
     Ok(Json(Preview {
         total: preview.total,
@@ -208,10 +205,7 @@ async fn commit(
     state.ext.account_event(
         &state.services,
         user.id,
-        "import_commit",
-        Surface::Mobile,
-        None,
-        Some(committed.imported as i64),
+        AccountEvent::new("import_commit", Surface::Mobile).amount(Some(committed.imported as i64)),
     );
     Ok(Json(committed))
 }

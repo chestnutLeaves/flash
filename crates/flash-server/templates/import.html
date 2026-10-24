@@ -1,33 +1,32 @@
 {% extends "base.html" %}
-{% block title %}Import - Flash{% endblock %}
+{% block title %}{{ "import-title"|t }}{% endblock %}
 {% block content %}
-<h1>Import</h1>
-<p class="muted">CSV with header <code>front,back,tags,deck</code>, or an Anki <code>.apkg</code> export.
-Cards import as new, unless you bring your Anki study progress with them.</p>
+<h1>{{ "import-heading"|t }}</h1>
+<p class="muted">{{ "import-intro-html"|t|safe }}</p>
 
 <form class="fl-card fl-card-pad" method="post" action="/import/preview" enctype="multipart/form-data" style="display:flex;flex-direction:column;gap:14px" data-fl-drop>
   <div class="fl-field">
-    <span class="fl-label">File</span>
+    <span class="fl-label">{{ "import-file"|t }}</span>
     <div class="fl-file" data-fl-file>
       <input type="file" id="import-file" name="file" accept=".csv,.apkg" required>
-      <label for="import-file" class="fl-btn fl-btn-secondary">Choose file</label>
-      <span class="fl-file-name small muted" aria-live="polite">No file chosen, or drop one here</span>
+      <label for="import-file" class="fl-btn fl-btn-secondary">{{ "import-choose"|t }}</label>
+      <span class="fl-file-name small muted" aria-live="polite">{{ "import-no-file-chosen"|t }}</span>
     </div>
   </div>
   <div class="fl-field">
-    <label class="fl-label" for="import-deck">Into deck</label>
-    <input class="fl-input" type="text" id="import-deck" name="deck" placeholder="e.g. Pharmacology" maxlength="120"{% if let Some(p) = preview %} value="{{ p.deck }}"{% endif %}>
+    <label class="fl-label" for="import-deck">{{ "import-into"|t }}</label>
+    <input class="fl-input" type="text" dir="auto" id="import-deck" name="deck" placeholder="{{ "import-deck-placeholder"|t }}" maxlength="120"{% if let Some(p) = preview %} value="{{ p.deck }}"{% endif %}>
   </div>
-  <div><button class="fl-btn fl-btn-primary" type="submit" data-busy-label="Uploading and reading the deck…">Preview</button></div>
+  <div><button class="fl-btn fl-btn-primary" type="submit" data-busy-label="{{ "import-reading"|t }}">{{ "import-preview-button"|t }}</button></div>
 </form>
 
 {% if let Some(preview) = preview %}
 <div class="fl-card fl-card-pad" style="display:flex;flex-direction:column;gap:14px">
-  <h3>Preview</h3>
-  <p><strong>{{ preview.total }} cards</strong> ready to import from <span class="mono">{{ preview.file_name }}</span> <span class="muted">({{ preview.file_size }})</span>.
-  {% if preview.warnings > 0 %}<span class="fl-badge fl-badge-warn">{{ preview.warnings }} rows skipped</span>{% endif %}</p>
+  <h3>{{ "import-preview-heading"|t }}</h3>
+  <p>{{ "import-ready-html"|tna2(preview.total, "name", preview.file_name, "size", preview.file_size)|safe }}
+  {% if preview.warnings > 0 %}<span class="fl-badge fl-badge-warn">{{ "import-skipped"|tn(preview.warnings) }}</span>{% endif %}</p>
   <table class="fl-table">
-    <thead><tr><th>Front</th><th>Back</th></tr></thead>
+    <thead><tr><th>{{ "cards-col-front"|t }}</th><th>{{ "cards-col-back"|t }}</th></tr></thead>
     <tbody>
     {% for row in preview.sample %}
     <tr><td>{{ row.0 }}</td><td class="muted">{{ row.1 }}</td></tr>
@@ -44,65 +43,62 @@ Cards import as new, unless you bring your Anki study progress with them.</p>
        them; the field only says where to put the lot. #}
     <input type="hidden" name="keep_decks" value="on">
     <div class="fl-field">
-      <span class="fl-label">Decks in this file</span>
+      <span class="fl-label">{{ "import-decks-in-file"|t }}</span>
       <ul class="import-decks">
         {% for deck in preview.file_decks %}
-        <li><span>{{ deck.0 }}</span> <span class="muted small">{{ deck.1 }} card{% if deck.1 != 1 %}s{% endif %}</span></li>
+        <li><span>{{ deck.0 }}</span> <span class="muted small">{{ "import-deck-cards"|tn(deck.1) }}</span></li>
         {% endfor %}
-        {% if preview.more_decks > 0 %}<li class="muted small">+{{ preview.more_decks }} more</li>{% endif %}
+        {% if preview.more_decks > 0 %}<li class="muted small">{{ "import-more"|tn(preview.more_decks) }}</li>{% endif %}
       </ul>
-      <span class="fl-hint">Each deck is kept, and <code>Parent::Child</code> becomes a subdeck. A deck you already have by that name gets the cards.</span>
+      <span class="fl-hint">{{ "import-keep-hint-html"|t|safe }}</span>
     </div>
     <div class="fl-field">
-      <label class="fl-label" for="commit-deck">Put under (optional)</label>
-      <input class="fl-input" type="text" id="commit-deck" name="deck" value="{{ preview.parent }}" placeholder="Top level" maxlength="120">
-      <span class="fl-hint">Name a deck to hold them all as subdecks, or leave it blank.</span>
+      <label class="fl-label" for="commit-deck">{{ "import-put-under"|t }}</label>
+      <input class="fl-input" type="text" dir="auto" id="commit-deck" name="deck" value="{{ preview.parent }}" placeholder="{{ "import-top-level"|t }}" maxlength="120">
+      <span class="fl-hint">{{ "import-put-under-hint"|t }}</span>
     </div>
     {% else %}
     <div class="fl-field">
-      <label class="fl-label" for="commit-deck">Into deck</label>
-      <input class="fl-input" type="text" id="commit-deck" name="deck" value="{{ preview.deck }}" placeholder="Name this deck" required maxlength="120"{% if preview.deck.is_empty() %} autofocus{% endif %}>
+      <label class="fl-label" for="commit-deck">{{ "import-into"|t }}</label>
+      <input class="fl-input" type="text" dir="auto" id="commit-deck" name="deck" value="{{ preview.deck }}" placeholder="{{ "import-name-deck"|t }}" required maxlength="120"{% if preview.deck.is_empty() %} autofocus{% endif %}>
     </div>
     {% endif %}
     {% if preview.progress_reviews > 0 || preview.settings_desc.is_some() || preview.colored_cards > 0 %}
     <details class="fl-advanced">
-      <summary>Advanced</summary>
+      <summary>{{ "import-advanced"|t }}</summary>
       <div class="fl-advanced-body">
         {% if preview.colored_cards > 0 %}
         <label class="fl-check" style="align-items:baseline">
           <input type="radio" name="colors" value="keep" checked>
-          <span>Keep deck colors, matched to Flash's palette
-          ({{ preview.colored_cards }} colored cards).</span>
+          <span>{{ "import-keep-colors"|tn(preview.colored_cards) }}</span>
         </label>
         <label class="fl-check" style="align-items:baseline">
           <input type="radio" name="colors" value="clean">
-          <span>Clean look, import without colors.</span>
+          <span>{{ "import-clean-look"|t }}</span>
         </label>
         {% endif %}
         {% if preview.progress_reviews > 0 %}
         <label class="fl-check" style="align-items:baseline">
           <input type="checkbox" name="progress" value="on" checked>
-          <span>Bring my study progress ({{ preview.progress_reviews }} reviews found):
-          cards keep their schedule instead of starting as new, and every review
-          lands in your stats, streaks included.</span>
+          <span>{{ "import-bring-progress"|tn(preview.progress_reviews) }}</span>
         </label>
         {% endif %}
         {% if let Some(desc) = preview.settings_desc %}
         <label class="fl-check" style="align-items:baseline">
           <input type="checkbox" name="settings" value="on">
-          <span>Adopt this deck's Anki FSRS settings ({{ desc }}).
-          <span class="fl-hint">Replaces your current scheduling settings.</span></span>
+          <span>{{ "import-adopt-settings"|ta("settings", desc) }}
+          <span class="fl-hint">{{ "import-adopt-hint"|t }}</span></span>
         </label>
         {% endif %}
       </div>
     </details>
     {% endif %}
-    <div><button class="fl-btn fl-btn-secondary" type="submit" data-busy-label="Importing cards and media…">Import {{ preview.total }} cards</button></div>
+    <div><button class="fl-btn fl-btn-secondary" type="submit" data-busy-label="{{ "import-importing"|t }}">{{ "import-submit"|tn(preview.total) }}</button></div>
   </form>
 </div>
 {% endif %}
 
 {% if let Some(n) = imported %}
-<div class="row"><span class="fl-badge fl-badge-good"><span class="fl-badge-dot"></span>imported</span><span class="small muted">{{ n }} cards added.</span></div>
+<div class="row"><span class="fl-badge fl-badge-good"><span class="fl-badge-dot"></span>{{ "import-imported"|t }}</span><span class="small muted">{{ "import-added"|tn(n) }}</span></div>
 {% endif %}
 {% endblock %}

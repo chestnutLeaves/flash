@@ -12,7 +12,18 @@ db-urls = ["https://github.com/rustsec/advisory-db"]
 yanked = "deny"
 # Advisories with no fix yet go here with the id and a reason, never
 # silently.
-ignore = []
+ignore = [
+    # Marvin, in `rsa` (no fixed release exists). It is a timing attack on
+    # private-key operations. Here `rsa` only verifies passkey signatures
+    # with public keys (webauthn-rs, via crypto-glue) and generates
+    # throwaway keys in tests; every RSA signature the server makes goes
+    # through ring. Mirrored in .github/workflows/audit.yml.
+    { id = "RUSTSEC-2023-0071", reason = "rsa is used for public-key verification and test keys only; no private-key operation in production" },
+    # basic-toml is unmaintained. askama_derive (0.16.1, the latest) reads
+    # a crate's askama.toml with it, at build time only; it never runs in
+    # the server. Drop this when askama moves off it.
+    { id = "RUSTSEC-2026-0374", reason = "build-time only, through askama_derive's config feature; no newer askama yet" },
+]
 
 [licenses]
 version = 2
@@ -37,8 +48,8 @@ allow = [
     "bzip2-1.0.6",
 ]
 confidence-threshold = 0.8
-# The workspace crates are never published; the hosted extension carries
-# its own licence file rather than an SPDX id.
+# The workspace crates are never published, so their own licence fields
+# are not checked.
 private = { ignore = true }
 
 [bans]

@@ -1,28 +1,56 @@
-{# A deck's page: the decks under it and the field that makes another, in a
-   panel the "Subdecks" button in the page head opens and closes
-   (`static/ui.js`). It is closed whenever the page loads, so the page opens
-   on the deck's own cards, and nothing about it is remembered. Its rows'
-   buttons swap `#subdecks-body` in place instead of reloading, so the panel
-   is not shut on the person using it. Without script the button is a link
-   to the panel, which shows itself as the link's target. An archived deck
-   lists what is under it but offers no new one: nothing is made inside an
-   archived deck. Expects `decks`, `rows`, `deck_id` and `archived`. #}
-<section class="deck-subdecks" id="subdecks" hidden>
-  <h2>Subdecks</h2>
-  <div class="deck-subdecks-body" id="subdecks-body">
-    {% if !decks.is_empty() %}
-    <table class="fl-table" data-deck-tree>
-      <thead><tr><th>Deck</th><th>Due</th><th>New</th><th></th></tr></thead>
-      <tbody>
-      {% include "deck_rows.html" %}
-      </tbody>
-    </table>
-    {% endif %}
-    {% if !archived %}
-    <form class="row" method="post" action="/decks/{{ deck_id }}/subdecks">
-      <input class="fl-input" type="text" name="name" placeholder="New subdeck name" aria-label="New subdeck name" required maxlength="120">
-      <button class="fl-btn fl-btn-secondary" type="submit">Add subdeck</button>
-    </form>
-    {% endif %}
+{# A deck's page: the decks directly under it, as rows to go into, above
+   its cards. A parent deck holds cards of its own and its subdecks'; its
+   list, Study and counts take in both, so the rows say where the
+   subdecks are and the cards say which subdeck each lives in.
+
+   Each row is a link into the subdeck; its Study is a link of its own
+   beside it, not inside it. The first rows show and the rest wait behind
+   "Show all". Archived subdecks wait behind their own quiet row, each
+   with Unarchive, which swaps the rows and the page head in place:
+   unarchiving a subdeck brings back the decks it sits in, which may be
+   this one. An archived deck makes nothing new inside it. Expects
+   `subs`, `archived_subs`, `deck_id` and `archived`. #}
+<nav class="deck-subs" id="deck-subdecks" aria-label="{{ "deck-subdecks-heading"|t }}"{% if subs.is_empty() && archived_subs.is_empty() %} hidden{% endif %}>
+  {% for sub in subs %}
+  <div class="deck-sub"{% if loop.index > 5 %} hidden data-sub-more{% endif %}>
+    <a class="deck-sub-link" href="/decks/{{ sub.id }}">
+      <svg class="deck-sub-icon" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/></svg>
+      <span class="deck-sub-name" dir="auto">{{ sub.leaf }}</span>
+      <span class="deck-sub-meta">{% if sub.due > 0 %}<span><b>{{ sub.due }}</b> {{ "deck-meta-due"|tn(sub.due) }}</span>{% endif %}<span>{{ "deck-sub-cards"|tn(sub.cards) }}</span></span>
+      <svg class="deck-sub-go" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path class="fl-dir" d="m9 18 6-6-6-6"/></svg>
+    </a>
+    {% if sub.due + sub.new > 0 %}<a class="deck-sub-study" href="/study?deck={{ sub.id }}" aria-label="{{ "deck-sub-study-label"|ta("name", sub.leaf) }}">{{ "decks-study"|t }}</a>{% endif %}
   </div>
-</section>
+  {% endfor %}
+  {% if subs.len() > 5 %}
+  <button class="deck-sub deck-sub-row" type="button" data-subs-all>{{ "deck-subs-all"|tn(subs.len()) }}</button>
+  {% endif %}
+  {% if !archived_subs.is_empty() %}
+  <details class="deck-sub deck-sub-archived">
+    <summary class="deck-sub-row">{{ "deck-subs-archived"|tn(archived_subs.len()) }}</summary>
+    {% for sub in archived_subs %}
+    <div class="deck-sub-archived-row">
+      <a href="/decks/{{ sub.id }}" dir="auto">{{ sub.leaf }}</a>
+      <form method="post" action="/decks/{{ sub.id }}/unarchive" hx-boost="true" hx-push-url="false" hx-select="#deck-subdecks" hx-target="#deck-subdecks" hx-select-oob="#deck-head" hx-swap="outerHTML show:none">
+        <input type="hidden" name="back" value="deck">
+        <input type="hidden" name="from" value="{{ deck_id }}">
+        <button class="small muted fl-linkbtn" type="submit">{{ "decks-unarchive"|t }}</button>
+      </form>
+    </div>
+    {% endfor %}
+  </details>
+  {% endif %}
+  {% if !archived %}
+  <div class="deck-sub deck-sub-new">
+    <button class="deck-sub-row" type="button" data-subnew-open aria-expanded="false" aria-controls="deck-subnew">
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+      <span>{{ "deck-subnew-open"|t }}</span>
+    </button>
+    <form class="deck-sub-form" id="deck-subnew" method="post" action="/decks/{{ deck_id }}/subdecks" hidden>
+      <input class="fl-input" type="text" dir="auto" name="name" placeholder="{{ "deck-new-subdeck"|t }}" aria-label="{{ "deck-new-subdeck"|t }}" required maxlength="120">
+      <button class="fl-btn fl-btn-sm fl-btn-primary" type="submit">{{ "deck-add-subdeck"|t }}</button>
+      <button class="fl-btn fl-btn-sm fl-btn-ghost" type="button" data-subnew-cancel>{{ "deck-subnew-cancel"|t }}</button>
+    </form>
+  </div>
+  {% endif %}
+</nav>

@@ -12,6 +12,15 @@ workspace = true
 
 [dependencies]
 fsrs = "6.6.1"
-
-[dev-dependencies]
+# The study day starts at a local hour on the account's own calendar.
+# The tz database is built in too, for the names a host's copy lacks
+# (`day::time_zone`).
+jiff = { version = "0.2.35", features = ["tzdb-bundle-always"] }
+# The study scope a session stores is JSON once it names tags, because a
+# tag may hold any character and no separator would be safe; a card
+# side's speech blocks are JSON too.
+serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
+# Every letter a card, a deck name or a tag holds is kept in one form
+# (NFC): "é" typed on a phone and "é" pasted from a PDF are one letter.
+unicode-normalization = "0.1.25"

@@ -7,6 +7,7 @@
 //! 4-permit semaphore so at most four 64 MiB hashes are ever in flight
 //! under the 1 GiB cgroup in flash.service.
 
+use crate::i18n::filters;
 use std::sync::OnceLock;
 
 use argon2::password_hash::phc::PasswordHash;
@@ -14,13 +15,13 @@ use argon2::password_hash::{PasswordHasher, PasswordVerifier};
 use argon2::{Algorithm, Argon2, Params, Version};
 use askama::Template;
 use axum::extract::{Path, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::Form;
 use axum_extra::extract::CookieJar;
 use serde::Deserialize;
 
-use crate::auth::{self, hash_token, AuthUser, Theme};
+use crate::auth::{self, hash_token, FullUser, Theme};
 use crate::flows::{account, enroll, reset};
 use crate::service::now_ms;
 use crate::state::AppState;
@@ -84,10 +85,10 @@ pub fn dummy_phc() -> &'static str {
 
 pub fn validate_new_password(password: &str) -> Result<(), &'static str> {
     if password.chars().count() < MIN_PASSWORD_CHARS {
-        return Err("password must be at least 8 characters");
+        return Err("auth-password-short");
     }
     if password.len() > MAX_PASSWORD_BYTES {
-        return Err("password is too long");
+        return Err("auth-password-long");
     }
     Ok(())
 }
@@ -101,7 +102,7 @@ pub async fn hash_blocking(state: &AppState, password: String) -> Result<String,
         .acquire_owned()
         .await
         .map_err(|e| err500("pw semaphore", e))?;
-    tokio::task::spawn_blocking(move || {
+    crate::i18n::blocking(move || {
         let result = hash_password(&password);
         drop(permit);
         result
@@ -122,7 +123,7 @@ pub async fn verify_blocking(
         .acquire_owned()
         .await
         .map_err(|e| err500("pw semaphore", e))?;
-    tokio::task::spawn_blocking(move || {
+    crate::i18n::blocking(move || {
         let outcome = verify_password(&phc, &password);
         drop(permit);
         outcome
@@ -133,7 +134,11 @@ pub async fn verify_blocking(
 
 fn err500(context: &str, err: impl std::fmt::Display) -> Response {
     tracing::error!("{context}: {err}");
-    (StatusCode::INTERNAL_SERVER_ERROR, "internal error").into_response()
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        crate::i18n::t("error-internal"),
+    )
+        .into_response()
 }
 
 /// A `flows` call: `ServiceError` maps the way the web's `act` maps it.
@@ -151,17 +156,18 @@ where
     F: FnOnce(&flash_store::Store) -> Result<T, flash_store::StoreError> + Send + 'static,
 {
     let services = state.services.clone();
-    tokio::task::spawn_blocking(move || f(services.store()))
+    crate::i18n::blocking(move || f(services.store()))
         .await
         .map_err(|e| err500("join", e))?
         .map_err(|e| err500("store", e))
 }
 
-const UNIFORM_LOGIN_ERROR: &str = "Incorrect email or password.";
+/// A message id.
+const UNIFORM_LOGIN_ERROR: &str = "login-wrong";
 
 /// Shape check before any lookup: invite and reset tokens are base64url
 /// from `new_token`, so anything else is rejected without a query.
-pub(crate) fn token_shape_ok(token: &str) -> bool {
+pub fn token_shape_ok(token: &str) -> bool {
     token.len() <= 100
         && !token.is_empty()
         && token
@@ -184,11 +190,19 @@ pub struct PasswordLoginForm {
 pub async fn login_password(
     State(state): State<AppState>,
     theme: Theme,
+    headers: HeaderMap,
     Form(form): Form<PasswordLoginForm>,
 ) -> Response {
+    let browser = auth::Browser::from_headers(&headers);
     let next = crate::web::clean_next(Some(form.next));
     let render_error = |email: String| {
-        crate::web::render_login_error(&state, theme, next.clone(), email, UNIFORM_LOGIN_ERROR)
+        crate::web::render_login_error(
+            &state,
+            theme,
+            next.clone(),
+            email,
+            &crate::i18n::t(UNIFORM_LOGIN_ERROR),
+        )
     };
     let Ok(email) = crate::webauthn::normalize_email(&form.email) else {
         return render_error(form.email);
@@ -242,7 +256,7 @@ pub async fn login_password(
     let user = login.user;
     let result = store_call(&state, move |s| {
         crate::flows::login::finish(s, user, rehashed.as_deref())?;
-        auth::issue_session(s, user, now)
+        auth::issue_session(s, user, &browser, now)
     })
     .await;
     match result {
@@ -261,7 +275,7 @@ pub async fn login_password(
 pub struct ResetRequestPage {
     pub theme: &'static str,
     pub sent: bool,
-    pub error: Option<String>,
+    pub error: Option<crate::i18n::Words>,
     /// The extension's challenge widget, if it puts one on this form.
     pub captcha_html: String,
 }
@@ -277,7 +291,7 @@ fn render_reset_request(
     state: &AppState,
     theme: Theme,
     sent: bool,
-    error: Option<String>,
+    error: Option<crate::i18n::Words>,
 ) -> Response {
     let captcha_html = match state.ext.render(state, crate::ext::Slot::Captcha) {
         Ok(html) => html,
@@ -289,7 +303,7 @@ fn render_reset_request(
         error,
         captcha_html,
     };
-    let mut response = Html(page.render().unwrap_or_default()).into_response();
+    let mut response = Html(crate::i18n::render_current(&page).unwrap_or_default()).into_response();
     if let Some(csp) = state.ext.captcha_csp(state) {
         response
             .headers_mut()
@@ -302,9 +316,9 @@ fn render_reset_request(
 pub struct ResetRequestForm {
     #[serde(deserialize_with = "crate::bounds::email")]
     email: String,
-    #[serde(default, rename = "cf-turnstile-response")]
+    #[serde(default, rename = "captcha-token")]
     #[serde(deserialize_with = "crate::bounds::captcha_token")]
-    cf_turnstile_response: String,
+    captcha_token: String,
 }
 
 pub async fn reset_request_submit(
@@ -316,10 +330,8 @@ pub async fn reset_request_submit(
     let Some(mailer) = state.mailer.clone() else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    if let Err(msg) =
-        crate::captcha::require_captcha(&state, &form.cf_turnstile_response, &headers).await
-    {
-        return render_reset_request(&state, theme, false, Some(msg.to_string()));
+    if let Err(msg) = crate::captcha::require_captcha(&state, &form.captcha_token, &headers).await {
+        return render_reset_request(&state, theme, false, Some(crate::i18n::t(msg)));
     }
     // Uniform: a malformed or unknown email gets the same "check your
     // email" page.
@@ -344,7 +356,7 @@ pub async fn reset_request_submit(
 pub struct ResetConfirmPage {
     pub theme: &'static str,
     pub token: String,
-    pub error: Option<String>,
+    pub error: Option<crate::i18n::Words>,
 }
 
 pub async fn reset_confirm_page(
@@ -353,7 +365,11 @@ pub async fn reset_confirm_page(
     Path(token): Path<String>,
 ) -> Response {
     if !token_shape_ok(&token) {
-        return (StatusCode::BAD_REQUEST, "malformed reset link").into_response();
+        return crate::web::dead_link(
+            theme,
+            StatusCode::BAD_REQUEST,
+            crate::i18n::t("auth-reset-spent"),
+        );
     }
     let hash = hash_token(&token);
     let now = now_ms();
@@ -365,13 +381,13 @@ pub async fn reset_confirm_page(
                 token,
                 error: None,
             };
-            Html(page.render().unwrap_or_default()).into_response()
+            Html(crate::i18n::render_current(&page).unwrap_or_default()).into_response()
         }
-        Ok(None) => (
+        Ok(None) => crate::web::dead_link(
+            theme,
             StatusCode::FORBIDDEN,
-            "This reset link is invalid, expired, or already used.",
-        )
-            .into_response(),
+            crate::i18n::t("auth-reset-spent"),
+        ),
         Err(response) => response,
     }
 }
@@ -388,24 +404,30 @@ pub async fn reset_confirm_submit(
     State(state): State<AppState>,
     theme: Theme,
     Path(token): Path<String>,
+    headers: HeaderMap,
     Form(form): Form<ResetConfirmForm>,
 ) -> Response {
+    let browser = auth::Browser::from_headers(&headers);
     if !token_shape_ok(&token) {
-        return (StatusCode::BAD_REQUEST, "malformed reset link").into_response();
+        return crate::web::dead_link(
+            theme,
+            StatusCode::BAD_REQUEST,
+            crate::i18n::t("auth-reset-spent"),
+        );
     }
-    let render_error = |msg: &str| {
+    let render_error = |msg: crate::i18n::Words| {
         let page = ResetConfirmPage {
             theme: theme.as_str(),
             token: token.clone(),
-            error: Some(msg.to_string()),
+            error: Some(msg),
         };
-        Html(page.render().unwrap_or_default()).into_response()
+        Html(crate::i18n::render_current(&page).unwrap_or_default()).into_response()
     };
     if form.password != form.confirm {
-        return render_error("passwords don't match");
+        return render_error(crate::i18n::t("auth-passwords-differ"));
     }
-    if let Err(msg) = validate_new_password(&form.password) {
-        return render_error(msg);
+    if let Err(id) = validate_new_password(&form.password) {
+        return render_error(crate::i18n::t(id));
     }
     // Look the token up before hashing: a stranger with a made-up link
     // must not be able to spend the Argon2 permits (the reset is not
@@ -415,9 +437,7 @@ pub async fn reset_confirm_submit(
         let hash = hash.clone();
         match store_call(&state, move |s| s.lookup_password_reset(&hash, now_ms())).await {
             Ok(Some(_)) => {}
-            Ok(None) => {
-                return render_error("this reset link is invalid, expired, or already used")
-            }
+            Ok(None) => return render_error(crate::i18n::t("auth-reset-spent-line")),
             Err(response) => return response,
         }
     }
@@ -430,18 +450,18 @@ pub async fn reset_confirm_submit(
     let result = flow_call(&state, move |s| {
         let now = now_ms();
         match reset::confirm(s.store(), &hash, &phc, now)? {
-            Some(user) => Ok(Some(auth::issue_session(s.store(), user, now)?)),
+            Some(user) => Ok(Some(auth::issue_session(s.store(), user, &browser, now)?)),
             None => Ok(None),
         }
     })
     .await;
     match result {
         Ok(Some(token)) => auth::with_session_cookie(&token, Redirect::to("/").into_response()),
-        Ok(None) => (
+        Ok(None) => crate::web::dead_link(
+            theme,
             StatusCode::FORBIDDEN,
-            "This reset link is invalid, expired, or already used.",
-        )
-            .into_response(),
+            crate::i18n::t("auth-reset-spent"),
+        ),
         Err(response) => response,
     }
 }
@@ -464,10 +484,16 @@ pub async fn enroll_password(
     State(state): State<AppState>,
     theme: Theme,
     Path(token): Path<String>,
+    headers: HeaderMap,
     Form(form): Form<EnrollPasswordForm>,
 ) -> Response {
+    let browser = auth::Browser::from_headers(&headers);
     if !token_shape_ok(&token) {
-        return (StatusCode::BAD_REQUEST, "malformed invite").into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            crate::i18n::t("auth-invite-malformed"),
+        )
+            .into_response();
     }
     let invite_hash = hash_token(&token);
     let now = now_ms();
@@ -481,27 +507,24 @@ pub async fn enroll_password(
         {
             Ok(Some(enrollment)) => enrollment,
             Ok(None) => {
-                return (
-                    StatusCode::FORBIDDEN,
-                    "This invite link is invalid, expired, or already used.",
-                )
-                    .into_response()
+                return (StatusCode::FORBIDDEN, crate::i18n::t("auth-invite-spent")).into_response()
             }
             Err(response) => return response,
         }
     };
     let next = crate::web::clean_next(Some(form.next));
-    let render_error =
-        |msg: &str| crate::web::render_enroll_error(theme, &token, &enrollment, msg, &next);
+    let render_error = |msg: crate::i18n::Words| {
+        crate::web::render_enroll_error(theme, &token, &enrollment, msg, &next)
+    };
     if form.password != form.confirm {
-        return render_error("passwords don't match");
+        return render_error(crate::i18n::t("auth-passwords-differ"));
     }
-    if let Err(msg) = validate_new_password(&form.password) {
-        return render_error(msg);
+    if let Err(id) = validate_new_password(&form.password) {
+        return render_error(crate::i18n::t(id));
     }
     // Signup invites lock the email; admin invites take the typed one.
-    if let Err(msg) = enroll::resolve_email(&enrollment, &form.email) {
-        return render_error(msg);
+    if let Err(id) = enroll::resolve_email(&enrollment, &form.email) {
+        return render_error(crate::i18n::t(id));
     }
 
     let phc = match hash_blocking(&state, form.password).await {
@@ -521,20 +544,18 @@ pub async fn enroll_password(
             &phc,
             now,
         )?
-        .with_session(store, now)
+        .with_session(store, &browser, now)
     })
     .await;
     match created {
         Ok((enroll::EnrollOutcome::Created(_), Some(token))) => {
             auth::with_session_cookie(&token, Redirect::to(&next).into_response())
         }
-        Ok((enroll::EnrollOutcome::EmailTaken, _)) => render_error("email already in use"),
-        Ok((enroll::EnrollOutcome::BadEmail(msg), _)) => render_error(msg),
-        Ok(_) => (
-            StatusCode::FORBIDDEN,
-            "This invite link is invalid, expired, or already used.",
-        )
-            .into_response(),
+        Ok((enroll::EnrollOutcome::EmailTaken, _)) => {
+            render_error(crate::i18n::t("auth-email-taken"))
+        }
+        Ok((enroll::EnrollOutcome::BadEmail(id), _)) => render_error(crate::i18n::t(id)),
+        Ok(_) => (StatusCode::FORBIDDEN, crate::i18n::t("auth-invite-spent")).into_response(),
         Err(response) => response,
     }
 }
@@ -551,7 +572,7 @@ pub struct SetPasswordForm {
 
 pub async fn settings_set_password(
     State(state): State<AppState>,
-    AuthUser { id: user, .. }: AuthUser,
+    FullUser { id: user, .. }: FullUser,
     Form(form): Form<SetPasswordForm>,
 ) -> Response {
     if form.password != form.confirm || validate_new_password(&form.password).is_err() {
@@ -587,7 +608,7 @@ pub struct ChangePasswordForm {
 
 pub async fn settings_change_password(
     State(state): State<AppState>,
-    AuthUser { id: user, .. }: AuthUser,
+    FullUser { id: user, .. }: FullUser,
     jar: CookieJar,
     Form(form): Form<ChangePasswordForm>,
 ) -> Response {
@@ -627,7 +648,7 @@ pub struct RemovePasswordForm {
 
 pub async fn settings_remove_password(
     State(state): State<AppState>,
-    AuthUser { id: user, .. }: AuthUser,
+    FullUser { id: user, .. }: FullUser,
     Form(form): Form<RemovePasswordForm>,
 ) -> Response {
     match require_current_password(&state, user, form.current).await {
@@ -667,11 +688,14 @@ pub struct DeleteAccountForm {
 /// cleared and a neutral notice on the login page.
 pub async fn settings_delete_account(
     State(state): State<AppState>,
-    AuthUser { id: user, is_admin }: AuthUser,
+    FullUser { id: user, is_admin }: FullUser,
     Form(form): Form<DeleteAccountForm>,
 ) -> Response {
     let refuse = |why: &str| Redirect::to(&format!("/settings?delerr={why}")).into_response();
-    if form.confirm.trim() != "DELETE" {
+    // The reader's own word for it, or the English one a page in
+    // another language may have asked for.
+    let typed = form.confirm.trim();
+    if typed != "DELETE" && typed != crate::i18n::t("settings-delete-word") {
         return refuse("confirm");
     }
     let has_password = match store_call(&state, move |s| s.get_password_hash(user)).await {
@@ -691,16 +715,13 @@ pub async fn settings_delete_account(
         account::delete_account(&app, user, is_admin, now_ms())
     })
     .await;
-    let deleted = match outcome {
-        Ok(Ok(deleted)) => deleted,
+    match outcome {
+        Ok(Ok(_deleted)) => {}
         Ok(Err(refusal)) => return refuse(refusal.code()),
         Err(response) => return response,
     };
-    crate::media::remove_orphans(
-        state.services.clone(),
-        state.media.clone(),
-        &deleted.orphan_blobs,
-    );
+    // The purge owes its orphaned blobs to the job worker.
+    crate::jobs::wake(&state);
 
     let mut response = Redirect::to("/login?deleted=1").into_response();
     if let Ok(value) = auth::clear_cookie_header(auth::SESSION_COOKIE).parse() {

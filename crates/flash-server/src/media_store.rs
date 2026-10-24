@@ -1,13 +1,14 @@
 //! Where media bytes live. Metadata (ownership, MIME, refcounts) is in
 //! SQLite; the blob itself is content-addressed by sha256 and stored either
-//! on local disk (dev, tests, self-host) or in an S3-compatible bucket such
-//! as Cloudflare R2 (durable and off-box; a database replicator does not
-//! cover blobs, so this is what keeps media safe).
+//! on local disk (dev, tests, self-host) or in an S3-compatible bucket
+//! (durable and off-box: a copy of the database alone does not hold the
+//! blobs).
 //!
 //! Sync by design: every call happens inside spawn_blocking, like the
-//! mailer and captcha clients. The R2 client speaks plain S3 with a
+//! mailer and captcha clients. The bucket client speaks plain S3 with a
 //! hand-rolled SigV4 (HMAC-SHA256 over a canonical request). It is small
-//! enough to own outright, and it keeps the vendored-OpenSSL/ureq build.
+//! enough to own outright, and it keeps an S3 SDK and its own HTTP and TLS
+//! stack out of the build: ureq carries it.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -159,6 +160,7 @@ impl MediaStore for DiskStore {
             .map_err(|e| MediaStoreError::Other(format!("media dir: {e}")))?;
         // One temp name per writer: two workers ingesting the same blob
         // must not truncate each other's file mid-write.
+        // global-state: a sequence for unique names; nothing reads it back.
         static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let tmp = dir.join(format!("{sha256}.tmp-{}-{seq}", std::process::id()));
@@ -218,7 +220,7 @@ impl MediaStore for DiskStore {
 
 // ---- S3-compatible bucket (path-style, SigV4) ----
 
-pub struct R2Store {
+pub struct S3Store {
     /// Scheme + host, no trailing slash, e.g. https://s3.us-east-1.amazonaws.com
     endpoint: String,
     host: String,
@@ -234,7 +236,7 @@ const EMPTY_SHA256: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495
 const REGION: &str = "auto";
 const SERVICE: &str = "s3";
 
-impl R2Store {
+impl S3Store {
     pub fn new(config: &MediaR2Config, max_read: u64) -> Result<Self, String> {
         let endpoint = config.endpoint.trim_end_matches('/').to_string();
         let host = endpoint
@@ -337,11 +339,11 @@ impl R2Store {
     }
 }
 
-impl MediaStore for R2Store {
+impl MediaStore for S3Store {
     fn put(&self, sha256: &str, mime: &str, bytes: &[u8]) -> Result<(), MediaStoreError> {
         let key = object_key(sha256)?;
-        // The key is the bytes' own sha256 for media, but a voice clip is
-        // keyed by what it says, not by its bytes, so the signed content
+        // The key is the bytes' own sha256 for media, but another caller's
+        // object may be keyed by something else, so the signed content
         // hash is computed here from the bytes themselves. S3-style
         // stores refuse a PUT whose declared hash is not the body's.
         let payload_hash = hex(&Sha256::digest(bytes));
@@ -362,7 +364,7 @@ impl MediaStore for R2Store {
             .header("x-amz-content-sha256", &payload_hash)
             .header("x-amz-date", &amz_date)
             .send(bytes)
-            .map_err(|e| MediaStoreError::Other(format!("r2 put: {e}")))?;
+            .map_err(|e| MediaStoreError::Other(format!("s3 put: {e}")))?;
         let status = response.status().as_u16();
         // Drain the (tiny) body so the connection goes back to the pool;
         // otherwise every PUT pays a fresh TLS handshake.
@@ -375,7 +377,7 @@ impl MediaStore for R2Store {
         if (200..300).contains(&status) {
             Ok(())
         } else {
-            Err(MediaStoreError::Other(format!("r2 put: HTTP {status}")))
+            Err(MediaStoreError::Other(format!("s3 put: HTTP {status}")))
         }
     }
 
@@ -408,13 +410,13 @@ impl MediaStore for R2Store {
         }
         let mut response = request
             .call()
-            .map_err(|e| MediaStoreError::Other(format!("r2 get: {e}")))?;
+            .map_err(|e| MediaStoreError::Other(format!("s3 get: {e}")))?;
         let status = response.status().as_u16();
         match status {
             200 | 206 => {}
             404 => return Err(MediaStoreError::NotFound),
             416 => return Err(MediaStoreError::RangeUnsatisfiable),
-            _ => return Err(MediaStoreError::Other(format!("r2 get: HTTP {status}"))),
+            _ => return Err(MediaStoreError::Other(format!("s3 get: HTTP {status}"))),
         }
         let content_range = response
             .headers()
@@ -426,10 +428,10 @@ impl MediaStore for R2Store {
             .with_config()
             .limit(self.max_read)
             .read_to_vec()
-            .map_err(|e| MediaStoreError::Other(format!("r2 body: {e}")))?;
+            .map_err(|e| MediaStoreError::Other(format!("s3 body: {e}")))?;
         let (start, total) = match (status, content_range) {
             (206, Some(cr)) => parse_content_range(&cr)
-                .ok_or_else(|| MediaStoreError::Other(format!("r2 content-range: {cr}")))?,
+                .ok_or_else(|| MediaStoreError::Other(format!("s3 content-range: {cr}")))?,
             _ => (0, bytes.len() as u64),
         };
         Ok(Blob {
@@ -456,18 +458,18 @@ impl MediaStore for R2Store {
             .header("x-amz-content-sha256", EMPTY_SHA256)
             .header("x-amz-date", &amz_date)
             .call()
-            .map_err(|e| MediaStoreError::Other(format!("r2 delete: {e}")))?;
+            .map_err(|e| MediaStoreError::Other(format!("s3 delete: {e}")))?;
         let status = response.status().as_u16();
         // S3 answers 204 for deletes, including of missing keys.
         if (200..300).contains(&status) || status == 404 {
             Ok(())
         } else {
-            Err(MediaStoreError::Other(format!("r2 delete: HTTP {status}")))
+            Err(MediaStoreError::Other(format!("s3 delete: HTTP {status}")))
         }
     }
 
     fn describe(&self) -> String {
-        format!("r2 ({}/{})", self.host, self.bucket)
+        format!("s3 ({}/{})", self.host, self.bucket)
     }
 
     fn presigned_get(
@@ -496,7 +498,7 @@ fn parse_content_range(value: &str) -> Option<(u64, u64)> {
 // ---- SigV4 ----
 
 /// Lowercase hex of a digest (content addresses, SigV4 hashes).
-pub(crate) fn hex(bytes: &[u8]) -> String {
+pub fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
@@ -655,7 +657,7 @@ pub fn from_config(
     max_read: u64,
 ) -> Result<Box<dyn MediaStore>, String> {
     match r2 {
-        Some(cfg) => Ok(Box::new(R2Store::new(cfg, max_read)?)),
+        Some(cfg) => Ok(Box::new(S3Store::new(cfg, max_read)?)),
         None => Ok(Box::new(DiskStore::new(data_dir.join("media")))),
     }
 }
@@ -827,8 +829,8 @@ mod tests {
     }
 
     /// The access key id from AWS's own documentation examples, assembled
-    /// so the source never spells a credential-shaped token (the public
-    /// tree's leak scan rejects that shape on sight).
+    /// so the source never spells a credential-shaped token (secret
+    /// scanners flag that shape on sight).
     const AWS_EXAMPLE_KEY: &str = concat!("AKIA", "IOSFODNN7EXAMPLE");
 
     /// AWS's published presigned-URL example (S3 docs, "Authenticating
@@ -867,7 +869,7 @@ mod tests {
             "secret",
             "auto",
             "s3",
-            "acct.r2.example",
+            "acct.s3.example",
             "/flash-media/ab/abcdef",
             "20260905T120000Z",
             900,
@@ -888,10 +890,10 @@ mod tests {
     }
 
     #[test]
-    fn r2_store_presigns_path_style_urls_on_its_endpoint() {
-        let store = R2Store::new(
+    fn s3_store_presigns_path_style_urls_on_its_endpoint() {
+        let store = S3Store::new(
             &MediaR2Config {
-                endpoint: "https://acct.r2.example".into(),
+                endpoint: "https://acct.s3.example".into(),
                 bucket: "flash-media".into(),
                 access_key_id: "AKIDEXAMPLE".into(),
                 secret_access_key: "secret".into(),
@@ -904,22 +906,21 @@ mod tests {
             .presigned_get(&sha, "image/png", "cat.png", Duration::from_secs(900))
             .unwrap()
             .unwrap();
-        assert!(url.starts_with("https://acct.r2.example/flash-media/ab/"));
+        assert!(url.starts_with("https://acct.s3.example/flash-media/ab/"));
         assert!(url.contains("X-Amz-Expires=900"));
         assert!(url.contains("response-content-type=image%2Fpng"));
-        assert_eq!(store.origin().as_deref(), Some("https://acct.r2.example"));
+        assert_eq!(store.origin().as_deref(), Some("https://acct.s3.example"));
     }
 
     /// A PUT declares the body's own hash even when the object key is not
-    /// that hash (a voice clip is keyed by what it says). A loopback
-    /// listener plays the bucket and records the request.
+    /// that hash. A fake on an in-memory host plays the bucket and records
+    /// the request.
     #[test]
-    fn r2_put_signs_the_body_hash_not_the_key() {
+    fn s3_put_signs_the_body_hash_not_the_key() {
         use std::io::{Read, Write};
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
+        let (host, mut acceptor) = crate::testing::MemoryHost::accepting();
         let server = std::thread::spawn(move || {
-            let (mut socket, _) = listener.accept().unwrap();
+            let mut socket = acceptor.accept().unwrap();
             let mut raw = Vec::new();
             let mut buf = [0u8; 4096];
             loop {
@@ -953,9 +954,9 @@ mod tests {
                 .unwrap();
             (head, body)
         });
-        let store = R2Store::new(
+        let store = S3Store::new(
             &MediaR2Config {
-                endpoint: format!("http://127.0.0.1:{port}"),
+                endpoint: "http://bucket.test".into(),
                 bucket: "flash-media".into(),
                 access_key_id: "AKIDEXAMPLE".into(),
                 secret_access_key: "secret".into(),
@@ -963,9 +964,14 @@ mod tests {
             1024,
         )
         .unwrap();
+        // The bucket's agent as production sets it up, reaching the fake.
+        let store = S3Store {
+            agent: host.agent(std::time::Duration::from_secs(30), false),
+            ..store
+        };
         let key = "ab".repeat(32);
         let bytes = b"not the bytes the key names";
-        store.put(&key, "audio/mp4", bytes).unwrap();
+        store.put(&key, "application/octet-stream", bytes).unwrap();
         let (head, body) = server.join().unwrap();
         let expected = hex(&Sha256::digest(bytes));
         let declared = head
@@ -986,18 +992,18 @@ mod tests {
     }
 
     /// Runs only against a real bucket: set FLASH_MEDIA_R2_* and
-    /// `cargo test -p flash-server r2_round_trip -- --ignored --nocapture`.
+    /// `cargo test -p flash-server bucket_round_trip -- --ignored --nocapture`.
     #[test]
     #[ignore]
-    fn r2_round_trip() {
+    fn bucket_round_trip() {
         let cfg = MediaR2Config {
             endpoint: std::env::var("FLASH_MEDIA_R2_ENDPOINT").unwrap(),
             bucket: std::env::var("FLASH_MEDIA_R2_BUCKET").unwrap(),
             access_key_id: std::env::var("FLASH_MEDIA_R2_ACCESS_KEY_ID").unwrap(),
             secret_access_key: std::env::var("FLASH_MEDIA_R2_SECRET_ACCESS_KEY").unwrap(),
         };
-        let store = R2Store::new(&cfg, 1024 * 1024).unwrap();
-        let bytes = format!("flash r2 probe {}", jiff::Timestamp::now()).into_bytes();
+        let store = S3Store::new(&cfg, 1024 * 1024).unwrap();
+        let bytes = format!("flash bucket probe {}", jiff::Timestamp::now()).into_bytes();
         let sha = hex(&Sha256::digest(&bytes));
         store.put(&sha, "text/plain", &bytes).unwrap();
         let got = store.get(&sha, None).unwrap();
@@ -1011,13 +1017,13 @@ mod tests {
                 }),
             )
             .unwrap();
-        assert_eq!(part.bytes, b"r2");
+        assert_eq!(part.bytes, b"bu");
         assert_eq!((part.start, part.total), (6, bytes.len() as u64));
         store.delete(&sha).unwrap();
         assert!(matches!(
             store.get(&sha, None),
             Err(MediaStoreError::NotFound)
         ));
-        println!("r2 round trip ok via {}", store.describe());
+        println!("bucket round trip ok via {}", store.describe());
     }
 }

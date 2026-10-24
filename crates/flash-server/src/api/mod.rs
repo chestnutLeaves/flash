@@ -7,7 +7,6 @@
 //! table the MCP authorization server uses.
 
 pub mod admin;
-pub mod ai;
 pub mod auth;
 pub mod cards;
 pub mod decks;
@@ -17,8 +16,8 @@ pub mod media;
 pub mod settings;
 pub mod stats;
 pub mod study;
+pub mod tags;
 pub mod today;
-pub mod voice;
 
 use axum::extract::{FromRequest, FromRequestParts, Request, State};
 use axum::http::request::Parts;
@@ -42,8 +41,7 @@ use crate::state::AppState;
 pub const MOBILE_CLIENT_ID: &str = "flash-mobile";
 pub const MOBILE_SCOPE: &str = "mobile";
 /// The oldest app build the API still speaks to; bump on a breaking
-/// change and the app asks for an update. 1.0.1: the plan's usage meter
-/// became the generation quota (`/usage` is gone).
+/// change and the app asks for an update.
 pub const MIN_APP_VERSION: &str = "1.0.1";
 
 pub fn router(state: &AppState) -> Router<AppState> {
@@ -55,18 +53,50 @@ pub fn router(state: &AppState) -> Router<AppState> {
         .merge(decks::router())
         .merge(cards::router())
         .merge(study::router())
-        .merge(voice::router())
+        .merge(tags::router())
         .merge(settings::router())
         .merge(stats::router())
         .merge(import::router())
         .merge(admin::router())
         .merge(media::router())
-        .merge(ai::router())
         .merge(state.ext.api_routes(state))
         .fallback(not_found)
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            bearer_reader,
+        ))
         .layer(api_limit)
         .layer(axum::middleware::from_fn(no_store));
     Router::new().nest("/api/v1", v1)
+}
+
+#[derive(Clone)]
+struct CachedToken(Option<ApiTokenInfo>);
+
+async fn bearer_reader(
+    State(state): State<AppState>,
+    request: Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let (mut parts, body) = request.into_parts();
+    let info = lookup_token(&parts, &state).await;
+    let account = info.as_ref().map(|t| crate::auth::AccountLang {
+        locale: t.locale.clone().filter(|_| t.locale_chosen),
+        chosen: t.locale_chosen,
+        zone: t.zone.clone(),
+    });
+    parts.extensions.insert(CachedToken(info));
+    let Some(account) = account else {
+        return next.run(Request::from_parts(parts, body)).await;
+    };
+    let tr = crate::i18n::reader(
+        &state.i18n,
+        &parts.headers,
+        parts.uri.query(),
+        Some(&account),
+    );
+    parts.extensions.insert(tr.clone());
+    crate::i18n::within(tr, next.run(Request::from_parts(parts, body))).await
 }
 
 /// Every API reply is per-user and live: never cache it (tokens in
@@ -82,23 +112,25 @@ async fn no_store(request: Request, next: axum::middleware::Next) -> Response {
 // ---- errors ----
 
 /// The one error shape the app sees: `{"error": {"code", "message", …}}`.
-/// `code` is stable and machine-readable; `message` is for logs and
-/// fallback copy; extra fields (`current`/`cap` on `over_cap`, `what` on
-/// `not_found`) ride alongside.
+/// `code` is stable and machine-readable; `message` is what the app
+/// shows for a code it has no words of its own for, so it is worded in
+/// the request's language (`i18n`), except for a request the app never
+/// sends (a malformed body, a field it bounds itself); extra fields
+/// (`current`/`cap` on `over_cap`, `what` on `not_found`) ride alongside.
 #[derive(Debug)]
 pub struct ApiError {
     pub status: StatusCode,
     pub code: &'static str,
-    pub message: String,
+    pub message: crate::i18n::Words,
     pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 impl ApiError {
-    pub fn new(status: StatusCode, code: &'static str, message: impl Into<String>) -> Self {
+    pub fn new(status: StatusCode, code: &'static str, message: crate::i18n::Words) -> Self {
         Self {
             status,
             code,
-            message: message.into(),
+            message,
             extra: serde_json::Map::new(),
         }
     }
@@ -111,13 +143,25 @@ impl ApiError {
         self
     }
 
-    pub fn invalid(message: impl Into<String>) -> Self {
+    pub fn invalid(message: crate::i18n::Words) -> Self {
         Self::new(StatusCode::BAD_REQUEST, "invalid", message)
+    }
+
+    /// A request no app sends (a malformed body, a field outside the
+    /// bounds the app keeps itself): `invalid`, worded in English for the
+    /// developer who sent it.
+    pub fn malformed(message: impl Into<String>) -> Self {
+        // for machines: a request no app sends, for its developer.
+        Self::invalid(crate::i18n::Words::for_machines(message))
     }
 
     /// Missing, expired, or foreign bearer token.
     pub fn unauthorized() -> Self {
-        Self::new(StatusCode::UNAUTHORIZED, "unauthorized", "sign in required")
+        Self::new(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            crate::i18n::t("api-unauthorized"),
+        )
     }
 
     /// Wrong email/password or a failed identity exchange, deliberately
@@ -126,35 +170,39 @@ impl ApiError {
         Self::new(
             StatusCode::UNAUTHORIZED,
             "invalid_credentials",
-            "those details didn't match",
+            crate::i18n::t("api-invalid-credentials"),
         )
     }
 
     pub fn forbidden() -> Self {
-        Self::new(StatusCode::FORBIDDEN, "forbidden", "not allowed")
+        Self::new(
+            StatusCode::FORBIDDEN,
+            "forbidden",
+            crate::i18n::t("api-forbidden"),
+        )
     }
 
     pub fn not_found(what: &'static str) -> Self {
         Self::new(
             StatusCode::NOT_FOUND,
             "not_found",
-            format!("not found: {what}"),
+            crate::i18n::ta("api-not-found", &[("what", what.into())]),
         )
         .with("what", what)
     }
 
-    /// The feature isn't configured on this server (signup, Google,
-    /// Apple, billing, push): the app hides the affordance.
+    /// The feature isn't configured on this server: the app hides the
+    /// affordance.
     pub fn not_available(what: &'static str) -> Self {
         Self::new(
             StatusCode::NOT_FOUND,
             "not_available",
-            format!("{what} is not available on this server"),
+            crate::i18n::ta("api-not-available", &[("what", what.into())]),
         )
         .with("what", what)
     }
 
-    pub fn conflict(code: &'static str, message: impl Into<String>) -> Self {
+    pub fn conflict(code: &'static str, message: crate::i18n::Words) -> Self {
         Self::new(StatusCode::CONFLICT, code, message)
     }
 
@@ -162,12 +210,16 @@ impl ApiError {
         Self::new(
             StatusCode::PAYLOAD_TOO_LARGE,
             "payload_too_large",
-            "that upload is too large",
+            crate::i18n::t("api-too-large"),
         )
     }
 
     pub fn rate_limited() -> Self {
-        Self::new(StatusCode::TOO_MANY_REQUESTS, "rate_limited", "slow down")
+        Self::new(
+            StatusCode::TOO_MANY_REQUESTS,
+            "rate_limited",
+            crate::i18n::t("api-rate-limited"),
+        )
     }
 }
 
@@ -184,7 +236,7 @@ impl ApiError {
         Self::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal",
-            "internal error",
+            crate::i18n::t("error-internal"),
         )
     }
 }
@@ -193,7 +245,7 @@ impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let mut error = serde_json::Map::new();
         error.insert("code".into(), self.code.into());
-        error.insert("message".into(), self.message.into());
+        error.insert("message".into(), self.message.into_string().into());
         error.extend(self.extra);
         let mut response =
             (self.status, Json(serde_json::json!({ "error": error }))).into_response();
@@ -209,24 +261,25 @@ impl IntoResponse for ApiError {
 impl From<ServiceError> for ApiError {
     fn from(err: ServiceError) -> Self {
         match err {
-            ServiceError::Invalid(msg) => ApiError::invalid(msg),
+            ServiceError::Invalid(msg) | ServiceError::Refused { message: msg, .. } => {
+                ApiError::invalid(msg)
+            }
+            ServiceError::Malformed(msg) => ApiError::malformed(msg),
             ServiceError::Store(flash_store::StoreError::NotFound(what)) => {
                 ApiError::not_found(what)
             }
             ServiceError::Store(flash_store::StoreError::Invalid(msg)) => {
-                ApiError::conflict("conflict", msg)
+                ApiError::conflict("conflict", crate::service::store_refusal(msg))
             }
             ServiceError::Store(e) if e.is_constraint() => {
-                ApiError::conflict("conflict", "that already exists")
+                ApiError::conflict("conflict", crate::i18n::t("error-exists"))
             }
             ServiceError::OverCap { current, cap, .. } => {
-                ApiError::new(StatusCode::FORBIDDEN, "over_cap", err.to_string())
+                ApiError::new(StatusCode::FORBIDDEN, "over_cap", err.words())
                     .with("current", current)
                     .with("cap", cap)
             }
-            // The policy's own code rides as the envelope's, so the app
-            // branches on `pro_required` or `monthly_limit` directly.
-            ServiceError::AiDenied { code, message } => {
+            ServiceError::PolicyDenied { code, message } => {
                 ApiError::new(StatusCode::FORBIDDEN, code, message)
             }
             other => {
@@ -234,14 +287,6 @@ impl From<ServiceError> for ApiError {
                 ApiError::internal()
             }
         }
-    }
-}
-
-/// No model on this server: the same answer every AI route gives, in
-/// the envelope, so the app hides the affordance.
-impl From<crate::state::AiOff> for ApiError {
-    fn from(_: crate::state::AiOff) -> Self {
-        ApiError::not_available("card generation")
     }
 }
 
@@ -272,7 +317,7 @@ where
     E: Into<ApiError> + Send + 'static,
     F: FnOnce(Services) -> Result<T, E> + Send + 'static,
 {
-    match tokio::task::spawn_blocking(move || f(services)).await {
+    match crate::i18n::blocking(move || f(services)).await {
         Ok(Ok(value)) => Ok(value),
         Ok(Err(err)) => Err(err.into()),
         Err(e) => {
@@ -310,14 +355,16 @@ where
             // A body past its route's limit is not malformed, it is too
             // big, and the app says so differently (it did not send
             // anything wrong, it sent too much).
+            // axum words it in English, which an English reader reads as
+            // it is.
             Err(rejection) if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE => {
                 Err(ApiError::new(
                     StatusCode::PAYLOAD_TOO_LARGE,
                     "payload_too_large",
-                    rejection.body_text(),
+                    crate::i18n::t_or("api-too-large", &rejection.body_text()),
                 ))
             }
-            Err(rejection) => Err(ApiError::invalid(rejection.body_text())),
+            Err(rejection) => Err(ApiError::malformed(rejection.body_text())),
         }
     }
 }
@@ -347,10 +394,17 @@ pub(crate) fn bearer_token(parts: &Parts) -> Option<String> {
 }
 
 async fn token_info(parts: &Parts, state: &AppState) -> Option<ApiTokenInfo> {
+    if let Some(cached) = parts.extensions.get::<CachedToken>() {
+        return cached.0.clone();
+    }
+    lookup_token(parts, state).await
+}
+
+async fn lookup_token(parts: &Parts, state: &AppState) -> Option<ApiTokenInfo> {
     let token = bearer_token(parts)?;
     let hash = hash_token(&token);
     let services = state.services.clone();
-    tokio::task::spawn_blocking(move || {
+    crate::i18n::blocking(move || {
         services
             .store()
             .lookup_api_token(&hash, now_ms())
@@ -365,14 +419,24 @@ async fn token_info(parts: &Parts, state: &AppState) -> Option<ApiTokenInfo> {
 /// Only a token minted for the app counts: MCP grants (scope
 /// `flashcards`) must never reach account management.
 pub(crate) async fn mobile_user(parts: &Parts, state: &AppState) -> Option<BearerUser> {
-    token_info(parts, state)
+    let user = token_info(parts, state)
         .await
         .filter(|t| t.client_id == MOBILE_CLIENT_ID)
         .map(|t| BearerUser {
             id: t.user,
             is_admin: t.role == "admin",
             token_id: t.id,
-        })
+        })?;
+    let languages = crate::auth::accept_languages(&parts.headers);
+    crate::account_locale::keep_often_seen(
+        &state.services,
+        user.id,
+        flash_store::LocaleSource::App,
+        languages,
+        crate::service::now_ms(),
+    )
+    .await;
+    Some(user)
 }
 
 /// The app user behind a valid first-party bearer token.
@@ -417,8 +481,8 @@ impl FromRequestParts<AppState> for BearerAdmin {
     }
 }
 
-/// Public routes that render differently for a signed-in viewer (share
-/// pages, community browse). Never rejects.
+/// Public routes that render differently for a signed-in viewer. Never
+/// rejects.
 #[derive(Debug, Clone, Copy)]
 pub struct OptionalBearer(pub Option<BearerUser>);
 
@@ -436,87 +500,26 @@ impl FromRequestParts<AppState> for OptionalBearer {
 // ---- meta ----
 
 /// What this server offers, so the app shows only affordances that work
-/// here. `features` seeds every key the core knows as off and lets the
-/// extension turn its own on; `extra` carries the extension's own
-/// top-level fields (store product ids and the like).
+/// here: the core's `features` and the extension's beside them, and the
+/// extension's own top-level fields (`extra`).
 #[derive(Serialize)]
 struct Meta {
     version: &'static str,
     min_app_version: &'static str,
     features: crate::ext::JsonFields,
-    /// What card generation accepts here; null when it is off.
-    ai: Option<AiMeta>,
-    /// The natural voice this server reads with; null when it has none.
-    voice: Option<VoiceMeta>,
     #[serde(flatten)]
     extra: crate::ext::JsonFields,
 }
 
-/// What the app needs to play the server's clips: the voice an account
-/// starts with, how long a side may be to get one, the envelope's rate,
-/// and the phrase keys it may ask for.
-#[derive(Serialize)]
-struct VoiceMeta {
-    default_voice: String,
-    max_chars: usize,
-    envelope_hz: u32,
-    phrases: Vec<&'static str>,
-}
-
-/// The inputs this server reads and the caps a source must fit, so the
-/// app can hide a kind and say why a file is too big before uploading.
-/// `caps` is the whole picture (types, limits, sentences); the flat
-/// fields beside it are what older apps read.
-#[derive(Serialize)]
-struct AiMeta {
-    inputs: Vec<&'static str>,
-    max_words: u32,
-    max_images: u32,
-    max_pages: u32,
-    max_media_minutes: u32,
-    caps: crate::ai::caps::Caps,
-    /// What to send the grader for a spoken answer: `transcript` (the
-    /// device's own recognition) or `audio` (the recording itself).
-    voice_input: &'static str,
-}
-
 async fn meta(State(state): State<AppState>) -> Json<Meta> {
     let mut features = crate::ext::JsonFields::new();
-    for (key, on) in [
-        ("signup", false),
-        ("google", false),
-        ("apple", false),
-        ("passkeys", true),
-        ("billing", false),
-        ("push", false),
-        ("community", false),
-        ("ai", state.ai.is_some()),
-        ("voice", state.tts.is_some()),
-    ] {
-        features.insert(key.to_string(), on.into());
-    }
+    features.insert("signup".into(), false.into());
+    features.insert("passkeys".into(), true.into());
     features.extend(state.ext.features(&state));
-    let ai = state.ai.as_ref().map(|ai| AiMeta {
-        inputs: ai.inputs.iter().map(|i| i.as_str()).collect(),
-        max_words: crate::bounds::AI_MAX_WORDS,
-        max_images: crate::bounds::AI_MAX_IMAGES,
-        max_pages: crate::bounds::AI_MAX_PAGES,
-        max_media_minutes: crate::bounds::AI_MAX_MEDIA_SECONDS / 60,
-        caps: crate::ai::caps::Caps::of(ai, &[]),
-        voice_input: ai.voice_input.as_str(),
-    });
-    let voice = state.tts.as_ref().map(|tts| VoiceMeta {
-        default_voice: tts.default_voice.clone(),
-        max_chars: crate::tts::MAX_CLIP_CHARS,
-        envelope_hz: crate::tts::ENVELOPE_HZ,
-        phrases: crate::tts::phrase_keys(),
-    });
     Json(Meta {
         version: env!("CARGO_PKG_VERSION"),
-        min_app_version: MIN_APP_VERSION,
+        min_app_version: state.ext.min_app_version(&state).unwrap_or(MIN_APP_VERSION),
         features,
-        ai,
-        voice,
         extra: state.ext.meta_extra(&state),
     })
 }

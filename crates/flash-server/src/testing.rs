@@ -4,6 +4,7 @@
 //! and read the reply. Behind the `test-support` feature so this crate's
 //! tests and a downstream crate's tests build the app the same way.
 
+pub mod bounded;
 pub mod routes;
 
 use std::path::PathBuf;
@@ -15,7 +16,7 @@ use crate::config::Config;
 use crate::email::Mailer;
 use crate::ext::ServerExtension;
 use crate::media_store::{Blob, ByteRange, DiskStore, MediaStore, MediaStoreError};
-use crate::policy::{AiPolicy, CardPolicy, Unlimited};
+use crate::policy::{CardPolicy, Unlimited};
 use crate::service::{now_ms, Services};
 use crate::state::AppState;
 use axum::body::Body;
@@ -29,6 +30,30 @@ use tower::ServiceExt;
 /// must send it as `Origin`.
 pub const BASE: &str = "http://localhost:8437";
 
+/// The table's language `tag`, for a test that ships it or reads as it.
+pub fn reader(tag: &str) -> flash_core::locale::UiLocale {
+    flash_core::locale::UiLocale::by_tag(tag)
+        .unwrap_or_else(|| panic!("the table of languages has no {tag}"))
+}
+
+/// Every language of the table a person can read but English, for a test
+/// that ships them all.
+pub fn other_languages() -> Vec<flash_core::locale::UiLocale> {
+    flash_core::locale::UiLocale::real()
+        .filter(|l| *l != flash_core::locale::UiLocale::EN)
+        .collect()
+}
+
+/// Spain's Spanish, for a test that ships it or reads as it.
+pub fn spain() -> flash_core::locale::UiLocale {
+    reader("es-ES")
+}
+
+/// Latin America's Spanish, for a test that ships it or reads as it.
+pub fn latin_america() -> flash_core::locale::UiLocale {
+    reader("es-419")
+}
+
 /// A fresh per-binary, per-tag scratch directory (media, import previews).
 pub fn data_dir(tag: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("flash-test-{tag}-{}", std::process::id()));
@@ -41,14 +66,15 @@ pub fn config(data_dir: PathBuf) -> Config {
     Config {
         bind: "127.0.0.1:0".parse().unwrap(),
         client_ip_header: None,
+        access_log: false,
         base_url: BASE.to_string(),
+        previous_base_urls: Vec::new(),
         support_email: None,
         data_dir,
         mail: None,
         dev_mail_log: false,
         media_r2: None,
-        ai: None,
-        tts: None,
+        languages: crate::i18n::SHIPPED.to_vec(),
     }
 }
 
@@ -59,8 +85,28 @@ pub struct TestApp {
     pub services: Services,
     pub data_dir: PathBuf,
     /// The state the router was built over, for tests that drive a
-    /// background loop (the generation runner) against the same app.
+    /// background loop against the same app.
     pub state: AppState,
+}
+
+impl TestApp {
+    /// Lets the app finish what it started: the writes it made off the
+    /// request path (`Services::off_request`), and the jobs now due, with
+    /// whatever they start in turn, until nothing more is due. After it,
+    /// what that work wrote is there, and what is not there was never
+    /// written. A test waits for this, never for a while.
+    pub async fn settle(&self) {
+        loop {
+            self.state.services.settled().await;
+            let state = self.state.clone();
+            let ran = tokio::task::spawn_blocking(move || crate::jobs::run_due(&state))
+                .await
+                .expect("a pass over the due jobs");
+            if ran == 0 {
+                return;
+            }
+        }
+    }
 }
 
 /// Builds an `AppState` the way production does, then swaps in whichever
@@ -72,11 +118,25 @@ pub struct AppBuilder {
     mailer: Option<Arc<dyn Mailer>>,
     ext: Option<Arc<dyn ServerExtension>>,
     policy: Option<Arc<dyn CardPolicy>>,
-    ai_policy: Option<Arc<dyn AiPolicy>>,
-    ai: Option<Arc<crate::state::AiRuntime>>,
-    tts: Option<Arc<crate::tts::TtsRuntime>>,
+    data_dir: Option<PathBuf>,
     media: Option<Arc<dyn MediaStore>>,
-    tight_limits: bool,
+    limits: Limits,
+    previous_base_urls: Vec<String>,
+    base_url: Option<String>,
+    access_log: bool,
+    job_worker: bool,
+    languages: Option<Vec<flash_core::locale::UiLocale>>,
+}
+
+/// How the rate limiters are set.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Limits {
+    /// As the server sets them.
+    Production,
+    /// `tight_rate_limits`.
+    Tight,
+    /// `loose_rate_limits`.
+    Loose,
 }
 
 /// The burst every limiter allows under `tight_rate_limits`: a probe
@@ -95,34 +155,38 @@ impl AppBuilder {
             mailer: None,
             ext: None,
             policy: None,
-            ai_policy: None,
-            ai: None,
-            tts: None,
+            data_dir: None,
             media: None,
-            tight_limits: false,
+            limits: Limits::Production,
+            previous_base_urls: Vec::new(),
+            base_url: None,
+            access_log: false,
+            job_worker: false,
+            languages: None,
         }
     }
 
-    /// Turns natural voice on with `backend` (the fake sidecar in every
-    /// test); without it the voice audio routes answer as they do on a
-    /// server with no sidecar.
-    pub fn tts(mut self, backend: Arc<dyn crate::tts::TtsBackend>) -> Self {
-        self.tts = Some(Arc::new(crate::tts::TtsRuntime::with_backend(
-            backend,
-            flash_core::settings::DEFAULT_VOICE,
-        )));
+    /// Gives readers `languages` too, shipped or not: a test of a
+    /// language before it ships.
+    pub fn languages(mut self, languages: &[flash_core::locale::UiLocale]) -> Self {
+        self.languages = Some(languages.to_vec());
         self
     }
 
-    /// Turns card generation on with `provider` (the scripted fake in
-    /// every test) accepting `inputs`; without it the AI routes answer
-    /// as they do on a server with no key.
-    pub fn ai(
-        mut self,
-        provider: Arc<dyn crate::ai::provider::LlmProvider>,
-        inputs: Vec<crate::policy::AiInput>,
-    ) -> Self {
-        self.ai = Some(fake_ai(provider, inputs));
+    /// Serves at `origin` instead of `BASE`: a test that puts the app on a
+    /// real socket at a port of its own, for a browser, needs the origin
+    /// checks and the links the pages write to name that port.
+    pub fn base_url(mut self, origin: &str) -> Self {
+        self.base_url = Some(origin.trim_end_matches('/').to_string());
+        self
+    }
+
+    /// The job worker in the background, as production runs it: for a
+    /// test of the worker itself. Otherwise owed work runs when the test
+    /// says (`TestApp::settle`, or `jobs::run_due_at` at an instant it
+    /// chooses), never while it is looking.
+    pub fn job_worker(mut self) -> Self {
+        self.job_worker = true;
         self
     }
 
@@ -130,7 +194,28 @@ impl AppBuilder {
     /// slowly, so a test can see a 429 in a handful of requests. In the
     /// harness there is no socket, so every request shares one bucket.
     pub fn tight_rate_limits(mut self) -> Self {
-        self.tight_limits = true;
+        self.limits = Limits::Tight;
+        self
+    }
+
+    /// Rate limiters that never refuse: for a server that browser tests
+    /// sign in to dozens of times a minute from one address.
+    pub fn loose_rate_limits(mut self) -> Self {
+        self.limits = Limits::Loose;
+        self
+    }
+
+    /// The request log on (`FLASH_ACCESS_LOG=1`).
+    pub fn access_log(mut self) -> Self {
+        self.access_log = true;
+        self
+    }
+
+    /// An origin the server answered at before `BASE`
+    /// (`FLASH_PREVIOUS_BASE_URLS`).
+    pub fn previous_base_url(mut self, origin: &str) -> Self {
+        self.previous_base_urls
+            .push(origin.trim_end_matches('/').to_string());
         self
     }
 
@@ -141,8 +226,8 @@ impl AppBuilder {
         self
     }
 
-    /// The server extension to install; the hosted product's unless a
-    /// test asks for the open server's `CoreOnly`.
+    /// The server extension to install; the open server's `CoreOnly`
+    /// unless a test plugs one in.
     pub fn ext(mut self, ext: Arc<dyn ServerExtension>) -> Self {
         self.ext = Some(ext);
         self
@@ -155,10 +240,10 @@ impl AppBuilder {
         self
     }
 
-    /// The generation policy `Services` consults; `Unlimited` unless the
-    /// hosted product's harness plugs its quotas in.
-    pub fn ai_policy(mut self, policy: Arc<dyn AiPolicy>) -> Self {
-        self.ai_policy = Some(policy);
+    /// Serves from `dir` (made by `data_dir`) instead of a fresh one: for
+    /// a downstream harness that puts something in it before the build.
+    pub fn data_dir(mut self, dir: PathBuf) -> Self {
+        self.data_dir = Some(dir);
         self
     }
 
@@ -169,8 +254,8 @@ impl AppBuilder {
         self
     }
 
-    /// Present => the mail loops (password reset; signup on the hosted
-    /// product) are enabled with this capture mailer.
+    /// Present => the mail loops (password reset, and any an extension
+    /// adds) are enabled with this capture mailer.
     pub fn mailer(mut self, mailer: Arc<dyn Mailer>) -> Self {
         self.mailer = Some(mailer);
         self
@@ -181,10 +266,17 @@ impl AppBuilder {
             .store
             .unwrap_or_else(|| Arc::new(Store::open_in_memory().unwrap()));
         let policy = self.policy.unwrap_or_else(|| Arc::new(Unlimited));
-        let ai_policy = self.ai_policy.unwrap_or_else(|| Arc::new(Unlimited));
-        let services = Services::with_policies(store.clone(), policy, ai_policy);
-        let data_dir = data_dir(&self.tag);
-        let config = config(data_dir.clone());
+        let services = Services::with_policy(store.clone(), policy);
+        let data_dir = self.data_dir.unwrap_or_else(|| data_dir(&self.tag));
+        let mut config = config(data_dir.clone());
+        config.previous_base_urls = self.previous_base_urls;
+        if let Some(origin) = self.base_url {
+            config.base_url = origin;
+        }
+        config.access_log = self.access_log;
+        if let Some(languages) = &self.languages {
+            config.languages = languages.clone();
+        }
         let ext = self.ext.unwrap_or_else(|| Arc::new(crate::ext::CoreOnly));
         let mut state = AppState::new(services.clone(), config, ext, now_ms()).unwrap();
         if let Some(mailer) = self.mailer {
@@ -193,19 +285,28 @@ impl AppBuilder {
         if let Some(media) = self.media {
             state.install_media(media);
         }
-        if let Some(ai) = self.ai {
-            state.install_ai(ai);
+        match self.limits {
+            Limits::Production => {}
+            Limits::Tight => {
+                // Two different bursts, so a probe can tell which band
+                // answered: the strict one (sign-in, reset, token minting)
+                // refuses first.
+                state.rate_limiter = Arc::new(crate::middleware::RateLimiter::new(TIGHT_BURST, 1));
+                state.api_rate_limiter =
+                    Arc::new(crate::middleware::RateLimiter::new(TIGHT_BURST_GENEROUS, 1));
+            }
+            Limits::Loose => {
+                state.rate_limiter =
+                    Arc::new(crate::middleware::RateLimiter::new(1_000_000, 1_000_000));
+                state.api_rate_limiter =
+                    Arc::new(crate::middleware::RateLimiter::new(1_000_000, 1_000_000));
+            }
         }
-        if let Some(tts) = self.tts {
-            state.install_tts(tts);
-        }
-        if self.tight_limits {
-            // Two different bursts, so a probe can tell which band
-            // answered: the strict one (sign-in, reset, token minting)
-            // refuses first.
-            state.rate_limiter = Arc::new(crate::middleware::RateLimiter::new(TIGHT_BURST, 1));
-            state.api_rate_limiter =
-                Arc::new(crate::middleware::RateLimiter::new(TIGHT_BURST_GENEROUS, 1));
+        if self.job_worker && tokio::runtime::Handle::try_current().is_ok() {
+            tokio::spawn(crate::jobs::run(
+                state.clone(),
+                std::time::Duration::from_millis(25),
+            ));
         }
         TestApp {
             app: crate::build_app(state.clone()),
@@ -218,35 +319,6 @@ impl AppBuilder {
 }
 
 // ---- fixtures ----
-
-/// A generation runtime over `provider` with no PDF renderer: what
-/// `AppBuilder::ai` installs, and what a test that calls a voice service
-/// method directly hands it.
-pub fn fake_ai(
-    provider: Arc<dyn crate::ai::provider::LlmProvider>,
-    inputs: Vec<crate::policy::AiInput>,
-) -> Arc<crate::state::AiRuntime> {
-    fake_ai_with(provider, inputs, None)
-}
-
-/// `fake_ai` with a document converter, for tests of the document path.
-pub fn fake_ai_with(
-    provider: Arc<dyn crate::ai::provider::LlmProvider>,
-    inputs: Vec<crate::policy::AiInput>,
-    converter: Option<crate::ai::convert::DocConverter>,
-) -> Arc<crate::state::AiRuntime> {
-    Arc::new(
-        crate::state::AiRuntime::new(
-            provider,
-            Some(inputs),
-            #[cfg(feature = "pdf")]
-            None,
-            converter,
-            std::env::temp_dir().join("flash-test-convert"),
-        )
-        .expect("the fake reads every kind"),
-    )
-}
 
 /// A heavy-job permit for `user` from a gate of its own, for tests that
 /// call an import, export or Stats function directly.
@@ -271,6 +343,23 @@ pub fn web_session(store: &Store, user: UserId) -> String {
         .create_web_session(
             &hash_token(&token),
             user,
+            "Chrome on Windows",
+            now_ms(),
+            now_ms() + SESSION_TTL_MS,
+        )
+        .unwrap();
+    format!("__Host-flash={token}")
+}
+
+/// `web_session`, but opened the way an emailed sign-in link opens one:
+/// it studies, and signs in again for what `auth::FullUser` guards.
+pub fn link_session(store: &Store, user: UserId) -> String {
+    let token = new_token();
+    store
+        .create_link_session(
+            &hash_token(&token),
+            user,
+            "Safari on iPhone",
             now_ms(),
             now_ms() + SESSION_TTL_MS,
         )
@@ -297,6 +386,7 @@ pub fn oauth_bearer(store: &Store, user: UserId) -> String {
             user,
             "flashcards",
             "",
+            None,
             now + 3_600_000,
             now + 86_400_000,
             now,
@@ -318,6 +408,7 @@ pub fn api_bearer(store: &Store, user: UserId) -> String {
             user,
             MOBILE_SCOPE,
             "test device",
+            None,
             now + 3_600_000,
             now + 86_400_000,
             now,
@@ -406,9 +497,97 @@ impl Reply {
     }
 }
 
+/// What an in-memory connection holds unread each way.
+pub const PIPE_BYTES: usize = 1 << 20;
+
+/// The peer address a connection made by `connect_in_memory` comes from,
+/// as the rate limiters and the request log read it.
+pub const IN_MEMORY_PEER: std::net::SocketAddr = std::net::SocketAddr::V4(
+    std::net::SocketAddrV4::new(std::net::Ipv4Addr::LOCALHOST, 40000),
+);
+
+/// One connection to the app over an in-memory pipe: the app served on
+/// the far end as a listener serves it (HTTP/1 with upgrades, its peer at
+/// `IN_MEMORY_PEER`), the client's end returned. No socket, so what a
+/// busy machine does to its own connections never reaches the test, and
+/// a test may run on a clock it advances (`start_paused`).
+pub fn connect_in_memory(app: &Router) -> tokio::io::DuplexStream {
+    let (client, server) = tokio::io::duplex(PIPE_BYTES);
+    let app = app
+        .clone()
+        .layer(axum::extract::connect_info::MockConnectInfo(IN_MEMORY_PEER));
+    let service = hyper_util::service::TowerToHyperService::new(app);
+    tokio::spawn(async move {
+        let _ = hyper::server::conn::http1::Builder::new()
+            .serve_connection(hyper_util::rt::TokioIo::new(server), service)
+            .with_upgrades()
+            .await;
+    });
+    client
+}
+
+/// A listener with no socket under it, for what must be tested through
+/// a listener (`boot::serve`'s stop): each `MemoryConnector::connect`
+/// is one connection it accepts, from `IN_MEMORY_PEER`.
+pub struct MemoryListener {
+    incoming: tokio::sync::mpsc::Receiver<tokio::io::DuplexStream>,
+}
+
+/// Makes connections to its `MemoryListener`, and tells when the
+/// listener is gone (nothing new will be taken).
+#[derive(Clone)]
+pub struct MemoryConnector {
+    outgoing: tokio::sync::mpsc::Sender<tokio::io::DuplexStream>,
+}
+
+pub fn memory_listener() -> (MemoryListener, MemoryConnector) {
+    let (outgoing, incoming) = tokio::sync::mpsc::channel(1);
+    (MemoryListener { incoming }, MemoryConnector { outgoing })
+}
+
+impl axum::serve::Listener for MemoryListener {
+    type Io = tokio::io::DuplexStream;
+    type Addr = std::net::SocketAddr;
+
+    async fn accept(&mut self) -> (Self::Io, Self::Addr) {
+        match self.incoming.recv().await {
+            Some(io) => (io, IN_MEMORY_PEER),
+            None => std::future::pending().await,
+        }
+    }
+
+    fn local_addr(&self) -> std::io::Result<Self::Addr> {
+        Ok(IN_MEMORY_PEER)
+    }
+}
+
+impl MemoryConnector {
+    /// One request over a connection of its own, read whole; None when
+    /// the listener is gone.
+    pub async fn send(&self, req: Request<Body>) -> Option<Reply> {
+        let (client, server) = tokio::io::duplex(PIPE_BYTES);
+        self.outgoing.send(server).await.ok()?;
+        let (mut sender, connection) =
+            hyper::client::conn::http1::handshake(hyper_util::rt::TokioIo::new(client))
+                .await
+                .ok()?;
+        tokio::spawn(connection);
+        let response = sender.send_request(req).await.ok()?;
+        Some(reply(response.map(Body::new)).await)
+    }
+
+    /// Resolves once the listener is dropped: it takes nothing new.
+    pub async fn listener_gone(&self) {
+        self.outgoing.closed().await;
+    }
+}
+
 /// Runs one request through the router and reads the whole reply.
 pub async fn send(app: &Router, req: Request<Body>) -> Reply {
-    let response = app.clone().oneshot(req).await.unwrap();
+    reply(app.clone().oneshot(req).await.unwrap()).await
+}
+
+async fn reply(response: axum::response::Response) -> Reply {
     let status = response.status();
     let headers = response
         .headers()
@@ -434,8 +613,9 @@ pub fn header_of<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a 
         .map(|(_, v)| v.as_str())
 }
 
-/// A GET, optionally signed in. No User-Agent: the public share pages
-/// treat UA-less requests as bots, and tests that care set one.
+/// A GET, optionally signed in. No User-Agent: the server takes a
+/// UA-less request for a bot (`web::is_probably_bot`), and tests that
+/// care set one.
 pub fn get(path: &str, cookie: Option<&str>) -> Request<Body> {
     let mut req = Request::get(path);
     if let Some(c) = cookie {
@@ -453,6 +633,20 @@ pub fn form_post(path: &str, cookie: Option<&str>, body: &str) -> Request<Body> 
         req = req.header(header::COOKIE, c);
     }
     req.body(Body::from(body.to_string())).unwrap()
+}
+
+/// The number after `"key": ` in a study button's hx-vals, which is how
+/// a test posts the session and card the page is showing.
+pub fn hx_value(html: &str, key: &str) -> String {
+    let marker = format!("\"{key}\": ");
+    let at = html
+        .find(&marker)
+        .unwrap_or_else(|| panic!("{key} in {html}"))
+        + marker.len();
+    html[at..]
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect()
 }
 
 // ---- media store fakes ----
@@ -508,5 +702,293 @@ impl MediaStore for PresigningStore {
 
     fn origin(&self) -> Option<String> {
         Some(PRESIGN_ORIGIN.to_string())
+    }
+}
+
+/// A fake of a service the server calls out to (a mail provider, a
+/// bucket), reached with no socket: `agent` is a client set up as
+/// production's (`http::agent`) whose every connection is an in-memory
+/// pipe to this host. Serve it a router (`MemoryHost::router`), or take
+/// its connections one at a time as plain streams
+/// (`MemoryHost::accepting`) for a fake that reads the HTTP itself. As
+/// with a listener, a connection is refused once nothing takes them any
+/// more (the acceptor dropped, the host gone). The host runs on a
+/// runtime of its own, so a plain `#[test]` can use it, and a test's own
+/// clock never governs it.
+pub struct MemoryHost {
+    runtime: Option<tokio::runtime::Runtime>,
+    connections: tokio::sync::mpsc::UnboundedSender<tokio::io::DuplexStream>,
+}
+
+/// Takes a `MemoryHost`'s connections, for a fake that reads the HTTP
+/// itself on a thread of its own. Dropping it refuses the rest.
+pub struct MemoryAcceptor {
+    incoming: tokio::sync::mpsc::UnboundedReceiver<tokio::io::DuplexStream>,
+    runtime: tokio::runtime::Handle,
+}
+
+impl MemoryAcceptor {
+    /// The next connection made to the host, for a fake that serves it on
+    /// an async task; None once no client can connect any more.
+    pub async fn next(&mut self) -> Option<tokio::io::DuplexStream> {
+        self.incoming.recv().await
+    }
+
+    /// The next connection made to the host, as a blocking stream; None
+    /// once no client can connect any more. Call it off any async task.
+    pub fn accept(&mut self) -> Option<MemoryStream> {
+        let io = self.runtime.block_on(self.incoming.recv())?;
+        Some(tokio_util::io::SyncIoBridge::new_with_handle(
+            io,
+            self.runtime.clone(),
+        ))
+    }
+}
+
+/// What a fake reading its own HTTP reads and writes: one connection.
+pub type MemoryStream = tokio_util::io::SyncIoBridge<tokio::io::DuplexStream>;
+
+impl MemoryHost {
+    fn with_incoming() -> (
+        Self,
+        tokio::sync::mpsc::UnboundedReceiver<tokio::io::DuplexStream>,
+    ) {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .expect("a runtime for the memory host");
+        let (connections, incoming) = tokio::sync::mpsc::unbounded_channel();
+        (
+            Self {
+                runtime: Some(runtime),
+                connections,
+            },
+            incoming,
+        )
+    }
+
+    /// A host whose connections the test takes with the acceptor.
+    pub fn accepting() -> (Self, MemoryAcceptor) {
+        let (host, incoming) = Self::with_incoming();
+        let runtime = host.handle();
+        (host, MemoryAcceptor { incoming, runtime })
+    }
+
+    /// A host that refuses every connection: a service down, or one a
+    /// test never expects to be called.
+    pub fn unreachable() -> Self {
+        Self::with_incoming().0
+    }
+
+    /// A host that answers every connection with `app`, its peer at
+    /// `IN_MEMORY_PEER` as `connect_in_memory`'s is. Every request's body
+    /// is read whole before `app` answers, so a handler may ignore it:
+    /// hyper closes a connection whose body is unread, and a client still
+    /// writing it fails with a broken pipe.
+    pub fn router(app: Router) -> Self {
+        let app = app
+            .layer(axum::middleware::from_fn(read_whole))
+            .layer(axum::extract::connect_info::MockConnectInfo(IN_MEMORY_PEER));
+        let (host, mut incoming) = Self::with_incoming();
+        host.handle().spawn(async move {
+            while let Some(io) = incoming.recv().await {
+                let service = hyper_util::service::TowerToHyperService::new(app.clone());
+                tokio::spawn(async move {
+                    let _ = hyper::server::conn::http1::Builder::new()
+                        .serve_connection(hyper_util::rt::TokioIo::new(io), service)
+                        .await;
+                });
+            }
+        });
+        host
+    }
+
+    /// Where a client dials this host: each pipe sent is one connection.
+    pub fn dial(&self) -> tokio::sync::mpsc::UnboundedSender<tokio::io::DuplexStream> {
+        self.connections.clone()
+    }
+
+    fn handle(&self) -> tokio::runtime::Handle {
+        self.runtime
+            .as_ref()
+            .expect("the host's runtime runs until it is dropped")
+            .handle()
+            .clone()
+    }
+
+    /// A client of this host, set up as `http::agent` sets up one of
+    /// production's. Any address reaches the host; give it `http://`.
+    pub fn agent(&self, global_timeout: std::time::Duration, status_as_error: bool) -> ureq::Agent {
+        ureq::Agent::with_parts(
+            crate::http::config(global_timeout, status_as_error),
+            HostConnector {
+                connections: self.connections.clone(),
+                runtime: self.handle(),
+            },
+            HostResolver,
+        )
+    }
+}
+
+impl Drop for MemoryHost {
+    fn drop(&mut self) {
+        // Dropping a runtime blocks, which an async test may not do.
+        if let Some(runtime) = self.runtime.take() {
+            runtime.shutdown_background();
+        }
+    }
+}
+
+async fn read_whole(
+    request: Request<Body>,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let (parts, body) = request.into_parts();
+    match axum::body::to_bytes(body, usize::MAX).await {
+        Ok(bytes) => {
+            next.run(Request::from_parts(parts, Body::from(bytes)))
+                .await
+        }
+        Err(_) => StatusCode::BAD_REQUEST.into_response(),
+    }
+}
+
+#[derive(Debug)]
+struct HostResolver;
+
+impl ureq::unversioned::resolver::Resolver for HostResolver {
+    fn resolve(
+        &self,
+        _uri: &axum::http::Uri,
+        _config: &ureq::config::Config,
+        _timeout: ureq::unversioned::transport::NextTimeout,
+    ) -> Result<ureq::unversioned::resolver::ResolvedSocketAddrs, ureq::Error> {
+        let mut addrs = self.empty();
+        addrs.push(IN_MEMORY_PEER);
+        Ok(addrs)
+    }
+}
+
+#[derive(Debug)]
+struct HostConnector {
+    connections: tokio::sync::mpsc::UnboundedSender<tokio::io::DuplexStream>,
+    runtime: tokio::runtime::Handle,
+}
+
+impl ureq::unversioned::transport::Connector for HostConnector {
+    type Out = HostTransport;
+
+    fn connect(
+        &self,
+        details: &ureq::unversioned::transport::ConnectionDetails,
+        _chained: Option<()>,
+    ) -> Result<Option<HostTransport>, ureq::Error> {
+        let (client, server) = tokio::io::duplex(PIPE_BYTES);
+        self.connections.send(server).map_err(|_| {
+            ureq::Error::Io(std::io::Error::from(std::io::ErrorKind::ConnectionRefused))
+        })?;
+        Ok(Some(HostTransport {
+            io: client,
+            buffers: ureq::unversioned::transport::LazyBuffers::new(
+                details.config.input_buffer_size(),
+                details.config.output_buffer_size(),
+            ),
+            runtime: self.runtime.clone(),
+            open: true,
+        }))
+    }
+}
+
+/// One connection's client end, read and written as ureq's socket
+/// transport does, with ureq's timeouts kept.
+#[derive(Debug)]
+struct HostTransport {
+    io: tokio::io::DuplexStream,
+    buffers: ureq::unversioned::transport::LazyBuffers,
+    runtime: tokio::runtime::Handle,
+    open: bool,
+}
+
+impl HostTransport {
+    fn within<T>(
+        runtime: &tokio::runtime::Handle,
+        timeout: ureq::unversioned::transport::NextTimeout,
+        work: impl std::future::Future<Output = std::io::Result<T>>,
+    ) -> Result<T, ureq::Error> {
+        let limit = timeout.not_zero().map(|d| *d);
+        runtime.block_on(async move {
+            match limit {
+                Some(limit) => tokio::time::timeout(limit, work)
+                    .await
+                    .map_err(|_| ureq::Error::Timeout(timeout.reason))?
+                    .map_err(ureq::Error::Io),
+                None => work.await.map_err(ureq::Error::Io),
+            }
+        })
+    }
+}
+
+impl ureq::unversioned::transport::Transport for HostTransport {
+    fn buffers(&mut self) -> &mut dyn ureq::unversioned::transport::Buffers {
+        &mut self.buffers
+    }
+
+    fn transmit_output(
+        &mut self,
+        amount: usize,
+        timeout: ureq::unversioned::transport::NextTimeout,
+    ) -> Result<(), ureq::Error> {
+        use tokio::io::AsyncWriteExt;
+        use ureq::unversioned::transport::Buffers;
+        let Self {
+            io,
+            buffers,
+            runtime,
+            ..
+        } = self;
+        let output = &buffers.output()[..amount];
+        Self::within(runtime, timeout, io.write_all(output))
+    }
+
+    fn await_input(
+        &mut self,
+        timeout: ureq::unversioned::transport::NextTimeout,
+    ) -> Result<bool, ureq::Error> {
+        use tokio::io::AsyncReadExt;
+        use ureq::unversioned::transport::Buffers;
+        let Self {
+            io,
+            buffers,
+            runtime,
+            open,
+        } = self;
+        let input = buffers.input_append_buf();
+        let read = Self::within(runtime, timeout, io.read(input))?;
+        buffers.input_appended(read);
+        if read == 0 {
+            *open = false;
+        }
+        Ok(read > 0)
+    }
+
+    fn is_open(&mut self) -> bool {
+        use tokio::io::AsyncReadExt;
+        // As ureq probes a socket before reusing it: open while a read
+        // would wait, closed at its end, and unusable if bytes nobody
+        // asked for are waiting.
+        let Self {
+            io, runtime, open, ..
+        } = self;
+        if !*open {
+            return false;
+        }
+        let mut byte = [0u8; 1];
+        let waiting = runtime.block_on(async {
+            tokio::time::timeout(std::time::Duration::ZERO, io.read(&mut byte)).await
+        });
+        *open = waiting.is_err();
+        *open
     }
 }

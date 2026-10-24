@@ -18,7 +18,7 @@
   Nothing here names a host: the links and the footer come from `site`.
 -#}
 <!doctype html>
-<html lang="en">
+<html lang="{{ ""|html_lang }}" dir="{{ ""|html_dir }}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -50,7 +50,8 @@
    more here than the last word of the preview. #}
 <div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all;">{% block preheader %}{% endblock %}</div>
 
-<table role="presentation" class="fl-ground" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#fafafa;">
+{# `dir` again on the outer table: some webmail drops the <html> it was on. #}
+<table role="presentation" class="fl-ground" dir="{{ ""|html_dir }}" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#fafafa;">
 <tr><td class="fl-ground" align="center" style="padding:32px 16px;">
 <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;">
 
@@ -59,12 +60,12 @@
       {# alt text carries the brand when images are off, which is the whole
          reason the mark sits beside the wordmark rather than replacing it. #}
       <td width="36" style="width:36px;"><img src="{{ site.base_url }}/static/favicon-192.png" width="36" height="36" alt="Flash" style="display:block;width:36px;height:36px;border:0;outline:none;text-decoration:none;"></td>
-      <td class="fl-mark" style="padding-left:9px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:17px;font-weight:600;letter-spacing:-0.4px;color:#18181b;">Flash</td>
+      <td class="fl-mark" style="padding-{{ ""|start_side }}:9px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:17px;font-weight:600;letter-spacing:{{ "-0.4px"|tracking }};color:#18181b;">Flash</td>
     </tr></table>
   </td></tr>
 
   <tr><td class="fl-card" style="background-color:#ffffff;border:1px solid #e6e6e6;border-radius:12px;padding:24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:25px;color:#18181b;mso-line-height-rule:exactly;">
-    <h1 class="fl-h1" style="margin:0 0 12px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:20px;line-height:27px;font-weight:600;letter-spacing:-0.2px;color:#18181b;">{% block heading %}{% endblock %}</h1>
+    <h1 class="fl-h1" style="margin:0 0 12px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:20px;line-height:27px;font-weight:600;letter-spacing:{{ "-0.2px"|tracking }};color:#18181b;">{% block heading %}{% endblock %}</h1>
     {% block body %}{% endblock %}
 
     <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:20px 0 0;"><tr>
@@ -72,7 +73,7 @@
          anchor. No VML: it buys only the corner radius in Outlook
          desktop, and a square button is honest degradation. #}
       <td class="fl-btn" bgcolor="#111113" style="background-color:#111113;border-radius:6px;padding:11px 20px;">
-        <a href="{{ link }}" style="display:inline-block;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:15px;font-weight:600;line-height:20px;color:#ffffff;text-decoration:none;">{% block cta_label %}Open Flash{% endblock %}</a>
+        <a href="{{ link }}" style="display:inline-block;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:15px;font-weight:600;line-height:20px;color:#ffffff;text-decoration:none;">{% block cta_label %}{{ "email-cta-default"|t }}{% endblock %}</a>
       </td>
     </tr></table>
 
@@ -82,14 +83,14 @@
        destination before they commit, and it is the way through when a
        client strips the button. Last, because it is the fallback: the
        message should read as prose before it reads as a URL. #}
-    <p class="fl-muted" style="margin:16px 0 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:13px;line-height:20px;color:#52525b;">Or paste this link into your browser:<br><a href="{{ link }}" style="color:#52525b;word-break:break-all;">{{ link }}</a></p>
+    <p class="fl-muted" style="margin:16px 0 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:13px;line-height:20px;color:#52525b;">{{ "email-paste-link"|t }}<br><a href="{{ link }}" style="color:#52525b;word-break:break-all;">{{ link }}</a></p>
   </td></tr>
 
   <tr><td class="fl-muted" style="padding:20px 4px 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:12px;line-height:18px;color:#6d6d75;">
     {% block footer_note %}{% endblock %}
     <p style="margin:0 0 6px;">Flash · <a href="{{ site.base_url }}" style="color:#6d6d75;">{{ site.host() }}</a></p>
     {% if let Some(email) = site.support_email %}
-    <p style="margin:0;">Questions? Reply to this email, or write to <a href="mailto:{{ email }}" style="color:#6d6d75;">{{ email }}</a>.</p>
+    <p style="margin:0;">{{ "email-questions-html"|ta("email", email)|safe }}</p>
     {% endif %}
   </td></tr>
 

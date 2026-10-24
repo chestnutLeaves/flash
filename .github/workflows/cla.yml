@@ -1,6 +1,6 @@
 # Contributor license agreement check on pull requests to the public
 # repository (see CLA.md). Signatures are kept on the `cla-signatures`
-# branch by the action itself. Inert in the private monorepo.
+# branch by the action itself. Inert in a private repository.
 name: cla
 
 on:

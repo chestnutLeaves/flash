@@ -1,0 +1,13 @@
+{# The plan for the date a goal form holds (`web_goal::GoalPlanView`),
+   swapped in as the date changes. Its lines are our own messages with
+   bold parts; nothing in them comes from the person. Expects `plan`. #}
+{% if let Some(problem) = plan.problem %}
+<p class="small muted">{{ problem }}</p>
+{% else %}
+<div class="goal-plan-line"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>{% if let Some(line) = plan.lines.first() %}{{ line|safe }}{% endif %}</span></div>
+<div class="goal-plan-line"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg><span>{% if let Some(line) = plan.lines.get(1) %}{{ line|safe }}{% endif %}</span></div>
+<div class="goal-plan-line"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg><span>{% if let Some(line) = plan.lines.get(2) %}{{ line|safe }}{% endif %}</span></div>
+{% if let Some(tight) = plan.tight %}
+<div class="goal-warn"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg><span>{{ tight }}</span></div>
+{% endif %}
+{% endif %}

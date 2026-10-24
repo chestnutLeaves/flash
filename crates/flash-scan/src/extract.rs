@@ -12,7 +12,7 @@ use syn::visit::Visit;
 use crate::tokens::{compact, idents_in, paths_in, string_literals_in};
 use crate::{
     Attr, Call, Field, FnKind, Function, Let, MacroCall, MethodCall, Param, PathRef, SourceFile,
-    StringLit, TypeDecl, TypeKind, TypeRef, UseDecl, Vis,
+    StaticDecl, StringLit, TypeDecl, TypeKind, TypeRef, UseDecl, Vis,
 };
 
 pub fn source_file(path: PathBuf, rel: String, ast: &syn::File) -> SourceFile {
@@ -26,6 +26,7 @@ pub fn source_file(path: PathBuf, rel: String, ast: &syn::File) -> SourceFile {
         types: walker.types,
         uses: walker.uses,
         consts: walker.consts,
+        statics: walker.statics,
         calls: walker.calls,
         method_calls: walker.method_calls,
         macros: walker.macros,
@@ -41,6 +42,7 @@ struct Walker {
     types: Vec<TypeDecl>,
     uses: Vec<UseDecl>,
     consts: HashMap<String, String>,
+    statics: Vec<StaticDecl>,
     calls: Vec<Call>,
     method_calls: Vec<MethodCall>,
     macros: Vec<MacroCall>,
@@ -417,6 +419,17 @@ impl<'ast> Visit<'ast> for Walker {
             self.consts.insert(node.ident.to_string(), s.value());
         }
         syn::visit::visit_item_const(self, node);
+    }
+
+    fn visit_item_static(&mut self, node: &'ast syn::ItemStatic) {
+        self.statics.push(StaticDecl {
+            name: node.ident.to_string(),
+            ty: type_ref(&node.ty),
+            mutable: matches!(node.mutability, syn::StaticMutability::Mut(_)),
+            line: node.span().start().line,
+            function: self.function(),
+        });
+        syn::visit::visit_item_static(self, node);
     }
 
     fn visit_item_use(&mut self, node: &'ast syn::ItemUse) {

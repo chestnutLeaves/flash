@@ -1,0 +1,4649 @@
+{
+  "cases": [
+    {
+      "items": [],
+      "kind": "and",
+      "out": "",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Biology"
+      ],
+      "kind": "and",
+      "out": "Biology",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry"
+      ],
+      "kind": "and",
+      "out": "Biology and Chemistry",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics"
+      ],
+      "kind": "and",
+      "out": "Biology, Chemistry, and Physics",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics",
+        "Maths"
+      ],
+      "kind": "and",
+      "out": "Biology, Chemistry, Physics, and Maths",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Arte",
+        "inglés"
+      ],
+      "kind": "and",
+      "out": "Arte and inglés",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Arte",
+        "Historia",
+        "Hilo"
+      ],
+      "kind": "and",
+      "out": "Arte, Historia, and Hilo",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Arte",
+        "hielo"
+      ],
+      "kind": "and",
+      "out": "Arte and hielo",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Arte",
+        "hiato"
+      ],
+      "kind": "and",
+      "out": "Arte and hiato",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Arte",
+        "chico"
+      ],
+      "kind": "and",
+      "out": "Arte and chico",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Arte",
+        "hora"
+      ],
+      "kind": "and",
+      "out": "Arte and hora",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Arte",
+        "choco"
+      ],
+      "kind": "and",
+      "out": "Arte and choco",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Arte",
+        "Música",
+        "ocho"
+      ],
+      "kind": "and",
+      "out": "Arte, Música, and ocho",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Arte",
+        "8"
+      ],
+      "kind": "and",
+      "out": "Arte and 8",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Arte",
+        "11"
+      ],
+      "kind": "and",
+      "out": "Arte and 11",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Arte",
+        "11.000"
+      ],
+      "kind": "and",
+      "out": "Arte and 11.000",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Arte",
+        "11\u00A0000"
+      ],
+      "kind": "and",
+      "out": "Arte and 11\u00A0000",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Arte",
+        "110"
+      ],
+      "kind": "and",
+      "out": "Arte and 110",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Arte",
+        "11 gatos"
+      ],
+      "kind": "and",
+      "out": "Arte and 11 gatos",
+      "tag": "en"
+    },
+    {
+      "items": [],
+      "kind": "or",
+      "out": "",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Biology"
+      ],
+      "kind": "or",
+      "out": "Biology",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry"
+      ],
+      "kind": "or",
+      "out": "Biology or Chemistry",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics"
+      ],
+      "kind": "or",
+      "out": "Biology, Chemistry, or Physics",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics",
+        "Maths"
+      ],
+      "kind": "or",
+      "out": "Biology, Chemistry, Physics, or Maths",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Arte",
+        "inglés"
+      ],
+      "kind": "or",
+      "out": "Arte or inglés",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Arte",
+        "Historia",
+        "Hilo"
+      ],
+      "kind": "or",
+      "out": "Arte, Historia, or Hilo",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Arte",
+        "hielo"
+      ],
+      "kind": "or",
+      "out": "Arte or hielo",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Arte",
+        "hiato"
+      ],
+      "kind": "or",
+      "out": "Arte or hiato",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Arte",
+        "chico"
+      ],
+      "kind": "or",
+      "out": "Arte or chico",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Arte",
+        "hora"
+      ],
+      "kind": "or",
+      "out": "Arte or hora",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Arte",
+        "choco"
+      ],
+      "kind": "or",
+      "out": "Arte or choco",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Arte",
+        "Música",
+        "ocho"
+      ],
+      "kind": "or",
+      "out": "Arte, Música, or ocho",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Arte",
+        "8"
+      ],
+      "kind": "or",
+      "out": "Arte or 8",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Arte",
+        "11"
+      ],
+      "kind": "or",
+      "out": "Arte or 11",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Arte",
+        "11.000"
+      ],
+      "kind": "or",
+      "out": "Arte or 11.000",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Arte",
+        "11\u00A0000"
+      ],
+      "kind": "or",
+      "out": "Arte or 11\u00A0000",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Arte",
+        "110"
+      ],
+      "kind": "or",
+      "out": "Arte or 110",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Arte",
+        "11 gatos"
+      ],
+      "kind": "or",
+      "out": "Arte or 11 gatos",
+      "tag": "en"
+    },
+    {
+      "items": [],
+      "kind": "unit",
+      "out": "",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Biology"
+      ],
+      "kind": "unit",
+      "out": "Biology",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry"
+      ],
+      "kind": "unit",
+      "out": "Biology, Chemistry",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics"
+      ],
+      "kind": "unit",
+      "out": "Biology, Chemistry, Physics",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics",
+        "Maths"
+      ],
+      "kind": "unit",
+      "out": "Biology, Chemistry, Physics, Maths",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Arte",
+        "inglés"
+      ],
+      "kind": "unit",
+      "out": "Arte, inglés",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Arte",
+        "Historia",
+        "Hilo"
+      ],
+      "kind": "unit",
+      "out": "Arte, Historia, Hilo",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Arte",
+        "hielo"
+      ],
+      "kind": "unit",
+      "out": "Arte, hielo",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Arte",
+        "hiato"
+      ],
+      "kind": "unit",
+      "out": "Arte, hiato",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Arte",
+        "chico"
+      ],
+      "kind": "unit",
+      "out": "Arte, chico",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Arte",
+        "hora"
+      ],
+      "kind": "unit",
+      "out": "Arte, hora",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Arte",
+        "choco"
+      ],
+      "kind": "unit",
+      "out": "Arte, choco",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Arte",
+        "Música",
+        "ocho"
+      ],
+      "kind": "unit",
+      "out": "Arte, Música, ocho",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Arte",
+        "8"
+      ],
+      "kind": "unit",
+      "out": "Arte, 8",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Arte",
+        "11"
+      ],
+      "kind": "unit",
+      "out": "Arte, 11",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Arte",
+        "11.000"
+      ],
+      "kind": "unit",
+      "out": "Arte, 11.000",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Arte",
+        "11\u00A0000"
+      ],
+      "kind": "unit",
+      "out": "Arte, 11\u00A0000",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Arte",
+        "110"
+      ],
+      "kind": "unit",
+      "out": "Arte, 110",
+      "tag": "en"
+    },
+    {
+      "items": [
+        "Arte",
+        "11 gatos"
+      ],
+      "kind": "unit",
+      "out": "Arte, 11 gatos",
+      "tag": "en"
+    },
+    {
+      "items": [],
+      "kind": "and",
+      "out": "",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Biology"
+      ],
+      "kind": "and",
+      "out": "Biology",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry"
+      ],
+      "kind": "and",
+      "out": "Biology y Chemistry",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics"
+      ],
+      "kind": "and",
+      "out": "Biology, Chemistry y Physics",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics",
+        "Maths"
+      ],
+      "kind": "and",
+      "out": "Biology, Chemistry, Physics y Maths",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Arte",
+        "inglés"
+      ],
+      "kind": "and",
+      "out": "Arte e inglés",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Arte",
+        "Historia",
+        "Hilo"
+      ],
+      "kind": "and",
+      "out": "Arte, Historia e Hilo",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Arte",
+        "hielo"
+      ],
+      "kind": "and",
+      "out": "Arte y hielo",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Arte",
+        "hiato"
+      ],
+      "kind": "and",
+      "out": "Arte y hiato",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Arte",
+        "chico"
+      ],
+      "kind": "and",
+      "out": "Arte y chico",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Arte",
+        "hora"
+      ],
+      "kind": "and",
+      "out": "Arte y hora",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Arte",
+        "choco"
+      ],
+      "kind": "and",
+      "out": "Arte y choco",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Arte",
+        "Música",
+        "ocho"
+      ],
+      "kind": "and",
+      "out": "Arte, Música y ocho",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Arte",
+        "8"
+      ],
+      "kind": "and",
+      "out": "Arte y 8",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Arte",
+        "11"
+      ],
+      "kind": "and",
+      "out": "Arte y 11",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Arte",
+        "11.000"
+      ],
+      "kind": "and",
+      "out": "Arte y 11.000",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Arte",
+        "11\u00A0000"
+      ],
+      "kind": "and",
+      "out": "Arte y 11\u00A0000",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Arte",
+        "110"
+      ],
+      "kind": "and",
+      "out": "Arte y 110",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Arte",
+        "11 gatos"
+      ],
+      "kind": "and",
+      "out": "Arte y 11 gatos",
+      "tag": "es-ES"
+    },
+    {
+      "items": [],
+      "kind": "or",
+      "out": "",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Biology"
+      ],
+      "kind": "or",
+      "out": "Biology",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry"
+      ],
+      "kind": "or",
+      "out": "Biology o Chemistry",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics"
+      ],
+      "kind": "or",
+      "out": "Biology, Chemistry o Physics",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics",
+        "Maths"
+      ],
+      "kind": "or",
+      "out": "Biology, Chemistry, Physics o Maths",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Arte",
+        "inglés"
+      ],
+      "kind": "or",
+      "out": "Arte o inglés",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Arte",
+        "Historia",
+        "Hilo"
+      ],
+      "kind": "or",
+      "out": "Arte, Historia o Hilo",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Arte",
+        "hielo"
+      ],
+      "kind": "or",
+      "out": "Arte o hielo",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Arte",
+        "hiato"
+      ],
+      "kind": "or",
+      "out": "Arte o hiato",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Arte",
+        "chico"
+      ],
+      "kind": "or",
+      "out": "Arte o chico",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Arte",
+        "hora"
+      ],
+      "kind": "or",
+      "out": "Arte u hora",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Arte",
+        "choco"
+      ],
+      "kind": "or",
+      "out": "Arte o choco",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Arte",
+        "Música",
+        "ocho"
+      ],
+      "kind": "or",
+      "out": "Arte, Música u ocho",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Arte",
+        "8"
+      ],
+      "kind": "or",
+      "out": "Arte u 8",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Arte",
+        "11"
+      ],
+      "kind": "or",
+      "out": "Arte u 11",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Arte",
+        "11.000"
+      ],
+      "kind": "or",
+      "out": "Arte u 11.000",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Arte",
+        "11\u00A0000"
+      ],
+      "kind": "or",
+      "out": "Arte u 11\u00A0000",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Arte",
+        "110"
+      ],
+      "kind": "or",
+      "out": "Arte o 110",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Arte",
+        "11 gatos"
+      ],
+      "kind": "or",
+      "out": "Arte u 11 gatos",
+      "tag": "es-ES"
+    },
+    {
+      "items": [],
+      "kind": "unit",
+      "out": "",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Biology"
+      ],
+      "kind": "unit",
+      "out": "Biology",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry"
+      ],
+      "kind": "unit",
+      "out": "Biology y Chemistry",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics"
+      ],
+      "kind": "unit",
+      "out": "Biology, Chemistry y Physics",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics",
+        "Maths"
+      ],
+      "kind": "unit",
+      "out": "Biology, Chemistry, Physics y Maths",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Arte",
+        "inglés"
+      ],
+      "kind": "unit",
+      "out": "Arte e inglés",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Arte",
+        "Historia",
+        "Hilo"
+      ],
+      "kind": "unit",
+      "out": "Arte, Historia e Hilo",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Arte",
+        "hielo"
+      ],
+      "kind": "unit",
+      "out": "Arte y hielo",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Arte",
+        "hiato"
+      ],
+      "kind": "unit",
+      "out": "Arte y hiato",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Arte",
+        "chico"
+      ],
+      "kind": "unit",
+      "out": "Arte y chico",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Arte",
+        "hora"
+      ],
+      "kind": "unit",
+      "out": "Arte y hora",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Arte",
+        "choco"
+      ],
+      "kind": "unit",
+      "out": "Arte y choco",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Arte",
+        "Música",
+        "ocho"
+      ],
+      "kind": "unit",
+      "out": "Arte, Música y ocho",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Arte",
+        "8"
+      ],
+      "kind": "unit",
+      "out": "Arte y 8",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Arte",
+        "11"
+      ],
+      "kind": "unit",
+      "out": "Arte y 11",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Arte",
+        "11.000"
+      ],
+      "kind": "unit",
+      "out": "Arte y 11.000",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Arte",
+        "11\u00A0000"
+      ],
+      "kind": "unit",
+      "out": "Arte y 11\u00A0000",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Arte",
+        "110"
+      ],
+      "kind": "unit",
+      "out": "Arte y 110",
+      "tag": "es-ES"
+    },
+    {
+      "items": [
+        "Arte",
+        "11 gatos"
+      ],
+      "kind": "unit",
+      "out": "Arte y 11 gatos",
+      "tag": "es-ES"
+    },
+    {
+      "items": [],
+      "kind": "and",
+      "out": "",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Biology"
+      ],
+      "kind": "and",
+      "out": "Biology",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry"
+      ],
+      "kind": "and",
+      "out": "Biology y Chemistry",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics"
+      ],
+      "kind": "and",
+      "out": "Biology, Chemistry y Physics",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics",
+        "Maths"
+      ],
+      "kind": "and",
+      "out": "Biology, Chemistry, Physics y Maths",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Arte",
+        "inglés"
+      ],
+      "kind": "and",
+      "out": "Arte e inglés",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Arte",
+        "Historia",
+        "Hilo"
+      ],
+      "kind": "and",
+      "out": "Arte, Historia e Hilo",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Arte",
+        "hielo"
+      ],
+      "kind": "and",
+      "out": "Arte y hielo",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Arte",
+        "hiato"
+      ],
+      "kind": "and",
+      "out": "Arte y hiato",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Arte",
+        "chico"
+      ],
+      "kind": "and",
+      "out": "Arte y chico",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Arte",
+        "hora"
+      ],
+      "kind": "and",
+      "out": "Arte y hora",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Arte",
+        "choco"
+      ],
+      "kind": "and",
+      "out": "Arte y choco",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Arte",
+        "Música",
+        "ocho"
+      ],
+      "kind": "and",
+      "out": "Arte, Música y ocho",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Arte",
+        "8"
+      ],
+      "kind": "and",
+      "out": "Arte y 8",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Arte",
+        "11"
+      ],
+      "kind": "and",
+      "out": "Arte y 11",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Arte",
+        "11.000"
+      ],
+      "kind": "and",
+      "out": "Arte y 11.000",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Arte",
+        "11\u00A0000"
+      ],
+      "kind": "and",
+      "out": "Arte y 11\u00A0000",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Arte",
+        "110"
+      ],
+      "kind": "and",
+      "out": "Arte y 110",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Arte",
+        "11 gatos"
+      ],
+      "kind": "and",
+      "out": "Arte y 11 gatos",
+      "tag": "es-419"
+    },
+    {
+      "items": [],
+      "kind": "or",
+      "out": "",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Biology"
+      ],
+      "kind": "or",
+      "out": "Biology",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry"
+      ],
+      "kind": "or",
+      "out": "Biology o Chemistry",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics"
+      ],
+      "kind": "or",
+      "out": "Biology, Chemistry o Physics",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics",
+        "Maths"
+      ],
+      "kind": "or",
+      "out": "Biology, Chemistry, Physics o Maths",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Arte",
+        "inglés"
+      ],
+      "kind": "or",
+      "out": "Arte o inglés",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Arte",
+        "Historia",
+        "Hilo"
+      ],
+      "kind": "or",
+      "out": "Arte, Historia o Hilo",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Arte",
+        "hielo"
+      ],
+      "kind": "or",
+      "out": "Arte o hielo",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Arte",
+        "hiato"
+      ],
+      "kind": "or",
+      "out": "Arte o hiato",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Arte",
+        "chico"
+      ],
+      "kind": "or",
+      "out": "Arte o chico",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Arte",
+        "hora"
+      ],
+      "kind": "or",
+      "out": "Arte u hora",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Arte",
+        "choco"
+      ],
+      "kind": "or",
+      "out": "Arte o choco",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Arte",
+        "Música",
+        "ocho"
+      ],
+      "kind": "or",
+      "out": "Arte, Música u ocho",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Arte",
+        "8"
+      ],
+      "kind": "or",
+      "out": "Arte u 8",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Arte",
+        "11"
+      ],
+      "kind": "or",
+      "out": "Arte u 11",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Arte",
+        "11.000"
+      ],
+      "kind": "or",
+      "out": "Arte u 11.000",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Arte",
+        "11\u00A0000"
+      ],
+      "kind": "or",
+      "out": "Arte u 11\u00A0000",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Arte",
+        "110"
+      ],
+      "kind": "or",
+      "out": "Arte o 110",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Arte",
+        "11 gatos"
+      ],
+      "kind": "or",
+      "out": "Arte u 11 gatos",
+      "tag": "es-419"
+    },
+    {
+      "items": [],
+      "kind": "unit",
+      "out": "",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Biology"
+      ],
+      "kind": "unit",
+      "out": "Biology",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry"
+      ],
+      "kind": "unit",
+      "out": "Biology y Chemistry",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics"
+      ],
+      "kind": "unit",
+      "out": "Biology, Chemistry y Physics",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics",
+        "Maths"
+      ],
+      "kind": "unit",
+      "out": "Biology, Chemistry, Physics y Maths",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Arte",
+        "inglés"
+      ],
+      "kind": "unit",
+      "out": "Arte e inglés",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Arte",
+        "Historia",
+        "Hilo"
+      ],
+      "kind": "unit",
+      "out": "Arte, Historia e Hilo",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Arte",
+        "hielo"
+      ],
+      "kind": "unit",
+      "out": "Arte y hielo",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Arte",
+        "hiato"
+      ],
+      "kind": "unit",
+      "out": "Arte y hiato",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Arte",
+        "chico"
+      ],
+      "kind": "unit",
+      "out": "Arte y chico",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Arte",
+        "hora"
+      ],
+      "kind": "unit",
+      "out": "Arte y hora",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Arte",
+        "choco"
+      ],
+      "kind": "unit",
+      "out": "Arte y choco",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Arte",
+        "Música",
+        "ocho"
+      ],
+      "kind": "unit",
+      "out": "Arte, Música y ocho",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Arte",
+        "8"
+      ],
+      "kind": "unit",
+      "out": "Arte y 8",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Arte",
+        "11"
+      ],
+      "kind": "unit",
+      "out": "Arte y 11",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Arte",
+        "11.000"
+      ],
+      "kind": "unit",
+      "out": "Arte y 11.000",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Arte",
+        "11\u00A0000"
+      ],
+      "kind": "unit",
+      "out": "Arte y 11\u00A0000",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Arte",
+        "110"
+      ],
+      "kind": "unit",
+      "out": "Arte y 110",
+      "tag": "es-419"
+    },
+    {
+      "items": [
+        "Arte",
+        "11 gatos"
+      ],
+      "kind": "unit",
+      "out": "Arte y 11 gatos",
+      "tag": "es-419"
+    },
+    {
+      "items": [],
+      "kind": "and",
+      "out": "",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Biology"
+      ],
+      "kind": "and",
+      "out": "Biology",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry"
+      ],
+      "kind": "and",
+      "out": "Biology e Chemistry",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics"
+      ],
+      "kind": "and",
+      "out": "Biology, Chemistry e Physics",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics",
+        "Maths"
+      ],
+      "kind": "and",
+      "out": "Biology, Chemistry, Physics e Maths",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Arte",
+        "inglés"
+      ],
+      "kind": "and",
+      "out": "Arte e inglés",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Arte",
+        "Historia",
+        "Hilo"
+      ],
+      "kind": "and",
+      "out": "Arte, Historia e Hilo",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Arte",
+        "hielo"
+      ],
+      "kind": "and",
+      "out": "Arte e hielo",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Arte",
+        "hiato"
+      ],
+      "kind": "and",
+      "out": "Arte e hiato",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Arte",
+        "chico"
+      ],
+      "kind": "and",
+      "out": "Arte e chico",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Arte",
+        "hora"
+      ],
+      "kind": "and",
+      "out": "Arte e hora",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Arte",
+        "choco"
+      ],
+      "kind": "and",
+      "out": "Arte e choco",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Arte",
+        "Música",
+        "ocho"
+      ],
+      "kind": "and",
+      "out": "Arte, Música e ocho",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Arte",
+        "8"
+      ],
+      "kind": "and",
+      "out": "Arte e 8",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Arte",
+        "11"
+      ],
+      "kind": "and",
+      "out": "Arte e 11",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Arte",
+        "11.000"
+      ],
+      "kind": "and",
+      "out": "Arte e 11.000",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Arte",
+        "11\u00A0000"
+      ],
+      "kind": "and",
+      "out": "Arte e 11\u00A0000",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Arte",
+        "110"
+      ],
+      "kind": "and",
+      "out": "Arte e 110",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Arte",
+        "11 gatos"
+      ],
+      "kind": "and",
+      "out": "Arte e 11 gatos",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [],
+      "kind": "or",
+      "out": "",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Biology"
+      ],
+      "kind": "or",
+      "out": "Biology",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry"
+      ],
+      "kind": "or",
+      "out": "Biology ou Chemistry",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics"
+      ],
+      "kind": "or",
+      "out": "Biology, Chemistry ou Physics",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics",
+        "Maths"
+      ],
+      "kind": "or",
+      "out": "Biology, Chemistry, Physics ou Maths",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Arte",
+        "inglés"
+      ],
+      "kind": "or",
+      "out": "Arte ou inglés",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Arte",
+        "Historia",
+        "Hilo"
+      ],
+      "kind": "or",
+      "out": "Arte, Historia ou Hilo",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Arte",
+        "hielo"
+      ],
+      "kind": "or",
+      "out": "Arte ou hielo",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Arte",
+        "hiato"
+      ],
+      "kind": "or",
+      "out": "Arte ou hiato",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Arte",
+        "chico"
+      ],
+      "kind": "or",
+      "out": "Arte ou chico",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Arte",
+        "hora"
+      ],
+      "kind": "or",
+      "out": "Arte ou hora",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Arte",
+        "choco"
+      ],
+      "kind": "or",
+      "out": "Arte ou choco",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Arte",
+        "Música",
+        "ocho"
+      ],
+      "kind": "or",
+      "out": "Arte, Música ou ocho",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Arte",
+        "8"
+      ],
+      "kind": "or",
+      "out": "Arte ou 8",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Arte",
+        "11"
+      ],
+      "kind": "or",
+      "out": "Arte ou 11",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Arte",
+        "11.000"
+      ],
+      "kind": "or",
+      "out": "Arte ou 11.000",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Arte",
+        "11\u00A0000"
+      ],
+      "kind": "or",
+      "out": "Arte ou 11\u00A0000",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Arte",
+        "110"
+      ],
+      "kind": "or",
+      "out": "Arte ou 110",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Arte",
+        "11 gatos"
+      ],
+      "kind": "or",
+      "out": "Arte ou 11 gatos",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [],
+      "kind": "unit",
+      "out": "",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Biology"
+      ],
+      "kind": "unit",
+      "out": "Biology",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry"
+      ],
+      "kind": "unit",
+      "out": "Biology e Chemistry",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics"
+      ],
+      "kind": "unit",
+      "out": "Biology, Chemistry e Physics",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics",
+        "Maths"
+      ],
+      "kind": "unit",
+      "out": "Biology, Chemistry, Physics e Maths",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Arte",
+        "inglés"
+      ],
+      "kind": "unit",
+      "out": "Arte e inglés",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Arte",
+        "Historia",
+        "Hilo"
+      ],
+      "kind": "unit",
+      "out": "Arte, Historia e Hilo",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Arte",
+        "hielo"
+      ],
+      "kind": "unit",
+      "out": "Arte e hielo",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Arte",
+        "hiato"
+      ],
+      "kind": "unit",
+      "out": "Arte e hiato",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Arte",
+        "chico"
+      ],
+      "kind": "unit",
+      "out": "Arte e chico",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Arte",
+        "hora"
+      ],
+      "kind": "unit",
+      "out": "Arte e hora",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Arte",
+        "choco"
+      ],
+      "kind": "unit",
+      "out": "Arte e choco",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Arte",
+        "Música",
+        "ocho"
+      ],
+      "kind": "unit",
+      "out": "Arte, Música e ocho",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Arte",
+        "8"
+      ],
+      "kind": "unit",
+      "out": "Arte e 8",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Arte",
+        "11"
+      ],
+      "kind": "unit",
+      "out": "Arte e 11",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Arte",
+        "11.000"
+      ],
+      "kind": "unit",
+      "out": "Arte e 11.000",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Arte",
+        "11\u00A0000"
+      ],
+      "kind": "unit",
+      "out": "Arte e 11\u00A0000",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Arte",
+        "110"
+      ],
+      "kind": "unit",
+      "out": "Arte e 110",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [
+        "Arte",
+        "11 gatos"
+      ],
+      "kind": "unit",
+      "out": "Arte e 11 gatos",
+      "tag": "pt-BR"
+    },
+    {
+      "items": [],
+      "kind": "and",
+      "out": "",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Biology"
+      ],
+      "kind": "and",
+      "out": "Biology",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry"
+      ],
+      "kind": "and",
+      "out": "Biology e Chemistry",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics"
+      ],
+      "kind": "and",
+      "out": "Biology, Chemistry e Physics",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics",
+        "Maths"
+      ],
+      "kind": "and",
+      "out": "Biology, Chemistry, Physics e Maths",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Arte",
+        "inglés"
+      ],
+      "kind": "and",
+      "out": "Arte e inglés",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Arte",
+        "Historia",
+        "Hilo"
+      ],
+      "kind": "and",
+      "out": "Arte, Historia e Hilo",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Arte",
+        "hielo"
+      ],
+      "kind": "and",
+      "out": "Arte e hielo",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Arte",
+        "hiato"
+      ],
+      "kind": "and",
+      "out": "Arte e hiato",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Arte",
+        "chico"
+      ],
+      "kind": "and",
+      "out": "Arte e chico",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Arte",
+        "hora"
+      ],
+      "kind": "and",
+      "out": "Arte e hora",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Arte",
+        "choco"
+      ],
+      "kind": "and",
+      "out": "Arte e choco",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Arte",
+        "Música",
+        "ocho"
+      ],
+      "kind": "and",
+      "out": "Arte, Música e ocho",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Arte",
+        "8"
+      ],
+      "kind": "and",
+      "out": "Arte e 8",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Arte",
+        "11"
+      ],
+      "kind": "and",
+      "out": "Arte e 11",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Arte",
+        "11.000"
+      ],
+      "kind": "and",
+      "out": "Arte e 11.000",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Arte",
+        "11\u00A0000"
+      ],
+      "kind": "and",
+      "out": "Arte e 11\u00A0000",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Arte",
+        "110"
+      ],
+      "kind": "and",
+      "out": "Arte e 110",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Arte",
+        "11 gatos"
+      ],
+      "kind": "and",
+      "out": "Arte e 11 gatos",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [],
+      "kind": "or",
+      "out": "",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Biology"
+      ],
+      "kind": "or",
+      "out": "Biology",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry"
+      ],
+      "kind": "or",
+      "out": "Biology ou Chemistry",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics"
+      ],
+      "kind": "or",
+      "out": "Biology, Chemistry ou Physics",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics",
+        "Maths"
+      ],
+      "kind": "or",
+      "out": "Biology, Chemistry, Physics ou Maths",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Arte",
+        "inglés"
+      ],
+      "kind": "or",
+      "out": "Arte ou inglés",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Arte",
+        "Historia",
+        "Hilo"
+      ],
+      "kind": "or",
+      "out": "Arte, Historia ou Hilo",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Arte",
+        "hielo"
+      ],
+      "kind": "or",
+      "out": "Arte ou hielo",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Arte",
+        "hiato"
+      ],
+      "kind": "or",
+      "out": "Arte ou hiato",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Arte",
+        "chico"
+      ],
+      "kind": "or",
+      "out": "Arte ou chico",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Arte",
+        "hora"
+      ],
+      "kind": "or",
+      "out": "Arte ou hora",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Arte",
+        "choco"
+      ],
+      "kind": "or",
+      "out": "Arte ou choco",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Arte",
+        "Música",
+        "ocho"
+      ],
+      "kind": "or",
+      "out": "Arte, Música ou ocho",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Arte",
+        "8"
+      ],
+      "kind": "or",
+      "out": "Arte ou 8",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Arte",
+        "11"
+      ],
+      "kind": "or",
+      "out": "Arte ou 11",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Arte",
+        "11.000"
+      ],
+      "kind": "or",
+      "out": "Arte ou 11.000",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Arte",
+        "11\u00A0000"
+      ],
+      "kind": "or",
+      "out": "Arte ou 11\u00A0000",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Arte",
+        "110"
+      ],
+      "kind": "or",
+      "out": "Arte ou 110",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Arte",
+        "11 gatos"
+      ],
+      "kind": "or",
+      "out": "Arte ou 11 gatos",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [],
+      "kind": "unit",
+      "out": "",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Biology"
+      ],
+      "kind": "unit",
+      "out": "Biology",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry"
+      ],
+      "kind": "unit",
+      "out": "Biology e Chemistry",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics"
+      ],
+      "kind": "unit",
+      "out": "Biology, Chemistry e Physics",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics",
+        "Maths"
+      ],
+      "kind": "unit",
+      "out": "Biology, Chemistry, Physics e Maths",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Arte",
+        "inglés"
+      ],
+      "kind": "unit",
+      "out": "Arte e inglés",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Arte",
+        "Historia",
+        "Hilo"
+      ],
+      "kind": "unit",
+      "out": "Arte, Historia e Hilo",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Arte",
+        "hielo"
+      ],
+      "kind": "unit",
+      "out": "Arte e hielo",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Arte",
+        "hiato"
+      ],
+      "kind": "unit",
+      "out": "Arte e hiato",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Arte",
+        "chico"
+      ],
+      "kind": "unit",
+      "out": "Arte e chico",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Arte",
+        "hora"
+      ],
+      "kind": "unit",
+      "out": "Arte e hora",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Arte",
+        "choco"
+      ],
+      "kind": "unit",
+      "out": "Arte e choco",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Arte",
+        "Música",
+        "ocho"
+      ],
+      "kind": "unit",
+      "out": "Arte, Música e ocho",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Arte",
+        "8"
+      ],
+      "kind": "unit",
+      "out": "Arte e 8",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Arte",
+        "11"
+      ],
+      "kind": "unit",
+      "out": "Arte e 11",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Arte",
+        "11.000"
+      ],
+      "kind": "unit",
+      "out": "Arte e 11.000",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Arte",
+        "11\u00A0000"
+      ],
+      "kind": "unit",
+      "out": "Arte e 11\u00A0000",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Arte",
+        "110"
+      ],
+      "kind": "unit",
+      "out": "Arte e 110",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [
+        "Arte",
+        "11 gatos"
+      ],
+      "kind": "unit",
+      "out": "Arte e 11 gatos",
+      "tag": "pt-PT"
+    },
+    {
+      "items": [],
+      "kind": "and",
+      "out": "",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Biology"
+      ],
+      "kind": "and",
+      "out": "Biology",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry"
+      ],
+      "kind": "and",
+      "out": "Biology et Chemistry",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics"
+      ],
+      "kind": "and",
+      "out": "Biology, Chemistry et Physics",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics",
+        "Maths"
+      ],
+      "kind": "and",
+      "out": "Biology, Chemistry, Physics et Maths",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Arte",
+        "inglés"
+      ],
+      "kind": "and",
+      "out": "Arte et inglés",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Arte",
+        "Historia",
+        "Hilo"
+      ],
+      "kind": "and",
+      "out": "Arte, Historia et Hilo",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Arte",
+        "hielo"
+      ],
+      "kind": "and",
+      "out": "Arte et hielo",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Arte",
+        "hiato"
+      ],
+      "kind": "and",
+      "out": "Arte et hiato",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Arte",
+        "chico"
+      ],
+      "kind": "and",
+      "out": "Arte et chico",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Arte",
+        "hora"
+      ],
+      "kind": "and",
+      "out": "Arte et hora",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Arte",
+        "choco"
+      ],
+      "kind": "and",
+      "out": "Arte et choco",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Arte",
+        "Música",
+        "ocho"
+      ],
+      "kind": "and",
+      "out": "Arte, Música et ocho",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Arte",
+        "8"
+      ],
+      "kind": "and",
+      "out": "Arte et 8",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Arte",
+        "11"
+      ],
+      "kind": "and",
+      "out": "Arte et 11",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Arte",
+        "11.000"
+      ],
+      "kind": "and",
+      "out": "Arte et 11.000",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Arte",
+        "11\u00A0000"
+      ],
+      "kind": "and",
+      "out": "Arte et 11\u00A0000",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Arte",
+        "110"
+      ],
+      "kind": "and",
+      "out": "Arte et 110",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Arte",
+        "11 gatos"
+      ],
+      "kind": "and",
+      "out": "Arte et 11 gatos",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [],
+      "kind": "or",
+      "out": "",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Biology"
+      ],
+      "kind": "or",
+      "out": "Biology",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry"
+      ],
+      "kind": "or",
+      "out": "Biology ou Chemistry",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics"
+      ],
+      "kind": "or",
+      "out": "Biology, Chemistry ou Physics",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics",
+        "Maths"
+      ],
+      "kind": "or",
+      "out": "Biology, Chemistry, Physics ou Maths",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Arte",
+        "inglés"
+      ],
+      "kind": "or",
+      "out": "Arte ou inglés",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Arte",
+        "Historia",
+        "Hilo"
+      ],
+      "kind": "or",
+      "out": "Arte, Historia ou Hilo",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Arte",
+        "hielo"
+      ],
+      "kind": "or",
+      "out": "Arte ou hielo",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Arte",
+        "hiato"
+      ],
+      "kind": "or",
+      "out": "Arte ou hiato",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Arte",
+        "chico"
+      ],
+      "kind": "or",
+      "out": "Arte ou chico",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Arte",
+        "hora"
+      ],
+      "kind": "or",
+      "out": "Arte ou hora",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Arte",
+        "choco"
+      ],
+      "kind": "or",
+      "out": "Arte ou choco",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Arte",
+        "Música",
+        "ocho"
+      ],
+      "kind": "or",
+      "out": "Arte, Música ou ocho",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Arte",
+        "8"
+      ],
+      "kind": "or",
+      "out": "Arte ou 8",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Arte",
+        "11"
+      ],
+      "kind": "or",
+      "out": "Arte ou 11",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Arte",
+        "11.000"
+      ],
+      "kind": "or",
+      "out": "Arte ou 11.000",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Arte",
+        "11\u00A0000"
+      ],
+      "kind": "or",
+      "out": "Arte ou 11\u00A0000",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Arte",
+        "110"
+      ],
+      "kind": "or",
+      "out": "Arte ou 110",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Arte",
+        "11 gatos"
+      ],
+      "kind": "or",
+      "out": "Arte ou 11 gatos",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [],
+      "kind": "unit",
+      "out": "",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Biology"
+      ],
+      "kind": "unit",
+      "out": "Biology",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry"
+      ],
+      "kind": "unit",
+      "out": "Biology et Chemistry",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics"
+      ],
+      "kind": "unit",
+      "out": "Biology, Chemistry et Physics",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics",
+        "Maths"
+      ],
+      "kind": "unit",
+      "out": "Biology, Chemistry, Physics et Maths",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Arte",
+        "inglés"
+      ],
+      "kind": "unit",
+      "out": "Arte et inglés",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Arte",
+        "Historia",
+        "Hilo"
+      ],
+      "kind": "unit",
+      "out": "Arte, Historia et Hilo",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Arte",
+        "hielo"
+      ],
+      "kind": "unit",
+      "out": "Arte et hielo",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Arte",
+        "hiato"
+      ],
+      "kind": "unit",
+      "out": "Arte et hiato",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Arte",
+        "chico"
+      ],
+      "kind": "unit",
+      "out": "Arte et chico",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Arte",
+        "hora"
+      ],
+      "kind": "unit",
+      "out": "Arte et hora",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Arte",
+        "choco"
+      ],
+      "kind": "unit",
+      "out": "Arte et choco",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Arte",
+        "Música",
+        "ocho"
+      ],
+      "kind": "unit",
+      "out": "Arte, Música et ocho",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Arte",
+        "8"
+      ],
+      "kind": "unit",
+      "out": "Arte et 8",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Arte",
+        "11"
+      ],
+      "kind": "unit",
+      "out": "Arte et 11",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Arte",
+        "11.000"
+      ],
+      "kind": "unit",
+      "out": "Arte et 11.000",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Arte",
+        "11\u00A0000"
+      ],
+      "kind": "unit",
+      "out": "Arte et 11\u00A0000",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Arte",
+        "110"
+      ],
+      "kind": "unit",
+      "out": "Arte et 110",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [
+        "Arte",
+        "11 gatos"
+      ],
+      "kind": "unit",
+      "out": "Arte et 11 gatos",
+      "tag": "fr-FR"
+    },
+    {
+      "items": [],
+      "kind": "and",
+      "out": "",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Biology"
+      ],
+      "kind": "and",
+      "out": "Biology",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry"
+      ],
+      "kind": "and",
+      "out": "Biology et Chemistry",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics"
+      ],
+      "kind": "and",
+      "out": "Biology, Chemistry et Physics",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics",
+        "Maths"
+      ],
+      "kind": "and",
+      "out": "Biology, Chemistry, Physics et Maths",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Arte",
+        "inglés"
+      ],
+      "kind": "and",
+      "out": "Arte et inglés",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Arte",
+        "Historia",
+        "Hilo"
+      ],
+      "kind": "and",
+      "out": "Arte, Historia et Hilo",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Arte",
+        "hielo"
+      ],
+      "kind": "and",
+      "out": "Arte et hielo",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Arte",
+        "hiato"
+      ],
+      "kind": "and",
+      "out": "Arte et hiato",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Arte",
+        "chico"
+      ],
+      "kind": "and",
+      "out": "Arte et chico",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Arte",
+        "hora"
+      ],
+      "kind": "and",
+      "out": "Arte et hora",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Arte",
+        "choco"
+      ],
+      "kind": "and",
+      "out": "Arte et choco",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Arte",
+        "Música",
+        "ocho"
+      ],
+      "kind": "and",
+      "out": "Arte, Música et ocho",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Arte",
+        "8"
+      ],
+      "kind": "and",
+      "out": "Arte et 8",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Arte",
+        "11"
+      ],
+      "kind": "and",
+      "out": "Arte et 11",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Arte",
+        "11.000"
+      ],
+      "kind": "and",
+      "out": "Arte et 11.000",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Arte",
+        "11\u00A0000"
+      ],
+      "kind": "and",
+      "out": "Arte et 11\u00A0000",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Arte",
+        "110"
+      ],
+      "kind": "and",
+      "out": "Arte et 110",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Arte",
+        "11 gatos"
+      ],
+      "kind": "and",
+      "out": "Arte et 11 gatos",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [],
+      "kind": "or",
+      "out": "",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Biology"
+      ],
+      "kind": "or",
+      "out": "Biology",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry"
+      ],
+      "kind": "or",
+      "out": "Biology ou Chemistry",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics"
+      ],
+      "kind": "or",
+      "out": "Biology, Chemistry ou Physics",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics",
+        "Maths"
+      ],
+      "kind": "or",
+      "out": "Biology, Chemistry, Physics ou Maths",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Arte",
+        "inglés"
+      ],
+      "kind": "or",
+      "out": "Arte ou inglés",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Arte",
+        "Historia",
+        "Hilo"
+      ],
+      "kind": "or",
+      "out": "Arte, Historia ou Hilo",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Arte",
+        "hielo"
+      ],
+      "kind": "or",
+      "out": "Arte ou hielo",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Arte",
+        "hiato"
+      ],
+      "kind": "or",
+      "out": "Arte ou hiato",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Arte",
+        "chico"
+      ],
+      "kind": "or",
+      "out": "Arte ou chico",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Arte",
+        "hora"
+      ],
+      "kind": "or",
+      "out": "Arte ou hora",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Arte",
+        "choco"
+      ],
+      "kind": "or",
+      "out": "Arte ou choco",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Arte",
+        "Música",
+        "ocho"
+      ],
+      "kind": "or",
+      "out": "Arte, Música ou ocho",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Arte",
+        "8"
+      ],
+      "kind": "or",
+      "out": "Arte ou 8",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Arte",
+        "11"
+      ],
+      "kind": "or",
+      "out": "Arte ou 11",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Arte",
+        "11.000"
+      ],
+      "kind": "or",
+      "out": "Arte ou 11.000",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Arte",
+        "11\u00A0000"
+      ],
+      "kind": "or",
+      "out": "Arte ou 11\u00A0000",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Arte",
+        "110"
+      ],
+      "kind": "or",
+      "out": "Arte ou 110",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Arte",
+        "11 gatos"
+      ],
+      "kind": "or",
+      "out": "Arte ou 11 gatos",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [],
+      "kind": "unit",
+      "out": "",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Biology"
+      ],
+      "kind": "unit",
+      "out": "Biology",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry"
+      ],
+      "kind": "unit",
+      "out": "Biology et Chemistry",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics"
+      ],
+      "kind": "unit",
+      "out": "Biology, Chemistry et Physics",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics",
+        "Maths"
+      ],
+      "kind": "unit",
+      "out": "Biology, Chemistry, Physics et Maths",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Arte",
+        "inglés"
+      ],
+      "kind": "unit",
+      "out": "Arte et inglés",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Arte",
+        "Historia",
+        "Hilo"
+      ],
+      "kind": "unit",
+      "out": "Arte, Historia et Hilo",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Arte",
+        "hielo"
+      ],
+      "kind": "unit",
+      "out": "Arte et hielo",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Arte",
+        "hiato"
+      ],
+      "kind": "unit",
+      "out": "Arte et hiato",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Arte",
+        "chico"
+      ],
+      "kind": "unit",
+      "out": "Arte et chico",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Arte",
+        "hora"
+      ],
+      "kind": "unit",
+      "out": "Arte et hora",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Arte",
+        "choco"
+      ],
+      "kind": "unit",
+      "out": "Arte et choco",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Arte",
+        "Música",
+        "ocho"
+      ],
+      "kind": "unit",
+      "out": "Arte, Música et ocho",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Arte",
+        "8"
+      ],
+      "kind": "unit",
+      "out": "Arte et 8",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Arte",
+        "11"
+      ],
+      "kind": "unit",
+      "out": "Arte et 11",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Arte",
+        "11.000"
+      ],
+      "kind": "unit",
+      "out": "Arte et 11.000",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Arte",
+        "11\u00A0000"
+      ],
+      "kind": "unit",
+      "out": "Arte et 11\u00A0000",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Arte",
+        "110"
+      ],
+      "kind": "unit",
+      "out": "Arte et 110",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [
+        "Arte",
+        "11 gatos"
+      ],
+      "kind": "unit",
+      "out": "Arte et 11 gatos",
+      "tag": "fr-CA"
+    },
+    {
+      "items": [],
+      "kind": "and",
+      "out": "",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Biology"
+      ],
+      "kind": "and",
+      "out": "Biology",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry"
+      ],
+      "kind": "and",
+      "out": "Biology and Chemistry",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics"
+      ],
+      "kind": "and",
+      "out": "Biology, Chemistry, and Physics",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics",
+        "Maths"
+      ],
+      "kind": "and",
+      "out": "Biology, Chemistry, Physics, and Maths",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Arte",
+        "inglés"
+      ],
+      "kind": "and",
+      "out": "Arte and inglés",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Arte",
+        "Historia",
+        "Hilo"
+      ],
+      "kind": "and",
+      "out": "Arte, Historia, and Hilo",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Arte",
+        "hielo"
+      ],
+      "kind": "and",
+      "out": "Arte and hielo",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Arte",
+        "hiato"
+      ],
+      "kind": "and",
+      "out": "Arte and hiato",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Arte",
+        "chico"
+      ],
+      "kind": "and",
+      "out": "Arte and chico",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Arte",
+        "hora"
+      ],
+      "kind": "and",
+      "out": "Arte and hora",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Arte",
+        "choco"
+      ],
+      "kind": "and",
+      "out": "Arte and choco",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Arte",
+        "Música",
+        "ocho"
+      ],
+      "kind": "and",
+      "out": "Arte, Música, and ocho",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Arte",
+        "8"
+      ],
+      "kind": "and",
+      "out": "Arte and 8",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Arte",
+        "11"
+      ],
+      "kind": "and",
+      "out": "Arte and 11",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Arte",
+        "11.000"
+      ],
+      "kind": "and",
+      "out": "Arte and 11.000",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Arte",
+        "11\u00A0000"
+      ],
+      "kind": "and",
+      "out": "Arte and 11\u00A0000",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Arte",
+        "110"
+      ],
+      "kind": "and",
+      "out": "Arte and 110",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Arte",
+        "11 gatos"
+      ],
+      "kind": "and",
+      "out": "Arte and 11 gatos",
+      "tag": "en-XA"
+    },
+    {
+      "items": [],
+      "kind": "or",
+      "out": "",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Biology"
+      ],
+      "kind": "or",
+      "out": "Biology",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry"
+      ],
+      "kind": "or",
+      "out": "Biology or Chemistry",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics"
+      ],
+      "kind": "or",
+      "out": "Biology, Chemistry, or Physics",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics",
+        "Maths"
+      ],
+      "kind": "or",
+      "out": "Biology, Chemistry, Physics, or Maths",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Arte",
+        "inglés"
+      ],
+      "kind": "or",
+      "out": "Arte or inglés",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Arte",
+        "Historia",
+        "Hilo"
+      ],
+      "kind": "or",
+      "out": "Arte, Historia, or Hilo",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Arte",
+        "hielo"
+      ],
+      "kind": "or",
+      "out": "Arte or hielo",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Arte",
+        "hiato"
+      ],
+      "kind": "or",
+      "out": "Arte or hiato",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Arte",
+        "chico"
+      ],
+      "kind": "or",
+      "out": "Arte or chico",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Arte",
+        "hora"
+      ],
+      "kind": "or",
+      "out": "Arte or hora",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Arte",
+        "choco"
+      ],
+      "kind": "or",
+      "out": "Arte or choco",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Arte",
+        "Música",
+        "ocho"
+      ],
+      "kind": "or",
+      "out": "Arte, Música, or ocho",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Arte",
+        "8"
+      ],
+      "kind": "or",
+      "out": "Arte or 8",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Arte",
+        "11"
+      ],
+      "kind": "or",
+      "out": "Arte or 11",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Arte",
+        "11.000"
+      ],
+      "kind": "or",
+      "out": "Arte or 11.000",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Arte",
+        "11\u00A0000"
+      ],
+      "kind": "or",
+      "out": "Arte or 11\u00A0000",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Arte",
+        "110"
+      ],
+      "kind": "or",
+      "out": "Arte or 110",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Arte",
+        "11 gatos"
+      ],
+      "kind": "or",
+      "out": "Arte or 11 gatos",
+      "tag": "en-XA"
+    },
+    {
+      "items": [],
+      "kind": "unit",
+      "out": "",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Biology"
+      ],
+      "kind": "unit",
+      "out": "Biology",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry"
+      ],
+      "kind": "unit",
+      "out": "Biology, Chemistry",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics"
+      ],
+      "kind": "unit",
+      "out": "Biology, Chemistry, Physics",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics",
+        "Maths"
+      ],
+      "kind": "unit",
+      "out": "Biology, Chemistry, Physics, Maths",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Arte",
+        "inglés"
+      ],
+      "kind": "unit",
+      "out": "Arte, inglés",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Arte",
+        "Historia",
+        "Hilo"
+      ],
+      "kind": "unit",
+      "out": "Arte, Historia, Hilo",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Arte",
+        "hielo"
+      ],
+      "kind": "unit",
+      "out": "Arte, hielo",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Arte",
+        "hiato"
+      ],
+      "kind": "unit",
+      "out": "Arte, hiato",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Arte",
+        "chico"
+      ],
+      "kind": "unit",
+      "out": "Arte, chico",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Arte",
+        "hora"
+      ],
+      "kind": "unit",
+      "out": "Arte, hora",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Arte",
+        "choco"
+      ],
+      "kind": "unit",
+      "out": "Arte, choco",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Arte",
+        "Música",
+        "ocho"
+      ],
+      "kind": "unit",
+      "out": "Arte, Música, ocho",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Arte",
+        "8"
+      ],
+      "kind": "unit",
+      "out": "Arte, 8",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Arte",
+        "11"
+      ],
+      "kind": "unit",
+      "out": "Arte, 11",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Arte",
+        "11.000"
+      ],
+      "kind": "unit",
+      "out": "Arte, 11.000",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Arte",
+        "11\u00A0000"
+      ],
+      "kind": "unit",
+      "out": "Arte, 11\u00A0000",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Arte",
+        "110"
+      ],
+      "kind": "unit",
+      "out": "Arte, 110",
+      "tag": "en-XA"
+    },
+    {
+      "items": [
+        "Arte",
+        "11 gatos"
+      ],
+      "kind": "unit",
+      "out": "Arte, 11 gatos",
+      "tag": "en-XA"
+    },
+    {
+      "items": [],
+      "kind": "and",
+      "out": "",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Biology"
+      ],
+      "kind": "and",
+      "out": "Biology",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry"
+      ],
+      "kind": "and",
+      "out": "Biology and Chemistry",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics"
+      ],
+      "kind": "and",
+      "out": "Biology, Chemistry, and Physics",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics",
+        "Maths"
+      ],
+      "kind": "and",
+      "out": "Biology, Chemistry, Physics, and Maths",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Arte",
+        "inglés"
+      ],
+      "kind": "and",
+      "out": "Arte and inglés",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Arte",
+        "Historia",
+        "Hilo"
+      ],
+      "kind": "and",
+      "out": "Arte, Historia, and Hilo",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Arte",
+        "hielo"
+      ],
+      "kind": "and",
+      "out": "Arte and hielo",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Arte",
+        "hiato"
+      ],
+      "kind": "and",
+      "out": "Arte and hiato",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Arte",
+        "chico"
+      ],
+      "kind": "and",
+      "out": "Arte and chico",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Arte",
+        "hora"
+      ],
+      "kind": "and",
+      "out": "Arte and hora",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Arte",
+        "choco"
+      ],
+      "kind": "and",
+      "out": "Arte and choco",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Arte",
+        "Música",
+        "ocho"
+      ],
+      "kind": "and",
+      "out": "Arte, Música, and ocho",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Arte",
+        "8"
+      ],
+      "kind": "and",
+      "out": "Arte and 8",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Arte",
+        "11"
+      ],
+      "kind": "and",
+      "out": "Arte and 11",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Arte",
+        "11.000"
+      ],
+      "kind": "and",
+      "out": "Arte and 11.000",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Arte",
+        "11\u00A0000"
+      ],
+      "kind": "and",
+      "out": "Arte and 11\u00A0000",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Arte",
+        "110"
+      ],
+      "kind": "and",
+      "out": "Arte and 110",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Arte",
+        "11 gatos"
+      ],
+      "kind": "and",
+      "out": "Arte and 11 gatos",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [],
+      "kind": "or",
+      "out": "",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Biology"
+      ],
+      "kind": "or",
+      "out": "Biology",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry"
+      ],
+      "kind": "or",
+      "out": "Biology or Chemistry",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics"
+      ],
+      "kind": "or",
+      "out": "Biology, Chemistry, or Physics",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics",
+        "Maths"
+      ],
+      "kind": "or",
+      "out": "Biology, Chemistry, Physics, or Maths",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Arte",
+        "inglés"
+      ],
+      "kind": "or",
+      "out": "Arte or inglés",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Arte",
+        "Historia",
+        "Hilo"
+      ],
+      "kind": "or",
+      "out": "Arte, Historia, or Hilo",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Arte",
+        "hielo"
+      ],
+      "kind": "or",
+      "out": "Arte or hielo",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Arte",
+        "hiato"
+      ],
+      "kind": "or",
+      "out": "Arte or hiato",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Arte",
+        "chico"
+      ],
+      "kind": "or",
+      "out": "Arte or chico",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Arte",
+        "hora"
+      ],
+      "kind": "or",
+      "out": "Arte or hora",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Arte",
+        "choco"
+      ],
+      "kind": "or",
+      "out": "Arte or choco",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Arte",
+        "Música",
+        "ocho"
+      ],
+      "kind": "or",
+      "out": "Arte, Música, or ocho",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Arte",
+        "8"
+      ],
+      "kind": "or",
+      "out": "Arte or 8",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Arte",
+        "11"
+      ],
+      "kind": "or",
+      "out": "Arte or 11",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Arte",
+        "11.000"
+      ],
+      "kind": "or",
+      "out": "Arte or 11.000",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Arte",
+        "11\u00A0000"
+      ],
+      "kind": "or",
+      "out": "Arte or 11\u00A0000",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Arte",
+        "110"
+      ],
+      "kind": "or",
+      "out": "Arte or 110",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Arte",
+        "11 gatos"
+      ],
+      "kind": "or",
+      "out": "Arte or 11 gatos",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [],
+      "kind": "unit",
+      "out": "",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Biology"
+      ],
+      "kind": "unit",
+      "out": "Biology",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry"
+      ],
+      "kind": "unit",
+      "out": "Biology, Chemistry",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics"
+      ],
+      "kind": "unit",
+      "out": "Biology, Chemistry, Physics",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Biology",
+        "Chemistry",
+        "Physics",
+        "Maths"
+      ],
+      "kind": "unit",
+      "out": "Biology, Chemistry, Physics, Maths",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Arte",
+        "inglés"
+      ],
+      "kind": "unit",
+      "out": "Arte, inglés",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Arte",
+        "Historia",
+        "Hilo"
+      ],
+      "kind": "unit",
+      "out": "Arte, Historia, Hilo",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Arte",
+        "hielo"
+      ],
+      "kind": "unit",
+      "out": "Arte, hielo",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Arte",
+        "hiato"
+      ],
+      "kind": "unit",
+      "out": "Arte, hiato",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Arte",
+        "chico"
+      ],
+      "kind": "unit",
+      "out": "Arte, chico",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Arte",
+        "hora"
+      ],
+      "kind": "unit",
+      "out": "Arte, hora",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Arte",
+        "choco"
+      ],
+      "kind": "unit",
+      "out": "Arte, choco",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Arte",
+        "Música",
+        "ocho"
+      ],
+      "kind": "unit",
+      "out": "Arte, Música, ocho",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Arte",
+        "8"
+      ],
+      "kind": "unit",
+      "out": "Arte, 8",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Arte",
+        "11"
+      ],
+      "kind": "unit",
+      "out": "Arte, 11",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Arte",
+        "11.000"
+      ],
+      "kind": "unit",
+      "out": "Arte, 11.000",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Arte",
+        "11\u00A0000"
+      ],
+      "kind": "unit",
+      "out": "Arte, 11\u00A0000",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Arte",
+        "110"
+      ],
+      "kind": "unit",
+      "out": "Arte, 110",
+      "tag": "ar-XB"
+    },
+    {
+      "items": [
+        "Arte",
+        "11 gatos"
+      ],
+      "kind": "unit",
+      "out": "Arte, 11 gatos",
+      "tag": "ar-XB"
+    }
+  ],
+  "note": "Each list as the server writes it (crates/flash-server/src/i18n.rs, list_in). Written by crates/flash-server/tests/it/list_vectors_tests.rs; rerun with FLASH_WRITE_LIST_VECTORS=1."
+}

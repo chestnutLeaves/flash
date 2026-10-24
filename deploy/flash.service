@@ -1,5 +1,5 @@
 # flash flashcard server, hardened systemd unit. /opt/flash/current is a
-# symlink to the binary in use (the open flash-server, or a hosted build);
+# symlink to the binary in use (the open flash-server, or a downstream build);
 # repointing it is also the rollback.
 # Install: sudo cp flash.service /etc/systemd/system/ && sudo systemctl daemon-reload
 [Unit]
@@ -22,6 +22,10 @@ Environment=FLASH_BIND=127.0.0.1:8437
 EnvironmentFile=-/etc/flash/env
 Restart=on-failure
 RestartSec=2
+# A stop (a deploy's restart) is SIGTERM: the server lets open requests
+# finish for up to 15 s and background work for up to 10 s more, then
+# exits. Past 30 s systemd kills it.
+TimeoutStopSec=30
 # The soft default of 1024 file descriptors is a few hundred held
 # connections away from a stalled accept loop.
 LimitNOFILE=65536

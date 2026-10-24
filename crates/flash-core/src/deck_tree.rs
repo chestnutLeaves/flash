@@ -16,6 +16,9 @@ pub struct Node<'a> {
     pub name: &'a str,
     pub due: u32,
     pub new: u32,
+    /// Paced toward a goal date: its new cards come on top of the new
+    /// cap (`queue::Budgets::paced`).
+    pub paced: bool,
 }
 
 /// One deck coming out, in display order.
@@ -109,8 +112,7 @@ struct Walk<'a> {
 }
 
 impl Walk<'_> {
-    /// Emits `i` and its subtree; returns the subtree's (due, new).
-    fn visit(&mut self, i: usize, depth: u32) -> (u32, u32) {
+    fn visit(&mut self, i: usize, depth: u32) -> (u32, u32, u32) {
         let at = self.rows.len();
         self.rows.push(Row {
             index: i,
@@ -120,15 +122,22 @@ impl Walk<'_> {
             due: 0,
             new: 0,
         });
-        let (mut due, mut new) = (self.nodes[i].due, self.nodes[i].new);
+        let node = self.nodes[i];
+        let (mut due, mut new, mut paced) = if node.paced {
+            (node.due, 0, node.new)
+        } else {
+            (node.due, node.new, 0)
+        };
         for &child in &self.children[i] {
-            let (d, n) = self.visit(child, depth + 1);
+            let (d, n, p) = self.visit(child, depth + 1);
             due = due.saturating_add(d);
             new = new.saturating_add(n);
+            paced = paced.saturating_add(p);
         }
-        let held = (due.min(self.caps.0), new.min(self.caps.1));
-        (self.rows[at].due, self.rows[at].new) = held;
-        held
+        let (due, new) = (due.min(self.caps.0), new.min(self.caps.1));
+        self.rows[at].due = due;
+        self.rows[at].new = new.saturating_add(paced);
+        (due, new, paced)
     }
 }
 
@@ -137,7 +146,12 @@ mod tests {
     use super::*;
 
     fn node(name: &str, due: u32, new: u32) -> Node<'_> {
-        Node { name, due, new }
+        Node {
+            name,
+            due,
+            new,
+            paced: false,
+        }
     }
 
     fn shape(rows: &[Row]) -> Vec<(u32, &str)> {
@@ -202,6 +216,16 @@ mod tests {
         let rows = build(&nodes, 10, 100);
         let new: Vec<u32> = rows.iter().map(|r| r.new).collect();
         assert_eq!(new, vec![10, 10, 6, 8]);
+    }
+
+    #[test]
+    fn a_paced_subdecks_new_cards_come_on_top_of_the_cap() {
+        let mut paced = node("A::Exam", 0, 5);
+        paced.paced = true;
+        let nodes = [node("A", 0, 8), paced, node("A::Other", 0, 8)];
+        let rows = build(&nodes, 10, 100);
+        let new: Vec<(&str, u32)> = rows.iter().map(|r| (r.leaf.as_str(), r.new)).collect();
+        assert_eq!(new, vec![("A", 15), ("Exam", 5), ("Other", 8)]);
     }
 
     #[test]

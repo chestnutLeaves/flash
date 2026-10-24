@@ -11,24 +11,36 @@
     </head>
 
   `site` is the page's `Site` (the deployment's public origin); `path` is
-  the canonical path under it ("/" for the front page). Asset
-  cache-busters live here once, not per page.
+  the canonical path under it ("/" for the front page), with no language
+  in it: a page with an address per language (`/es/...`) names its
+  own as canonical and the others as alternates. Asset cache-busters
+  live here once, not per page.
 #}
 {% macro meta(site, title, description, path, og_description) %}
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{ title|safe }}</title>
 <meta name="description" content="{{ description|safe }}">
-<link rel="canonical" href="{{ site.base_url }}{{ path|safe }}">
+<link rel="canonical" href="{{ site.base_url }}{{ path|href|safe }}">
+{{ site.base_url|alternates|safe }}
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Flash">
+{{ ""|og_locale|safe }}
 <meta property="og:title" content="{{ title|safe }}">
 <meta property="og:description" content="{{ og_description|safe }}">
-<meta property="og:url" content="{{ site.base_url }}{{ path|safe }}">
+<meta property="og:url" content="{{ site.base_url }}{{ path|href|safe }}">
 <meta property="og:image" content="{{ site.base_url }}/static/og.png?v=2">
 <meta name="twitter:card" content="summary">
 <link rel="icon" href="/static/favicon.svg?v=39" type="image/svg+xml">
 <link rel="icon" href="/static/favicon-192.png?v=1" type="image/png" sizes="192x192">
 <link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v=1">
-<link rel="stylesheet" href="/static/app.css?v=52">
+<link rel="stylesheet" href="/static/app.css?v=111">
+{# Before the page's own scripts, which come after the call, so it hears them. #}
+<script src="/static/report.js?v=1" defer></script>
+{# Second: every script after it words through it, from the words the
+   page carries (`js_island`): those of the scripts it loads. #}
+<script src="/static/i18n.js?v=9" defer></script>
+{{ "js-ui"|js_island|safe }}
+{# Third: what every script after it looks things up with. #}
+<script src="/static/dom.js?v=6" defer></script>
 {% endmacro %}

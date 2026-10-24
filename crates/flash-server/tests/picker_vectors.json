@@ -1,0 +1,551 @@
+{
+  "matches": [
+    {
+      "found": [
+        "en",
+        "es-ES",
+        "es-419",
+        "pt-BR",
+        "pt-PT",
+        "fr-FR",
+        "fr-CA",
+        "en-XA",
+        "ar-XB"
+      ],
+      "query": ""
+    },
+    {
+      "found": [
+        "es-ES",
+        "es-419"
+      ],
+      "query": "esp"
+    },
+    {
+      "found": [
+        "es-ES",
+        "es-419"
+      ],
+      "query": "ESPAÑOL"
+    },
+    {
+      "found": [
+        "es-ES",
+        "es-419"
+      ],
+      "query": "espanol"
+    },
+    {
+      "found": [
+        "es-ES",
+        "es-419"
+      ],
+      "query": "spanish"
+    },
+    {
+      "found": [
+        "en",
+        "en-XA",
+        "ar-XB"
+      ],
+      "query": "eng"
+    },
+    {
+      "found": [
+        "es-419"
+      ],
+      "query": "latino"
+    },
+    {
+      "found": [],
+      "query": "xyz"
+    },
+    {
+      "found": [
+        "es-ES",
+        "es-419",
+        "pt-BR",
+        "pt-PT"
+      ],
+      "query": " es "
+    }
+  ],
+  "note": "A language picker's order and search as the server writes them (crates/flash-server/src/i18n/picker.rs). Written by crates/flash-server/tests/it/picker_vectors_tests.rs; rerun with FLASH_WRITE_PICKER_VECTORS=1.",
+  "order": [
+    {
+      "order": [
+        "en",
+        "en-XA",
+        "ar-XB",
+        "es-ES",
+        "es-419",
+        "fr-CA",
+        "fr-FR",
+        "pt-BR",
+        "pt-PT"
+      ],
+      "shipped": [
+        "en",
+        "es-ES",
+        "es-419",
+        "pt-BR",
+        "pt-PT",
+        "fr-FR",
+        "fr-CA",
+        "en-XA",
+        "ar-XB"
+      ],
+      "wanted": [],
+      "zone": null
+    },
+    {
+      "order": [
+        "en",
+        "en-XA",
+        "ar-XB",
+        "es-ES",
+        "es-419",
+        "fr-CA",
+        "fr-FR",
+        "pt-BR",
+        "pt-PT"
+      ],
+      "shipped": [
+        "en",
+        "es-ES",
+        "es-419",
+        "pt-BR",
+        "pt-PT",
+        "fr-FR",
+        "fr-CA",
+        "en-XA",
+        "ar-XB"
+      ],
+      "wanted": [
+        "en-US"
+      ],
+      "zone": null
+    },
+    {
+      "order": [
+        "es-419",
+        "en",
+        "en-XA",
+        "ar-XB",
+        "es-ES",
+        "fr-CA",
+        "fr-FR",
+        "pt-BR",
+        "pt-PT"
+      ],
+      "shipped": [
+        "en",
+        "es-ES",
+        "es-419",
+        "pt-BR",
+        "pt-PT",
+        "fr-FR",
+        "fr-CA",
+        "en-XA",
+        "ar-XB"
+      ],
+      "wanted": [
+        "es-MX",
+        "en-US"
+      ],
+      "zone": null
+    },
+    {
+      "order": [
+        "fr-FR",
+        "en",
+        "en-XA",
+        "ar-XB",
+        "es-ES",
+        "es-419",
+        "fr-CA",
+        "pt-BR",
+        "pt-PT"
+      ],
+      "shipped": [
+        "en",
+        "es-ES",
+        "es-419",
+        "pt-BR",
+        "pt-PT",
+        "fr-FR",
+        "fr-CA",
+        "en-XA",
+        "ar-XB"
+      ],
+      "wanted": [
+        "fr-FR"
+      ],
+      "zone": null
+    },
+    {
+      "order": [
+        "es-ES",
+        "en",
+        "en-XA",
+        "ar-XB",
+        "es-419",
+        "fr-CA",
+        "fr-FR",
+        "pt-BR",
+        "pt-PT"
+      ],
+      "shipped": [
+        "en",
+        "es-ES",
+        "es-419",
+        "pt-BR",
+        "pt-PT",
+        "fr-FR",
+        "fr-CA",
+        "en-XA",
+        "ar-XB"
+      ],
+      "wanted": [
+        "ca"
+      ],
+      "zone": "Europe/Madrid"
+    },
+    {
+      "order": [
+        "es-ES",
+        "en",
+        "en-XA",
+        "ar-XB",
+        "es-419",
+        "fr-CA",
+        "fr-FR",
+        "pt-BR",
+        "pt-PT"
+      ],
+      "shipped": [
+        "en",
+        "es-ES",
+        "es-419",
+        "pt-BR",
+        "pt-PT",
+        "fr-FR",
+        "fr-CA",
+        "en-XA",
+        "ar-XB"
+      ],
+      "wanted": [
+        "es"
+      ],
+      "zone": "Europe/Madrid"
+    },
+    {
+      "order": [
+        "es-419",
+        "en",
+        "en-XA",
+        "ar-XB",
+        "es-ES",
+        "fr-CA",
+        "fr-FR",
+        "pt-BR",
+        "pt-PT"
+      ],
+      "shipped": [
+        "en",
+        "es-ES",
+        "es-419",
+        "pt-BR",
+        "pt-PT",
+        "fr-FR",
+        "fr-CA",
+        "en-XA",
+        "ar-XB"
+      ],
+      "wanted": [
+        "es"
+      ],
+      "zone": "America/Bogota"
+    },
+    {
+      "order": [
+        "en",
+        "es-ES",
+        "es-419",
+        "en-XA",
+        "ar-XB",
+        "fr-CA",
+        "fr-FR",
+        "pt-BR",
+        "pt-PT"
+      ],
+      "shipped": [
+        "en",
+        "es-ES",
+        "es-419",
+        "pt-BR",
+        "pt-PT",
+        "fr-FR",
+        "fr-CA",
+        "en-XA",
+        "ar-XB"
+      ],
+      "wanted": [
+        "en-GB",
+        "es-ES",
+        "es-AR"
+      ],
+      "zone": null
+    },
+    {
+      "order": [
+        "es-419",
+        "en",
+        "en-XA",
+        "ar-XB",
+        "es-ES",
+        "fr-CA",
+        "fr-FR",
+        "pt-BR",
+        "pt-PT"
+      ],
+      "shipped": [
+        "en",
+        "es-ES",
+        "es-419",
+        "pt-BR",
+        "pt-PT",
+        "fr-FR",
+        "fr-CA",
+        "en-XA",
+        "ar-XB"
+      ],
+      "wanted": [
+        "de-DE",
+        "es-419",
+        "en"
+      ],
+      "zone": null
+    },
+    {
+      "order": [
+        "en",
+        "es-ES",
+        "es-419",
+        "fr-CA",
+        "fr-FR",
+        "pt-BR",
+        "pt-PT"
+      ],
+      "shipped": [
+        "en",
+        "es-ES",
+        "es-419",
+        "pt-BR",
+        "pt-PT",
+        "fr-FR",
+        "fr-CA"
+      ],
+      "wanted": [],
+      "zone": null
+    },
+    {
+      "order": [
+        "en",
+        "es-ES",
+        "es-419",
+        "fr-CA",
+        "fr-FR",
+        "pt-BR",
+        "pt-PT"
+      ],
+      "shipped": [
+        "en",
+        "es-ES",
+        "es-419",
+        "pt-BR",
+        "pt-PT",
+        "fr-FR",
+        "fr-CA"
+      ],
+      "wanted": [
+        "en-US"
+      ],
+      "zone": null
+    },
+    {
+      "order": [
+        "es-419",
+        "en",
+        "es-ES",
+        "fr-CA",
+        "fr-FR",
+        "pt-BR",
+        "pt-PT"
+      ],
+      "shipped": [
+        "en",
+        "es-ES",
+        "es-419",
+        "pt-BR",
+        "pt-PT",
+        "fr-FR",
+        "fr-CA"
+      ],
+      "wanted": [
+        "es-MX",
+        "en-US"
+      ],
+      "zone": null
+    },
+    {
+      "order": [
+        "fr-FR",
+        "en",
+        "es-ES",
+        "es-419",
+        "fr-CA",
+        "pt-BR",
+        "pt-PT"
+      ],
+      "shipped": [
+        "en",
+        "es-ES",
+        "es-419",
+        "pt-BR",
+        "pt-PT",
+        "fr-FR",
+        "fr-CA"
+      ],
+      "wanted": [
+        "fr-FR"
+      ],
+      "zone": null
+    },
+    {
+      "order": [
+        "es-ES",
+        "en",
+        "es-419",
+        "fr-CA",
+        "fr-FR",
+        "pt-BR",
+        "pt-PT"
+      ],
+      "shipped": [
+        "en",
+        "es-ES",
+        "es-419",
+        "pt-BR",
+        "pt-PT",
+        "fr-FR",
+        "fr-CA"
+      ],
+      "wanted": [
+        "ca"
+      ],
+      "zone": "Europe/Madrid"
+    },
+    {
+      "order": [
+        "es-ES",
+        "en",
+        "es-419",
+        "fr-CA",
+        "fr-FR",
+        "pt-BR",
+        "pt-PT"
+      ],
+      "shipped": [
+        "en",
+        "es-ES",
+        "es-419",
+        "pt-BR",
+        "pt-PT",
+        "fr-FR",
+        "fr-CA"
+      ],
+      "wanted": [
+        "es"
+      ],
+      "zone": "Europe/Madrid"
+    },
+    {
+      "order": [
+        "es-419",
+        "en",
+        "es-ES",
+        "fr-CA",
+        "fr-FR",
+        "pt-BR",
+        "pt-PT"
+      ],
+      "shipped": [
+        "en",
+        "es-ES",
+        "es-419",
+        "pt-BR",
+        "pt-PT",
+        "fr-FR",
+        "fr-CA"
+      ],
+      "wanted": [
+        "es"
+      ],
+      "zone": "America/Bogota"
+    },
+    {
+      "order": [
+        "en",
+        "es-ES",
+        "es-419",
+        "fr-CA",
+        "fr-FR",
+        "pt-BR",
+        "pt-PT"
+      ],
+      "shipped": [
+        "en",
+        "es-ES",
+        "es-419",
+        "pt-BR",
+        "pt-PT",
+        "fr-FR",
+        "fr-CA"
+      ],
+      "wanted": [
+        "en-GB",
+        "es-ES",
+        "es-AR"
+      ],
+      "zone": null
+    },
+    {
+      "order": [
+        "es-419",
+        "en",
+        "es-ES",
+        "fr-CA",
+        "fr-FR",
+        "pt-BR",
+        "pt-PT"
+      ],
+      "shipped": [
+        "en",
+        "es-ES",
+        "es-419",
+        "pt-BR",
+        "pt-PT",
+        "fr-FR",
+        "fr-CA"
+      ],
+      "wanted": [
+        "de-DE",
+        "es-419",
+        "en"
+      ],
+      "zone": null
+    }
+  ],
+  "search_from": 9
+}

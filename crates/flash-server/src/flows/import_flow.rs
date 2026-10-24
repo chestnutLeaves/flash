@@ -10,7 +10,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use flash_core::UserId;
-use flash_store::import::{parse_apkg, parse_csv, review_history, ImportRow, ImportedSettings};
+use flash_store::import::{
+    parse_apkg, parse_csv, review_history, ImportNote, ImportRow, ImportedSettings, NoteArg,
+};
 
 use super::Failure;
 use crate::auth::{hash_token, new_token};
@@ -27,7 +29,10 @@ struct PendingImport {
     user_id: i64,
     default_deck: String,
     rows: Vec<ImportRow>,
-    messages: Vec<String>,
+    /// What the preview told the person; a file parked before notes
+    /// were kept has none.
+    #[serde(default)]
+    notes: Vec<ImportNote>,
     skipped: u32,
     /// FSRS-relevant deck options found in the package.
     #[serde(default)]
@@ -52,7 +57,7 @@ pub struct ImportPreview {
     /// Prefill for the required destination field (may be empty).
     pub deck: String,
     /// Extra line when the file names several decks that will merge.
-    pub deck_note: Option<String>,
+    pub deck_note: Option<crate::i18n::Words>,
     /// The decks the file names, with how many cards each holds, in the
     /// file's order. More than one means the preview offers to keep them
     /// (`CommitOptions::keep_decks`) and asks only for an optional deck to
@@ -61,7 +66,7 @@ pub struct ImportPreview {
     pub parent: String,
     pub warnings: u32,
     pub sample: Vec<(String, String)>,
-    pub messages: Vec<String>,
+    pub messages: Vec<crate::i18n::Words>,
     pub token: String,
     /// Total Anki reviews found. >0 offers the bring-your-progress box.
     pub progress_reviews: usize,
@@ -152,18 +157,21 @@ fn discard_pending_for(dir: &Path, user: UserId) {
     }
 }
 
+/// The package's Anki settings in brief, in the reader's language.
 pub fn settings_desc(s: &ImportedSettings) -> String {
+    use crate::i18n::ta;
     let mut parts = Vec::new();
     if let Some(r) = s.desired_retention {
-        parts.push(format!("{:.0}% retention", r * 100.0));
+        let pct = (r * 100.0).round() as i64;
+        parts.push(ta("import-settings-retention", &[("pct", pct.into())]));
     }
     if let Some(p) = &s.fsrs_params {
-        parts.push(format!("tuned FSRS parameters ({} values)", p.len()));
+        parts.push(ta("import-settings-params", &[("count", p.len().into())]));
     }
     if let Some(n) = s.new_per_day {
-        parts.push(format!("{n} new cards/day"));
+        parts.push(ta("import-settings-new", &[("count", n.into())]));
     }
-    parts.join(", ")
+    crate::i18n::list(&parts, crate::i18n::ListKind::Unit)
 }
 
 /// "Pharm" for ["Pharm::Cardio", "Pharm::Renal"]; the first name when
@@ -187,14 +195,80 @@ fn common_deck_parent(decks: &[String]) -> String {
     }
 }
 
-fn merge_note(file_decks: &[String]) -> Option<String> {
+fn merge_note(file_decks: &[String]) -> Option<crate::i18n::Words> {
     (file_decks.len() > 1).then(|| {
-        format!(
-            "The file holds {} decks ({}); all of their cards go into the deck named above.",
-            file_decks.len(),
-            file_decks.join(", ")
+        crate::i18n::ta(
+            "import-merge",
+            &[
+                ("count", file_decks.len().into()),
+                (
+                    "decks",
+                    crate::i18n::list(file_decks, crate::i18n::ListKind::Unit).into(),
+                ),
+            ],
         )
     })
+}
+
+/// `n` to one decimal place, as the reader writes it ("3.0", "3,0").
+pub fn one_decimal(n: f64) -> String {
+    match crate::i18n::tr().formats() {
+        Some(f) => f.decimal(n, 1),
+        None => format!("{n:.1}"),
+    }
+}
+
+/// What an import says, in the reader's language: the store names a
+/// message and its variables (`ImportNote`), this words it. The media
+/// summary lists only the kinds the package has.
+pub fn word(note: &ImportNote) -> crate::i18n::Words {
+    use crate::i18n::{ta, Value};
+    let number = |name: &str| match note.arg(name) {
+        Some(NoteArg::Number(n)) => *n,
+        _ => 0.0,
+    };
+    let what = if note.id == "import-media" {
+        let parts: Vec<crate::i18n::Words> = [
+            ("images", "import-media-images"),
+            ("audio", "import-media-audio"),
+            ("video", "import-media-video"),
+            ("unsupported", "import-media-unsupported"),
+        ]
+        .into_iter()
+        .filter(|(name, _)| number(name) > 0.0)
+        .map(|(name, id)| ta(id, &[("count", number(name).into())]))
+        .collect();
+        ta(
+            "import-media",
+            &[
+                (
+                    "what",
+                    crate::i18n::Words::list(parts, crate::i18n::ListKind::Unit).into(),
+                ),
+                ("mb", one_decimal(number("mb")).into()),
+            ],
+        )
+    } else {
+        let args: Vec<(&str, Value)> = note
+            .args
+            .iter()
+            .map(|(k, v)| {
+                let value = match v {
+                    NoteArg::Number(n) => Value::from(*n),
+                    NoteArg::Text(t) => Value::from(t.clone()),
+                };
+                (k.as_str(), value)
+            })
+            .collect();
+        ta(&note.id, &args)
+    };
+    match &note.file {
+        Some(file) => ta(
+            "import-about-file",
+            &[("file", file.as_str().into()), ("what", what.into())],
+        ),
+        None => what,
+    }
 }
 
 /// The most cards one file may bring: enough for the largest shared Anki
@@ -215,7 +289,7 @@ fn parse_failed(user: UserId, filename: &str, err: flash_store::import::ImportEr
             err.public()
         );
     }
-    Failure::user(err.public())
+    Failure::user(word(err.public()))
 }
 
 /// Parses the upload and parks it. `Failure::User` messages are for the
@@ -247,15 +321,18 @@ pub fn preview(
         "import preview parsed"
     );
     if parsed.rows.len() > MAX_ROWS {
-        return Err(Failure::user(format!(
-            "that file has {} cards; imports are capped at {MAX_ROWS} per file, so split it in Anki first",
-            parsed.rows.len()
+        return Err(Failure::user(crate::i18n::ta(
+            "import-file-too-many-cards",
+            &[
+                ("count", parsed.rows.len().into()),
+                ("max", MAX_ROWS.into()),
+            ],
         )));
     }
     if parsed.rows.is_empty() {
-        return Err(Failure::user(format!(
-            "no importable cards found ({} rows skipped)",
-            parsed.skipped
+        return Err(Failure::user(crate::i18n::ta(
+            "import-nothing",
+            &[("count", parsed.skipped.into())],
         )));
     }
     let token = new_token();
@@ -298,7 +375,7 @@ pub fn preview(
         user_id: user.raw(),
         default_deck: destination.clone(),
         rows: parsed.rows,
-        messages: parsed.messages.clone(),
+        notes: parsed.messages.clone(),
         skipped: parsed.skipped,
         settings: parsed.settings.clone(),
         apkg: keep_apkg,
@@ -329,7 +406,7 @@ pub fn preview(
             .take(5)
             .map(|r| (r.front.clone(), r.back.clone()))
             .collect(),
-        messages: pending.messages,
+        messages: pending.notes.iter().map(word).collect(),
         token,
         progress_reviews: pending.progress_reviews,
         settings_desc: pending
@@ -356,10 +433,11 @@ pub fn commit(
     // The path carries the caller's id, so another user's token cannot
     // even name this user's file; the owner check below is belt and braces.
     let (path, apkg_path) = pending_paths(dir, user, &opts.token);
-    let bytes = std::fs::read(&path).map_err(|_| Failure::user("preview expired; upload again"))?;
+    let bytes =
+        std::fs::read(&path).map_err(|_| Failure::user(crate::i18n::t("import-expired")))?;
     let mut pending: PendingImport = serde_json::from_str(&String::from_utf8_lossy(&bytes))?;
     if pending.user_id != user.raw() {
-        return Err(Failure::user("preview belongs to another user"));
+        return Err(Failure::user(crate::i18n::t("import-not-yours")));
     }
     let deck = opts.deck.trim().to_string();
     let named: std::collections::HashSet<&str> = pending
@@ -373,16 +451,14 @@ pub fn commit(
         // that deck to go to.
         for row in &mut pending.rows {
             let path = flash_core::deck_path::join(&deck, row.deck.as_deref().unwrap_or(""))
-                .ok_or_else(|| {
-                    Failure::user("some cards name no deck: name a deck to put the import under")
-                })?;
+                .ok_or_else(|| Failure::user(crate::i18n::t("import-needs-deck")))?;
             row.deck = Some(path);
         }
     } else {
         // One destination for everything: a file that names no deck or
         // one, and the merge a client built before decks nested asks for.
         if deck.is_empty() {
-            return Err(Failure::user("deck name required"));
+            return Err(Failure::user(crate::i18n::t("import-deck-required")));
         }
         for row in &mut pending.rows {
             row.deck = None;
@@ -400,12 +476,28 @@ pub fn commit(
     // that can no longer be read leaves nothing behind.
     let history = if opts.progress && pending.progress_reviews > 0 {
         let Some(package) = &package else {
-            return Err(Failure::user("preview expired; upload again"));
+            return Err(Failure::user(crate::i18n::t("import-expired")));
         };
         review_history(package).map_err(|e| parse_failed(user, "pending package", e))?
     } else {
         Vec::new()
     };
+    // The commit is claimed before anything of it is stored. A retry of a
+    // commit that went through (its reply was lost) answers what it did
+    // then and imports nothing twice; one cut off part way by a crash
+    // says so rather than adding its cards a second time.
+    let claim_key = crate::auth::hash_token(&opts.token);
+    match services.store().claim_import(user, &claim_key, now_ms())? {
+        flash_store::ImportClaim::New => {}
+        flash_store::ImportClaim::Finished(cards) => {
+            let _ = std::fs::remove_file(&path);
+            let _ = std::fs::remove_file(&apkg_path);
+            return Ok(cards as usize);
+        }
+        flash_store::ImportClaim::Unfinished => {
+            return Err(Failure::user(crate::i18n::t("import-cut-off")));
+        }
+    }
     // Media ingestion: pull the referenced files out of the kept
     // package, then upgrade the rows' placeholder chips into real
     // /media/ elements.
@@ -456,14 +548,25 @@ pub fn commit(
     let insert_started = std::time::Instant::now();
     // The service admits or rejects the whole batch in one decision.
     let history_rows = history.len();
-    let total = services.import_cards(
+    let total = match services.import_cards(
         user,
         &pending.default_deck,
         pending.rows,
         history,
         media_map.as_ref(),
         now_ms(),
-    )?;
+    ) {
+        Ok(total) => total,
+        Err(e) => {
+            // An error, not a crash: nothing (or nothing more) went in
+            // that a retry would repeat, and the person may try again.
+            let _ = services.store().release_import(user, &claim_key);
+            return Err(e.into());
+        }
+    };
+    services
+        .store()
+        .finish_import(user, &claim_key, total as u32, now_ms())?;
     tracing::info!(
         user = user.raw(),
         cards = total,

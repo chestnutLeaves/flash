@@ -1,0 +1,305 @@
+{
+  "cases": [
+    {
+      "how": "accented",
+      "out": "[Ħḗḗŀŀǿǿ]",
+      "pieces": [
+        [
+          "text",
+          "Hello"
+        ]
+      ]
+    },
+    {
+      "how": "accented",
+      "out": "[Ħīī Ana, şḗḗḗḗ ẏǿǿŭŭ]",
+      "pieces": [
+        [
+          "text",
+          "Hi "
+        ],
+        [
+          "var",
+          "Ana"
+        ],
+        [
+          "text",
+          ", see you"
+        ]
+      ]
+    },
+    {
+      "how": "accented",
+      "out": "[Şḗḗḗḗ <a href=\"/decks\">ẏǿǿŭŭř ḓḗḗƈķş</a> &amp; ḿǿǿřḗḗ]",
+      "pieces": [
+        [
+          "text",
+          "See <a href=\"/decks\">your decks</a> &amp; more"
+        ]
+      ]
+    },
+    {
+      "how": "accented",
+      "out": "[3 ƈȧȧřḓş ḓŭŭḗḗ, 21 ƞḗḗẇ]",
+      "pieces": [
+        [
+          "text",
+          "3 cards due, 21 new"
+        ]
+      ]
+    },
+    {
+      "how": "accented",
+      "out": "[Biology · 12]",
+      "pieces": [
+        [
+          "var",
+          "Biology"
+        ],
+        [
+          "text",
+          " · "
+        ],
+        [
+          "var",
+          "12"
+        ]
+      ]
+    },
+    {
+      "how": "accented",
+      "out": "[ȦȦ & Ɓ, &nbsp;Ƈ &ŭŭƞķƞǿǿẇƞ Ḓ]",
+      "pieces": [
+        [
+          "text",
+          "A & B, &nbsp;C &unknown D"
+        ]
+      ]
+    },
+    {
+      "how": "accented",
+      "out": "[Ŧǿǿḿ'ş “ɋŭŭǿǿŧḗḗḓ” ẇǿǿřḓ]",
+      "pieces": [
+        [
+          "text",
+          "Tom's “quoted” word"
+        ]
+      ]
+    },
+    {
+      "how": "accented",
+      "out": "[<b><i>x</i></b> ḓǿǿƞḗḗ]",
+      "pieces": [
+        [
+          "text",
+          "<b>"
+        ],
+        [
+          "var",
+          "<i>x</i>"
+        ],
+        [
+          "text",
+          "</b> done"
+        ]
+      ]
+    },
+    {
+      "how": "accented",
+      "out": "[Ŀīīƞḗḗ ǿǿƞḗḗ\nŀīīƞḗḗ ŧẇǿǿ]",
+      "pieces": [
+        [
+          "text",
+          "Line one\nline two"
+        ]
+      ]
+    },
+    {
+      "how": "accented",
+      "out": "[]",
+      "pieces": [
+        [
+          "text",
+          ""
+        ]
+      ]
+    },
+    {
+      "how": "accented",
+      "out": "[Ẇřīīŧḗḗ ŧǿǿ <a href=\"mailto:a@b.co\">a@b.co</a>]",
+      "pieces": [
+        [
+          "text",
+          "Write to <a href=\"mailto:"
+        ],
+        [
+          "var",
+          "a@b.co"
+        ],
+        [
+          "text",
+          "\">"
+        ],
+        [
+          "var",
+          "a@b.co"
+        ],
+        [
+          "text",
+          "</a>"
+        ]
+      ]
+    },
+    {
+      "how": "bidi",
+      "out": "\u200F\u202EHello\u202C\u200F",
+      "pieces": [
+        [
+          "text",
+          "Hello"
+        ]
+      ]
+    },
+    {
+      "how": "bidi",
+      "out": "\u200F\u202EHi\u202C\u200F Ana, \u200F\u202Esee\u202C\u200F \u200F\u202Eyou\u202C\u200F",
+      "pieces": [
+        [
+          "text",
+          "Hi "
+        ],
+        [
+          "var",
+          "Ana"
+        ],
+        [
+          "text",
+          ", see you"
+        ]
+      ]
+    },
+    {
+      "how": "bidi",
+      "out": "\u200F\u202ESee\u202C\u200F <a href=\"/decks\">\u200F\u202Eyour\u202C\u200F \u200F\u202Edecks\u202C\u200F</a> &amp; \u200F\u202Emore\u202C\u200F",
+      "pieces": [
+        [
+          "text",
+          "See <a href=\"/decks\">your decks</a> &amp; more"
+        ]
+      ]
+    },
+    {
+      "how": "bidi",
+      "out": "3 \u200F\u202Ecards\u202C\u200F \u200F\u202Edue,\u202C\u200F 21 \u200F\u202Enew\u202C\u200F",
+      "pieces": [
+        [
+          "text",
+          "3 cards due, 21 new"
+        ]
+      ]
+    },
+    {
+      "how": "bidi",
+      "out": "Biology · 12",
+      "pieces": [
+        [
+          "var",
+          "Biology"
+        ],
+        [
+          "text",
+          " · "
+        ],
+        [
+          "var",
+          "12"
+        ]
+      ]
+    },
+    {
+      "how": "bidi",
+      "out": "\u200F\u202EA\u202C\u200F & \u200F\u202EB,\u202C\u200F &nbsp;\u200F\u202EC\u202C\u200F &\u200F\u202Eunknown\u202C\u200F \u200F\u202ED\u202C\u200F",
+      "pieces": [
+        [
+          "text",
+          "A & B, &nbsp;C &unknown D"
+        ]
+      ]
+    },
+    {
+      "how": "bidi",
+      "out": "\u200F\u202ETom's\u202C\u200F \u200F\u202E“quoted”\u202C\u200F \u200F\u202Eword\u202C\u200F",
+      "pieces": [
+        [
+          "text",
+          "Tom's “quoted” word"
+        ]
+      ]
+    },
+    {
+      "how": "bidi",
+      "out": "<b><i>x</i></b> \u200F\u202Edone\u202C\u200F",
+      "pieces": [
+        [
+          "text",
+          "<b>"
+        ],
+        [
+          "var",
+          "<i>x</i>"
+        ],
+        [
+          "text",
+          "</b> done"
+        ]
+      ]
+    },
+    {
+      "how": "bidi",
+      "out": "\u200F\u202ELine\u202C\u200F \u200F\u202Eone\u202C\u200F\n\u200F\u202Eline\u202C\u200F \u200F\u202Etwo\u202C\u200F",
+      "pieces": [
+        [
+          "text",
+          "Line one\nline two"
+        ]
+      ]
+    },
+    {
+      "how": "bidi",
+      "out": "",
+      "pieces": [
+        [
+          "text",
+          ""
+        ]
+      ]
+    },
+    {
+      "how": "bidi",
+      "out": "\u200F\u202EWrite\u202C\u200F \u200F\u202Eto\u202C\u200F <a href=\"mailto:a@b.co\">a@b.co</a>",
+      "pieces": [
+        [
+          "text",
+          "Write to <a href=\"mailto:"
+        ],
+        [
+          "var",
+          "a@b.co"
+        ],
+        [
+          "text",
+          "\">"
+        ],
+        [
+          "var",
+          "a@b.co"
+        ],
+        [
+          "text",
+          "</a>"
+        ]
+      ]
+    }
+  ],
+  "note": "The pseudo-languages' turn of each message (crates/flash-server/src/i18n/pseudo.rs). Written by crates/flash-server/tests/it/pseudo_vectors_tests.rs; rerun with FLASH_WRITE_PSEUDO_VECTORS=1."
+}

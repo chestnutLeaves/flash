@@ -1,0 +1,34 @@
+{# The tag picker on the study page: the tags of the deck being studied,
+   or of every deck, as checkboxes. Applying is a plain GET to /study, so
+   a pick starts a new session exactly as ?deck= does, and the browser
+   builds the URL. static/study.js filters the rows and fills the hidden
+   field from the boxes. #}
+<dialog id="study-tags-dialog" class="fl-dialog study-tags-dialog" aria-labelledby="study-tags-title">
+  <form method="get" action="/study" data-study-tags-form>
+    {% if let Some(deck) = scope_deck %}<input type="hidden" name="deck" value="{{ deck }}">{% endif %}
+    <input type="hidden" name="tags" value="{{ scope_tags|join(",") }}" data-study-tags-value>
+    <div class="study-dialog-head">
+      <h2 id="study-tags-title">{{ "study-tags-heading"|t }}</h2>
+      <button type="button" class="fl-btn fl-btn-sm fl-iconbtn fl-btn-ghost" aria-label="{{ "close"|t }}" data-study-tags-close><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+    </div>
+    {% if tag_options.is_empty() %}
+    <p class="fl-hint">{% if scope_deck.is_some() %}{{ "study-tags-none-deck"|t }}{% else %}{{ "study-tags-none"|t }}{% endif %}</p>
+    {% else %}
+    <input class="fl-input" type="search" dir="auto" placeholder="{{ "study-tags-filter"|t }}" aria-label="{{ "study-tags-filter"|t }}" autocomplete="off" data-study-tags-filter>
+    <ul class="study-tags-list" role="list">
+      {% for t in tag_options %}
+      <li class="study-tags-row" data-tag="{{ t.name }}">
+        <label class="study-tags-pick"><input type="checkbox" value="{{ t.name }}"{% if t.checked %} checked{% endif %}> {{ t.name }}</label>
+        <span class="mono small muted">{{ t.cards }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+    <p class="fl-hint" data-study-tags-none hidden>{{ "study-tags-no-match"|t }}</p>
+    <p class="fl-hint">{{ "study-tags-every"|t }}</p>
+    <div class="row study-tags-actions">
+      <button type="button" class="fl-btn fl-btn-sm fl-btn-ghost" data-study-tags-clear>{{ "study-tags-clear"|t }}</button>
+      <button type="submit" class="fl-btn fl-btn-sm fl-btn-primary">{{ "study-tags-apply"|t }}</button>
+    </div>
+    {% endif %}
+  </form>
+</dialog>

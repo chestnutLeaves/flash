@@ -119,7 +119,7 @@ fn substitute<'a>(
     if filters.iter().any(|f| f.trim().starts_with("tts")) {
         // In Anki this is a play button. If the field is already visible
         // in this format, showing its text again is duplication; a
-        // tts-only card keeps the text (voice mode needs something to say).
+        // tts-only card keeps the text (its plain-text side needs words).
         if shown.contains(&name) {
             return String::new();
         }
@@ -194,7 +194,6 @@ mod tests {
             ),
             "食べる (たべる) "
         );
-        // A tts-only card keeps its text: voice needs something to say.
         assert_eq!(render("{{tts ja_JP:Word}}", &f, false), "食べる");
     }
 

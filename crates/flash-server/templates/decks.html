@@ -1,9 +1,9 @@
 {% extends "base.html" %}
-{% block title %}Decks - Flash{% endblock %}
+{% block title %}{{ "decks-title"|t }}{% endblock %}
 {% block content %}
 <div id="decks-main" style="display:contents">
 <div class="page-head">
-  <h1>Decks</h1>
+  <h1>{{ "decks-heading"|t }}</h1>
   <span class="small muted">
     {# Archived decks keep their place in the list; this shows or hides them.
        It changes nothing on the server, so it costs no request: every row is
@@ -11,25 +11,26 @@
        and the cookie it writes (as the theme is kept) makes the next load,
        a refresh included, come out the same. The address stays /decks.
        Without script the form posts and the redirect brings the page back. #}
-    {% if any_archived %}<form method="post" action="/decks/archived" style="display:inline" data-show-archived-form data-instant><input type="hidden" name="show" value="{% if show_archived %}0{% else %}1{% endif %}"><button class="muted fl-linkbtn" type="submit">{% if show_archived %}Hide archived{% else %}Show archived{% endif %}</button></form> &middot; {% endif %}<a class="muted" href="/import">Import</a>{% if ai_enabled %} &middot; <a class="muted" href="/generate">Generate</a>{% endif %}
+    {% if any_archived %}<form method="post" action="/decks/archived" style="display:inline" data-show-archived-form data-instant><input type="hidden" name="show" value="{% if show_archived %}0{% else %}1{% endif %}"><button class="muted fl-linkbtn" type="submit">{% if show_archived %}{{ "decks-hide-archived"|t }}{% else %}{{ "decks-show-archived"|t }}{% endif %}</button></form> &middot; {% endif %}<a class="muted" href="/import">{{ "decks-import"|t }}</a>{{ add_cards|safe }}
   </span>
 </div>
 <form class="row" method="post" action="/decks">
-  <input class="fl-input" type="text" name="name" placeholder="New deck name" required maxlength="120">
-  <button class="fl-btn fl-btn-primary" type="submit">Create</button>
+  <input class="fl-input" type="text" dir="auto" name="name" placeholder="{{ "decks-new-name"|t }}" required maxlength="120">
+  <button class="fl-btn fl-btn-primary" type="submit">{{ "decks-create"|t }}</button>
 </form>
 
 {% if decks.is_empty() %}
-<p class="muted">No decks yet.</p>
+<p class="muted">{{ "decks-none"|t }}</p>
 {% else %}
 {# Said in place of the table while every deck is archived and hidden. #}
-<p class="muted" data-all-archived{% if any_active || show_archived %} hidden{% endif %}>Every deck is archived.</p>
+<p class="muted" data-all-archived{% if any_active || show_archived %} hidden{% endif %}>{{ "decks-all-archived"|t }}</p>
 <table class="fl-table" data-deck-tree data-show-archived="{% if show_archived %}1{% else %}0{% endif %}"{% if !any_active && !show_archived %} hidden{% endif %}>
-  <thead><tr><th>Deck</th><th>Due</th><th>New</th><th></th></tr></thead>
+  <thead><tr><th>{{ "decks-col-deck"|t }}</th><th>{{ "decks-col-goal"|t }}</th><th>{{ "decks-col-due"|t }}</th><th>{{ "decks-col-new"|t }}</th><th></th></tr></thead>
   <tbody>
   {% include "deck_rows.html" %}
   </tbody>
 </table>
+{% include "goal_dialog.html" %}
 {% endif %}
 </div>
 {% endblock %}

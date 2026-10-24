@@ -1,0 +1,10 @@
+{% extends "auth_base.html" %}
+{#- An address that answers nothing any more: a link that expired, was
+    used or was turned off, or a feature this server does not offer
+    (`web::gone`). #}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+<h1>{{ heading }}</h1>
+{% if let Some(body) = body %}<p class="muted">{{ body }}</p>{% endif %}
+<p><a class="fl-btn fl-btn-secondary" href="{{ "/"|href }}">{{ "notfound-home"|t }}</a></p>
+{% endblock %}

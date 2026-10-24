@@ -1,0 +1,136 @@
+{
+  "history": [],
+  "parsed": {
+    "media": {
+      "audio": 0,
+      "images": 1,
+      "missing": 0,
+      "total_bytes": 19,
+      "unsupported": 0,
+      "video": 0
+    },
+    "messages": [
+      {
+        "args": [
+          [
+            "notes",
+            1.0
+          ],
+          [
+            "cards",
+            2.0
+          ]
+        ],
+        "id": "import-cloze-expanded"
+      },
+      {
+        "args": [
+          [
+            "images",
+            1.0
+          ],
+          [
+            "audio",
+            0.0
+          ],
+          [
+            "video",
+            0.0
+          ],
+          [
+            "unsupported",
+            0.0
+          ],
+          [
+            "mb",
+            0.0
+          ]
+        ],
+        "id": "import-media"
+      }
+    ],
+    "progress_reviews": 0,
+    "rows": [
+      {
+        "anki_card_id": 1700000000001,
+        "back": "• Vitamin K\n• FFP",
+        "back_html": "<ul><li>Vitamin K</li><li>FFP</li></ul>",
+        "cloze_index": null,
+        "cloze_text": null,
+        "deck": "Pharm::Anticoagulants",
+        "front": "Warfarin antidote?",
+        "front_html": "<b>Warfarin</b> antidote?",
+        "media": [],
+        "suspended": false,
+        "tags": [
+          "exam",
+          "hematology"
+        ],
+        "type_answer": null
+      },
+      {
+        "anki_card_id": 1700000000003,
+        "back": "Paris\nGeography",
+        "back_html": "<span class=\"cloze-answer\">Paris</span> is in France<br>Geography",
+        "cloze_index": 1,
+        "cloze_text": "{{c1::Paris}} is in {{c2::France::country}}\u001fGeography",
+        "deck": "Geo",
+        "front": "[...] is in France",
+        "front_html": "<span class=\"cloze-blank\">[...]</span> is in France",
+        "media": [],
+        "suspended": false,
+        "tags": [],
+        "type_answer": null
+      },
+      {
+        "anki_card_id": 1700000000004,
+        "back": "France\nGeography",
+        "back_html": "Paris is in <span class=\"cloze-answer\">France</span><br>Geography",
+        "cloze_index": 2,
+        "cloze_text": "{{c1::Paris}} is in {{c2::France::country}}\u001fGeography",
+        "deck": "Geo",
+        "front": "Paris is in [country]",
+        "front_html": "Paris is in <span class=\"cloze-blank\">[country]</span>",
+        "media": [],
+        "suspended": false,
+        "tags": [],
+        "type_answer": null
+      },
+      {
+        "anki_card_id": 1700000000006,
+        "back": "Rome",
+        "back_html": null,
+        "cloze_index": null,
+        "cloze_text": null,
+        "deck": "Geo",
+        "front": "Capital of Italy?",
+        "front_html": null,
+        "media": [],
+        "suspended": false,
+        "tags": [],
+        "type_answer": "Rome"
+      },
+      {
+        "anki_card_id": 1700000000008,
+        "back": "A red cat",
+        "back_html": "A <span class=\"hl-red\">red</span> cat",
+        "cloze_index": null,
+        "cloze_text": null,
+        "deck": "Art",
+        "front": "[image]",
+        "front_html": "<span class=\"media-ref\" data-kind=\"image\" data-media=\"cat.png\">image</span>",
+        "media": [
+          {
+            "filename": "cat.png",
+            "kind": "image"
+          }
+        ],
+        "suspended": false,
+        "tags": [],
+        "type_answer": null
+      }
+    ],
+    "settings": null,
+    "skipped": 0
+  }
+}

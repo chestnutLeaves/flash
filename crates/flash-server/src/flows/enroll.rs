@@ -21,10 +21,15 @@ pub enum EnrollOutcome {
 
 impl EnrollOutcome {
     /// Pairs a `Created` outcome with a fresh web session token.
-    pub fn with_session(self, store: &Store, now_ms: i64) -> Result<(Self, Option<String>)> {
+    pub fn with_session(
+        self,
+        store: &Store,
+        browser: &crate::auth::Browser,
+        now_ms: i64,
+    ) -> Result<(Self, Option<String>)> {
         match self {
             EnrollOutcome::Created(user) => {
-                let token = crate::auth::issue_session(store, user, now_ms)?;
+                let token = crate::auth::issue_session(store, user, browser, now_ms)?;
                 Ok((EnrollOutcome::Created(user), Some(token)))
             }
             other => Ok((other, None)),
@@ -89,26 +94,31 @@ pub fn with_password(
         Ok(email) => email,
         Err(msg) => return Ok(EnrollOutcome::BadEmail(msg)),
     };
-    if store.email_taken(&email)? {
-        return Ok(EnrollOutcome::EmailTaken);
-    }
-    if store.lookup_invite(invite_token_hash, now_ms)?.is_none() {
-        return Ok(EnrollOutcome::InviteGone);
-    }
-    store.consume_invite(invite_token_hash, now_ms)?;
-    let user = store.create_user(
-        &enrollment.invite.display_name,
-        Some(&email),
-        &enrollment.invite.role,
-        now_ms,
-    )?;
-    hooks.user_enrolled(
-        store,
-        user,
-        enrollment.signup.as_ref(),
-        invite_token_hash,
-        now_ms,
-    )?;
-    store.set_password_hash(user, Some(phc))?;
-    Ok(EnrollOutcome::Created(user))
+    // One transaction, as for a passkey: the invite is burned only if the
+    // account, what the extension records and the password all land.
+    Ok(store.with_tx(|tx| {
+        if flash_store::email_taken_tx(tx, &email)? {
+            return Ok(EnrollOutcome::EmailTaken);
+        }
+        if flash_store::lookup_invite_tx(tx, invite_token_hash, now_ms)?.is_none() {
+            return Ok(EnrollOutcome::InviteGone);
+        }
+        flash_store::consume_invite_tx(tx, invite_token_hash, now_ms)?;
+        let user = flash_store::create_user_tx(
+            tx,
+            &enrollment.invite.display_name,
+            Some(&email),
+            &enrollment.invite.role,
+            now_ms,
+        )?;
+        hooks.user_enrolled(
+            tx,
+            user,
+            enrollment.signup.as_ref(),
+            invite_token_hash,
+            now_ms,
+        )?;
+        flash_store::set_password_hash_tx(tx, user, Some(phc))?;
+        Ok(EnrollOutcome::Created(user))
+    })?)
 }

@@ -1,21 +1,31 @@
 //! Atomic connector edits and durable, user/client-scoped deletion approvals.
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
-use flash_core::{CardId, DeckId, NoteId, UserId};
+use flash_core::{CardId, DeckId, NoteId, RevisionId, UserId};
 use rusqlite::{params, Connection, OptionalExtension};
 
-use crate::{NoteSave, Result, Store, StoreError};
+use crate::notes::NoteType;
+use crate::richtext::SanitizedHtml;
+use crate::{NoteSave, Result, RevisionSource, Store, StoreError};
 
 pub struct SourceEdit<'a> {
     pub card: CardId,
     pub snapshot: String,
     pub siblings: Vec<CardId>,
+    /// The text the card has now, as the editor reads it: what a
+    /// note-less card's new note is made with, so its old text becomes
+    /// the note's first revision (`adopt_card_into_note_tx`).
+    pub seed: (NoteType, &'a SanitizedHtml, &'a SanitizedHtml),
     pub save: NoteSave<'a>,
 }
 
 /// Computed inside the write transaction, so reporting cannot fail after commit.
 pub struct McpMutationReceipt {
     pub sources: Vec<(NoteId, Vec<CardId>)>,
+    /// For an update, one per source: the revision keeping the text the
+    /// edit replaced, or None when the edit changed nothing. Empty for a
+    /// creation.
+    pub revisions: Vec<Option<RevisionId>>,
     pub created: u32,
     pub updated: u32,
     pub deck_totals: Vec<(i64, u32)>,
@@ -48,7 +58,7 @@ pub struct McpDeletionPreview {
 /// followed by the decks under it. A deck that is not the user's is not
 /// found.
 fn pinned_decks(conn: &Connection, user: UserId, deck: DeckId) -> Result<(Vec<i64>, Vec<String>)> {
-    let decks = super::cards::subtree(conn, user, deck)?;
+    let decks = super::decks::subtree(conn, user, deck)?;
     if decks.is_empty() {
         return Err(StoreError::NotFound("deck"));
     }
@@ -60,6 +70,7 @@ fn pinned_decks(conn: &Connection, user: UserId, deck: DeckId) -> Result<(Vec<i6
             name,
             due: 0,
             new: 0,
+            paced: false,
         })
         .collect();
     let names = flash_core::deck_tree::build(&nodes, 0, 0)
@@ -207,9 +218,9 @@ impl Store {
         let tx = conn.transaction()?;
         // A name is a path here as everywhere: `Bio::Cells` lands in the
         // subdeck, made with the decks it sits in when it is new.
-        let deck = match super::cards::find_deck(&tx, user, name)? {
+        let deck = match super::decks::find_deck(&tx, user, name)? {
             Some(deck) => deck,
-            None => super::cards::insert_deck_path_tx(&tx, user, name, "", now)?,
+            None => super::decks::insert_deck_path_tx(&tx, user, name, "", now)?,
         };
         let mut result = Vec::new();
         for save in saves {
@@ -220,6 +231,7 @@ impl Store {
             created: result.iter().map(|(_, ids)| ids.len() as u32).sum(),
             updated: 0,
             sources: result,
+            revisions: Vec::new(),
             deck_totals: deck_totals(&tx, user, &[deck])?,
         };
         tx.commit()?;
@@ -236,7 +248,8 @@ impl Store {
         }
         let mut conn = self.conn();
         let tx = conn.transaction()?;
-        let mut touched = HashSet::new();
+        // Each card the batch reaches, with the edit that named it.
+        let mut touched = HashMap::new();
         for edit in edits {
             if snapshot(&tx, user, edit.card)? != edit.snapshot {
                 return Err(invalid("source_changed: read the cards again"));
@@ -245,22 +258,28 @@ impl Store {
                 return Err(invalid("siblings_changed: read the cards again"));
             }
             for id in &edit.siblings {
-                if !touched.insert(id.0) {
-                    return Err(invalid("duplicate source in update batch"));
+                if let Some(first) = touched.insert(id.0, edit.card.0) {
+                    return Err(invalid(&format!(
+                        "duplicate_source: cards {first} and {} share one source: send one \
+                         edit for it",
+                        edit.card.0
+                    )));
                 }
             }
         }
         let mut result = Vec::new();
+        let mut revisions = Vec::new();
         let mut decks = Vec::new();
         for edit in edits {
             check_media(&tx, user, &edit.save)?;
+            let (seed_type, seed_front, seed_back) = edit.seed;
             let note = self.adopt_card_into_note_tx(
                 &tx,
                 user,
                 edit.card,
-                edit.save.note_type,
-                edit.save.front_html,
-                edit.save.back_html,
+                seed_type,
+                seed_front,
+                seed_back,
                 edit.save.now_ms,
             )?;
             let slots:Vec<(u32,i64)>=tx.prepare("SELECT ord,id FROM cards WHERE note_id = ?1 AND user_id = ?2 AND deleted_at IS NULL")?
@@ -275,7 +294,9 @@ impl Store {
                     "implicit_card_removal: delete these cards explicitly first: {removed:?}"
                 )));
             }
-            result.push((note, self.update_note_tx(&tx, user, note, &edit.save)?));
+            let update = self.update_note_tx(&tx, user, note, &edit.save, RevisionSource::Mcp)?;
+            result.push((note, update.cards));
+            revisions.push(update.revision);
             let deck = tx.query_row(
                 "SELECT deck_id FROM notes WHERE id = ?1 AND user_id = ?2",
                 params![note.0, user.raw()],
@@ -286,6 +307,7 @@ impl Store {
         let total: u32 = result.iter().map(|(_, ids)| ids.len() as u32).sum();
         let receipt = McpMutationReceipt {
             sources: result,
+            revisions,
             updated: touched.len() as u32,
             created: total - touched.len() as u32,
             deck_totals: deck_totals(&tx, user, &decks)?,

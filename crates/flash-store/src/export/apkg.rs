@@ -34,7 +34,7 @@ pub fn build_apkg(
             .files
             .iter()
             .find(|(name, _)| *name == entry.name)
-            .map(|(_, bytes)| bytes.clone())
+            .map(|(_, bytes)| Some(bytes.clone()))
             .ok_or_else(|| format!("no bytes for {}", entry.name))
     };
     let cursor = build_apkg_into(
@@ -47,15 +47,20 @@ pub fn build_apkg(
     Ok(cursor.into_inner())
 }
 
+/// Fetches one media entry's bytes for the package; `None` when storage
+/// no longer has the file.
+pub type ReadMedia<'a> = dyn FnMut(&ExportMediaEntry) -> Result<Option<Vec<u8>>, String> + 'a;
+
 /// Writes the package to `out`. The collection is built in a temp SQLite
 /// file and copied in; each media entry is fetched through `read` right
 /// before it is written and dropped right after, so the caller's peak
-/// memory is one blob, however many the plan holds. Returns the sink so a
-/// file can be reopened for sending.
+/// memory is one blob, however many the plan holds. `read` answering
+/// `None` (the file is gone from storage) leaves that file out; the notes
+/// still name it. Returns the sink so a file can be reopened for sending.
 pub fn build_apkg_into<W: Write + Seek>(
     cards: &[ExportCard],
     plan: &ExportMediaPlan,
-    read: &mut dyn FnMut(&ExportMediaEntry) -> Result<Vec<u8>, String>,
+    read: &mut ReadMedia<'_>,
     now_ms: i64,
     out: W,
 ) -> Result<W, String> {
@@ -75,7 +80,9 @@ pub fn build_apkg_into<W: Write + Seek>(
     std::io::copy(&mut db_file, &mut zip).map_err(|e| format!("zip db: {e}"))?;
     let mut manifest = serde_json::Map::new();
     for (i, entry) in plan.entries.iter().enumerate() {
-        let bytes = read(entry)?;
+        let Some(bytes) = read(entry)? else {
+            continue;
+        };
         zip.start_file(i.to_string(), options)
             .map_err(|e| format!("zip: {e}"))?;
         zip.write_all(&bytes)

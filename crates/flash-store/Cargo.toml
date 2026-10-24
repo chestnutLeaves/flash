@@ -18,9 +18,10 @@ workspace = true
 fuzzing = []
 
 [dependencies]
-ammonia = "4.1.4"
+ammonia = "4.2.3"
 csv = "1.4.0"
-rusqlite = { version = "0.40.2", features = ["bundled", "hooks"] }
+# `functions`: card search folds case and accents in SQL (`fold`).
+rusqlite = { version = "0.40.2", features = ["bundled", "hooks", "functions"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 sha1_smol = "1.0"
@@ -30,12 +31,15 @@ flash-core = { path = "../flash-core" }
 # next caller a working lock instead of a permanently panicking one.
 parking_lot = "0.12"
 thiserror = "2.0.20"
-zip = "8.6.0"
-zstd = "0.13.3"
+# One form for every letter a card holds (NFC), and search that ignores
+# accents (NFD, marks dropped). Already built for the URL parser.
+unicode-normalization = "0.1.25"
+zip = "9.0.4"
+zstd = "0.14.3"
 
 [dev-dependencies]
 flash-scan = { path = "../flash-scan" }
 rusqlite = { version = "0.40.2", features = ["bundled", "hooks"] }
 sha1_smol = "1.0"
-zip = "8.6.0"
-zstd = "0.13.3"
+zip = "9.0.4"
+zstd = "0.14.3"

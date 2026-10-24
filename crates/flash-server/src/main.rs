@@ -3,6 +3,7 @@
 //! nothing plugged in. A downstream extension builds its own binary the
 //! same way with its routers merged into each band.
 
+use std::process::ExitCode;
 use std::sync::Arc;
 
 use axum::routing::get;
@@ -13,8 +14,50 @@ use flash_server::service::{now_ms, Services};
 use flash_server::state::AppState;
 use flash_store::Store;
 
+fn main() -> ExitCode {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    match args.as_slice() {
+        [] => {
+            serve();
+            ExitCode::SUCCESS
+        }
+        [command, email] if command == "reset-link" => reset_link(email),
+        _ => {
+            eprintln!("usage: flash-server [reset-link <email>]");
+            ExitCode::from(2)
+        }
+    }
+}
+
+/// `flash-server reset-link <email>`: prints a one-time password-reset
+/// link for that account and exits, for an instance that sends no mail.
+/// Safe beside the running server. The link is a credential, so it goes
+/// to stdout alone, never to the log.
+fn reset_link(email: &str) -> ExitCode {
+    let link = Config::from_env().and_then(|config| {
+        let store = Store::open_current(&config.db_path()).map_err(|e| e.to_string())?;
+        flash_server::flows::reset::link_for(&store, &config.base_url, email, now_ms())
+            .map_err(|e| e.to_string())
+    });
+    match link {
+        Ok(Some(link)) => {
+            println!("{link}");
+            eprintln!("It works once, within the next hour.");
+            ExitCode::SUCCESS
+        }
+        Ok(None) => {
+            eprintln!("No account has the email {email}.");
+            ExitCode::FAILURE
+        }
+        Err(e) => {
+            eprintln!("reset-link: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 #[tokio::main]
-async fn main() {
+async fn serve() {
     tracing_subscriber::fmt().with_target(false).init();
 
     let config = Config::from_env().expect("config");
@@ -29,32 +72,23 @@ async fn main() {
 
     tokio::spawn(flash_server::scheduler::run_housekeeping(
         state.services.clone(),
-        state.media.clone(),
         state.config.data_dir.clone(),
     ));
-    // Card generation jobs, only when a model is configured.
-    if state.ai.is_some() {
-        tokio::spawn(flash_server::ai::runner::run_jobs(state.clone()));
-    }
-    // Voice clips, only when a sidecar is configured: the worker that
-    // makes them, and the warm-up that queues every phrase once.
-    if state.tts.is_some() {
-        tokio::spawn(flash_server::tts::worker::run_worker(state.clone()));
-        tokio::spawn(flash_server::tts::worker::run_warmup(state.clone()));
-    }
+    // A stopping process waits for this: owed work kept in the database
+    // until done.
+    let background = vec![tokio::spawn(flash_server::jobs::run(
+        state.clone(),
+        flash_server::jobs::POLL,
+    ))];
 
     let app = flash_server::build_app(state.clone())
-        .route("/healthz", get(boot::healthz).with_state(state));
+        .route("/healthz", get(boot::healthz).with_state(state.clone()));
 
     let listener = tokio::net::TcpListener::bind(bind)
         .await
         .unwrap_or_else(|e| panic!("bind {bind}: {e}"));
     tracing::info!(%bind, "flash-server listening");
-    // Peer addresses reach the rate limiter through ConnectInfo.
-    axum::serve(
-        listener,
-        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
-    )
-    .await
-    .expect("serve");
+    // Until SIGTERM or Ctrl-C, then a bounded drain; peer addresses reach
+    // the rate limiter through ConnectInfo.
+    boot::serve(listener, app, state, background, boot::stop_requested()).await;
 }

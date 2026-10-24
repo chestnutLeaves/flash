@@ -1,0 +1,21 @@
+# Build settings for every cargo command run in this workspace: local
+# builds, CI, and the Docker image (.dockerignore lets this file in).
+
+# SQLite (bundled by rusqlite) is compiled without memory-usage
+# statistics, one of SQLite's own recommended compile-time options
+# (sqlite.org/compile.html). With them on, every allocation in every
+# connection takes one process-wide lock: 24 test threads spent 104 s of
+# CPU where one thread needed 9. Nothing here reads the statistics
+# (sqlite3_memory_used, sqlite3_status, SQLITE_MAX_MEMORY), which are
+# all that stops working.
+[env]
+LIBSQLITE3_FLAGS = "-DSQLITE_DEFAULT_MEMSTATUS=0"
+
+# Link with LLD on Windows. It ships with every rustup toolchain
+# (lib/rustlib/<host>/bin/rust-lld.exe), reads the same MSVC import
+# libraries link.exe does, and links several times faster, which is most
+# of a debug rebuild. Other targets keep their default linker (already LLD
+# on Linux since Rust 1.90).
+[target.x86_64-pc-windows-msvc]
+linker = "rust-lld.exe"
+rustdocflags = ["-Clinker=rust-lld.exe"]

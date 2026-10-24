@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}{{ "editor-page-title"|t }}{% endblock %}
+{% block content %}
+{# One card's own page: its editor, whole (card_editor.html with
+   `after=page`). An assistant's study panel links here for an edit its
+   quick edit cannot make; a save stays here and says so. #}
+<nav class="deck-crumbs" aria-label="{{ "editor-crumbs"|t }}"><a href="/decks/{{ deck_id }}">{{ deck_name }}</a> &rsaquo;</nav>
+<div class="page-head">
+  <h1>{{ "editor-heading"|t }}</h1>
+</div>
+<div id="editor-dialog" data-editor-after="page">
+  {% include "card_editor.html" %}
+</div>
+{# bump ?v= together with base.html when static files change #}
+<script src="/static/editor.js?v=56" defer></script>
+{% endblock %}
+{% block js_words %}{{ super() }}{{ "js-editor"|js_island|safe }}{% endblock %}

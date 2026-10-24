@@ -7,13 +7,16 @@
 //! instead, and the model fails closed: a file that does not parse, or
 //! a construct it cannot read, is a panic rather than a silent gap.
 //!
-//! Two scans that every crate shares live here too: the route inventory
-//! (`routes`) and the per-user SQL scan (`sql`).
+//! Scans that every crate shares live here too: the route inventory
+//! (`routes`), the per-user SQL scan (`sql`) and the detached-work scan
+//! (`spawns`).
 
 pub mod cfg;
 mod extract;
 pub mod routes;
+pub mod spawns;
 pub mod sql;
+pub mod test_code;
 pub mod tokens;
 
 use std::collections::HashMap;
@@ -123,23 +126,39 @@ fn parse(label: &str, text: &str) -> syn::File {
 fn unshipped_modules(parsed: &[(PathBuf, syn::File)]) -> Vec<PathBuf> {
     let mut out = Vec::new();
     for (path, ast) in parsed {
-        let base = match path.file_name().and_then(|n| n.to_str()) {
-            Some("mod.rs" | "lib.rs" | "main.rs") => path.parent().map(Path::to_path_buf),
-            _ => path
-                .parent()
-                .map(|p| p.join(path.file_stem().unwrap_or_default())),
+        let Some(base) = module_dir(path) else {
+            continue;
         };
-        let Some(base) = base else { continue };
         for item in &ast.items {
             if let syn::Item::Mod(m) = item {
                 if m.content.is_none() && !cfg::shipped(&m.attrs) {
-                    out.push(base.join(format!("{}.rs", m.ident)));
-                    out.push(base.join(m.ident.to_string()));
+                    out.extend(out_of_line(&base, &m.ident));
                 }
             }
         }
     }
     out
+}
+
+/// Where the modules a file declares out of line live: beside it for a
+/// `mod.rs`, `lib.rs` or `main.rs`, in the directory named after it
+/// otherwise.
+fn module_dir(path: &Path) -> Option<PathBuf> {
+    match path.file_name().and_then(|n| n.to_str()) {
+        Some("mod.rs" | "lib.rs" | "main.rs") => path.parent().map(Path::to_path_buf),
+        _ => path
+            .parent()
+            .map(|p| p.join(path.file_stem().unwrap_or_default())),
+    }
+}
+
+/// The two places an out-of-line `mod ident;` under `base` can be:
+/// `ident.rs` and `ident/`.
+fn out_of_line(base: &Path, ident: &syn::Ident) -> [PathBuf; 2] {
+    [
+        base.join(format!("{ident}.rs")),
+        base.join(ident.to_string()),
+    ]
 }
 
 fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -178,6 +197,8 @@ pub struct SourceFile {
     pub uses: Vec<UseDecl>,
     /// `const NAME: &str = "…"` items, by name.
     pub consts: HashMap<String, String>,
+    /// Every `static` item, at module level or inside a function.
+    pub statics: Vec<StaticDecl>,
     pub calls: Vec<Call>,
     pub method_calls: Vec<MethodCall>,
     pub macros: Vec<MacroCall>,
@@ -198,6 +219,18 @@ impl SourceFile {
     pub fn type_named(&self, name: &str) -> Option<&TypeDecl> {
         self.types.iter().find(|t| t.name == name)
     }
+}
+
+/// A `static` item: what lives once per process.
+#[derive(Debug, Clone)]
+pub struct StaticDecl {
+    pub name: String,
+    pub ty: TypeRef,
+    /// `static mut`.
+    pub mutable: bool,
+    pub line: usize,
+    /// The innermost enclosing function, if it is declared inside one.
+    pub function: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

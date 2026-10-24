@@ -1,0 +1,3436 @@
+[
+  {
+    "_meta": {
+      "openai/widgetAccessible": false,
+      "ui": {
+        "visibility": [
+          "model"
+        ]
+      }
+    },
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": false,
+      "title": "Archive deck"
+    },
+    "description": "Use this when the user is done with a deck (an exam passed) but wants to keep it. Every card, its media and its review history stay, but the deck and its subdecks leave the study queue and the due counts, and start_study_session on it finds nothing. Nothing is deleted, so no confirmation is needed; unarchive_deck reverses it. Cards can still be added to an archived deck by name.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "deck": {
+          "description": "The deck's full name, e.g. \"Pharm::Cardio\" (list_decks has the\nnames).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "deck"
+      ],
+      "type": "object"
+    },
+    "name": "archive_deck",
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "saved": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "saved"
+      ],
+      "type": "object"
+    },
+    "title": "Archive deck"
+  },
+  {
+    "_meta": {
+      "openai/widgetAccessible": true,
+      "ui": {
+        "visibility": [
+          "model",
+          "app"
+        ]
+      }
+    },
+    "annotations": {
+      "destructiveHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false,
+      "title": "More new cards today"
+    },
+    "description": "Use this when the user wants more new cards today than the daily limit allows ('give me 10 more new cards today'). Adds extra new cards for today only: to one deck, or without a deck to the account-wide allowance. Each call adds more, up to 500, and returns the total extra granted today. To change the limit for every day, use set_limits.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "deck": {
+          "default": null,
+          "description": "Deck name; omit to boost the account-wide allowance.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "extra": {
+          "description": "Extra new cards to allow today (1-500). Today only.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "extra"
+      ],
+      "type": "object"
+    },
+    "name": "boost_new_today",
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "boost_today": {
+          "description": "Total extra new cards granted today (after this call).",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "boost_today"
+      ],
+      "type": "object"
+    },
+    "title": "More new cards today"
+  },
+  {
+    "_meta": {
+      "openai/outputTemplate": "{PANEL_URI}",
+      "openai/toolInvocation/invoked": "Cards made",
+      "openai/toolInvocation/invoking": "Making your cards",
+      "openai/widgetAccessible": false,
+      "ui": {
+        "resourceUri": "{PANEL_URI}",
+        "visibility": [
+          "model"
+        ]
+      },
+      "ui/resourceUri": "{PANEL_URI}"
+    },
+    "annotations": {
+      "destructiveHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false,
+      "title": "Create cards"
+    },
+    "description": "Use this when the user wants flashcards: made from notes, slides or a file they share, a topic they name, or this conversation, or to memorize something and review it later. Saves 1-500 cards into one deck of their Flash account (created if missing, with parents for Parent::Child), where spaced repetition schedules each card's reviews. Follow the field notes; cloze uses {{c1::answer}}; keep media as /media/{id}. To change existing cards use update_cards, not new copies.",
+    "inputSchema": {
+      "$defs": {
+        "CueBlock": {
+          "additionalProperties": false,
+          "properties": {
+            "say": {
+              "description": "\"equation\" for a formula too long to read, \"look\" for anything\nthat cannot be said aloud.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "say"
+          ],
+          "type": "object"
+        },
+        "NewCard": {
+          "additionalProperties": false,
+          "properties": {
+            "back_html": {
+              "description": "The answer to exactly what the front asks, as short as it can be while complete. Anything more (why, an example, a source) comes after the answer, set apart.",
+              "type": "string"
+            },
+            "back_speech": {
+              "description": "What is read aloud of this side, in order, as blocks: [{\"lang\":\"en\",\"text\":\"How do you say cat in Japanese?\"},{\"lang\":\"ja\",\"text\":\"ねこ\"}]. Follow the side as it is written, in its order, never rewording it. Each block is one language, by ISO 639-1 code, with a region where the accent matters (es-MX, es-ES, pt-BR, pt-PT, en-GB); a word in another language inside a sentence is its own block where it stands. Leave out what is not read aloud: citations and sources, a romanization next to the script it spells (romaji, pinyin), emoji, images. Write a word as it is said when its spelling is ambiguous (Japanese kanji in kana, 猫 as ねこ; Chinese in simplified characters). A short formula of a few symbols in words (F = ma as \"F equals m a\"); a long one as {\"say\":\"equation\"}; anything that cannot be said aloud, Cantonese included, as {\"say\":\"look\"}.",
+              "items": {
+                "$ref": "#/$defs/SpeechBlockArg"
+              },
+              "type": [
+                "array",
+                "null"
+              ]
+            },
+            "front_html": {
+              "description": "The prompt, answerable on its own: one question, cue or cloze sentence carrying everything needed to answer it (the choices of a multiple-choice question, the context a case depends on). One idea per card: a list, a multi-part rule or a comparison becomes several cards, or a cloze with one blank per part.",
+              "type": "string"
+            },
+            "front_speech": {
+              "description": "What is read aloud of this side, in order, as blocks: [{\"lang\":\"en\",\"text\":\"How do you say cat in Japanese?\"},{\"lang\":\"ja\",\"text\":\"ねこ\"}]. Follow the side as it is written, in its order, never rewording it. Each block is one language, by ISO 639-1 code, with a region where the accent matters (es-MX, es-ES, pt-BR, pt-PT, en-GB); a word in another language inside a sentence is its own block where it stands. Leave out what is not read aloud: citations and sources, a romanization next to the script it spells (romaji, pinyin), emoji, images. Write a word as it is said when its spelling is ambiguous (Japanese kanji in kana, 猫 as ねこ; Chinese in simplified characters). A short formula of a few symbols in words (F = ma as \"F equals m a\"); a long one as {\"say\":\"equation\"}; anything that cannot be said aloud, Cantonese included, as {\"say\":\"look\"}.",
+              "items": {
+                "$ref": "#/$defs/SpeechBlockArg"
+              },
+              "type": [
+                "array",
+                "null"
+              ]
+            },
+            "note_type": {
+              "default": null,
+              "description": "basic (default): one question, one answer. basic_reversed: both directions are worth asking (a word and its translation, a term and its definition). basic_typed: the exact spelling, number or formula matters. cloze: a sentence whose blanks are each their own fact, {{c1::...}}, {{c2::...}}.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "tags": {
+              "default": [],
+              "description": "A few short lowercase topic words (a chapter, a lesson, a theme), so the user can study one part later.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "front_html",
+            "back_html",
+            "front_speech",
+            "back_speech"
+          ],
+          "type": "object"
+        },
+        "SayBlock": {
+          "additionalProperties": false,
+          "properties": {
+            "lang": {
+              "description": "The language the words are in: an ISO 639-1 code, with a region\nwhere the accent matters (\"es-MX\").",
+              "type": "string"
+            },
+            "text": {
+              "description": "The words, as they are said.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "lang",
+            "text"
+          ],
+          "type": "object"
+        },
+        "SpeechBlockArg": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SayBlock"
+            },
+            {
+              "$ref": "#/$defs/CueBlock"
+            }
+          ],
+          "description": "One block of what is read aloud: words in one language, or a cue."
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "cards": {
+          "description": "On both sides keep the material's own terms, names and numbers. Write what plain text loses as HTML (10<sup>5</sup>, not 105; H<sub>2</sub>O; <br> between lines), and write each text in one script, as the material or the user writes it, never switching alphabets inside a word.",
+          "items": {
+            "$ref": "#/$defs/NewCard"
+          },
+          "type": "array"
+        },
+        "deck": {
+          "description": "The deck to add to, by full name, e.g. \"Spanish\" or \"Anatomy::Bones\":\nan existing deck (list_decks has the names), or a new one, created\nwith any missing parents.",
+          "type": "string"
+        },
+        "languages": {
+          "default": null,
+          "description": "The languages the deck's cards are in, most used first, by ISO 639-1 code (\"ja\", \"en\").",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "deck",
+        "cards"
+      ],
+      "type": "object"
+    },
+    "name": "create_cards",
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "card_ids": {
+          "items": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "created": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "deck_totals": {
+          "items": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "format": "int64",
+                "type": "integer"
+              },
+              {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              }
+            ],
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "note": {
+          "description": "How to reply when the cards are already on screen; on new cards,\nalso where else the user can study them.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source_ids": {
+          "items": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "updated": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "source_ids",
+        "card_ids",
+        "created",
+        "updated",
+        "deck_totals"
+      ],
+      "type": "object"
+    },
+    "title": "Create cards"
+  },
+  {
+    "_meta": {
+      "openai/widgetAccessible": false,
+      "ui": {
+        "visibility": [
+          "model"
+        ]
+      }
+    },
+    "annotations": {
+      "destructiveHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false,
+      "title": "Create deck"
+    },
+    "description": "Use this when the user asks for an empty deck to fill later, or to set up a structure of decks. Creates a new deck; name it Parent::Child to make a subdeck, and missing parents are created too. Not needed before adding cards, since create_cards creates its deck. When the user is studying for a date (an exam, a test, a deadline), pass goal_date. Refused if a deck with that name already exists.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "description": {
+          "default": null,
+          "description": "Optional: what the deck covers, in a sentence.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "goal_date": {
+          "default": null,
+          "description": "Optional: the date the user needs to know this deck by (an exam, a test, a trip, a deadline), YYYY-MM-DD on their calendar. Flash then spreads the deck's new cards so all are learned before it and brings back, in the last days, the cards that need it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "languages": {
+          "default": null,
+          "description": "The languages the deck's cards are in, most used first, by ISO 639-1 code (\"ja\", \"en\").",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "The deck's full name, e.g. \"Biology\" or \"Biology::Cell cycle\" for a\nsubdeck.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "name": "create_deck",
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "created": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "created"
+      ],
+      "type": "object"
+    },
+    "title": "Create deck"
+  },
+  {
+    "_meta": {
+      "openai/widgetAccessible": false,
+      "ui": {
+        "visibility": [
+          "model"
+        ]
+      }
+    },
+    "annotations": {
+      "destructiveHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": false,
+      "title": "Delete cards"
+    },
+    "description": "Use this when the user asks to delete specific cards. Takes 1-500 card IDs (from list_cards) with one confirmation for the batch: the first call deletes nothing and returns the exact set and a confirm_token; ask the user once, then repeat the same card_ids with confirm_token. Tokens last ten minutes and survive reconnects; a completed retry returns its original result. For a whole deck use delete_deck; to stop studying a deck but keep it, archive_deck.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "card_ids": {
+          "description": "The cards to delete, 1-500 IDs from list_cards, e.g. [1042, 1043].",
+          "items": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "confirm_token": {
+          "default": null,
+          "description": "Omit on the first call; pass back the token the first call returned,\nafter the user has confirmed.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "card_ids"
+      ],
+      "type": "object"
+    },
+    "name": "delete_cards",
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "card_ids": {
+          "items": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "cards_affected": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "confirm_token": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "deck_totals": {
+          "items": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "format": "int64",
+                "type": "integer"
+              },
+              {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              }
+            ],
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "decks_affected": {
+          "description": "A deck deletion: the decks that go, by name, the deck first and\nthen the decks under it. Empty for a deletion of cards.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "deleted": {
+          "type": "boolean"
+        },
+        "expires_ms": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pending": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "deleted",
+        "pending",
+        "cards_affected",
+        "card_ids",
+        "decks_affected",
+        "deck_totals"
+      ],
+      "type": "object"
+    },
+    "title": "Delete cards"
+  },
+  {
+    "_meta": {
+      "openai/widgetAccessible": false,
+      "ui": {
+        "visibility": [
+          "model"
+        ]
+      }
+    },
+    "annotations": {
+      "destructiveHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": false,
+      "title": "Delete deck"
+    },
+    "description": "Use this when the user asks to permanently delete a whole deck, every subdeck under it and all their cards. The first call deletes nothing and returns decks_affected, the affected card IDs and count, and a confirm_token: name every affected deck, ask once, then repeat the same deck with the token. Tokens last ten minutes across reconnects; a changed card or subdeck needs a fresh confirmation. To keep the cards but stop studying them, use archive_deck.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "confirm_token": {
+          "default": null,
+          "description": "Omit on the first call; pass back the token the first call returned,\nafter the user has confirmed.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "deck": {
+          "description": "The deck's full name, e.g. \"Pharm::Cardio\" (list_decks has the\nnames).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "deck"
+      ],
+      "type": "object"
+    },
+    "name": "delete_deck",
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "card_ids": {
+          "items": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "cards_affected": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "confirm_token": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "deck_totals": {
+          "items": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "format": "int64",
+                "type": "integer"
+              },
+              {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              }
+            ],
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "decks_affected": {
+          "description": "A deck deletion: the decks that go, by name, the deck first and\nthen the decks under it. Empty for a deletion of cards.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "deleted": {
+          "type": "boolean"
+        },
+        "expires_ms": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pending": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "deleted",
+        "pending",
+        "cards_affected",
+        "card_ids",
+        "decks_affected",
+        "deck_totals"
+      ],
+      "type": "object"
+    },
+    "title": "Delete deck"
+  },
+  {
+    "_meta": {
+      "openai/widgetAccessible": true,
+      "ui": {
+        "visibility": [
+          "model",
+          "app"
+        ]
+      }
+    },
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": false,
+      "title": "End session"
+    },
+    "description": "Use this when the user wants to stop studying before the cards run out, or after the last card. Closes the session and returns its summary (cards reviewed, counts by rating); give the user a one-sentence recap. Every review already recorded stays, and ending a session again changes nothing.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "session_id": {
+          "description": "The session_id start_study_session returned.",
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object"
+    },
+    "name": "end_session",
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "again": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "easy": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "good": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "hard": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "note": {
+          "description": "Where the user can study next time, on their own.",
+          "type": "string"
+        },
+        "reviewed": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "reviewed",
+        "again",
+        "hard",
+        "good",
+        "easy",
+        "note"
+      ],
+      "type": "object"
+    },
+    "title": "End session"
+  },
+  {
+    "_meta": {
+      "openai/widgetAccessible": false,
+      "ui": {
+        "visibility": [
+          "model"
+        ]
+      }
+    },
+    "annotations": {
+      "destructiveHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": true,
+      "title": "Get limits"
+    },
+    "description": "Use this when the user asks how many new cards or reviews they get per day, or why a session stopped while cards remain. Shows today's study limits: the account defaults (new cards per day, max reviews per day, any extra new cards granted today) and every deck's override (null = inherits) with how many new and due cards it can still serve today.",
+    "inputSchema": {
+      "properties": {},
+      "type": "object"
+    },
+    "name": "get_limits",
+    "outputSchema": {
+      "$defs": {
+        "AccountLimitsOut": {
+          "properties": {
+            "boost_today": {
+              "description": "Extra new cards granted for today.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "new_per_day": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "reviews_per_day": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "new_per_day",
+            "reviews_per_day",
+            "boost_today"
+          ],
+          "type": "object"
+        },
+        "DeckLimitsOut": {
+          "properties": {
+            "boost_today": {
+              "description": "Extra new cards granted to this deck for today.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "due": {
+              "description": "Reviews due now in this deck.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "goal": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/GoalOut"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Present when the deck has a goal date: while it is ahead, the\ngoal's pace stands in for new_per_day."
+            },
+            "name": {
+              "type": "string"
+            },
+            "new_available": {
+              "description": "New cards this deck can still serve today.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "new_per_day": {
+              "description": "Deck override; null = inherits the account default.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "reviews_per_day": {
+              "description": "Deck override; null = inherits the account default.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "name",
+            "boost_today",
+            "new_available",
+            "due"
+          ],
+          "type": "object"
+        },
+        "GoalOut": {
+          "description": "A deck's goal date and how the deck stands toward it, over the deck\nand its subdecks.",
+          "properties": {
+            "behind_by": {
+              "description": "New cards behind that plan; studying that many more today catches up.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "date": {
+              "description": "The date, YYYY-MM-DD, on the user's calendar.",
+              "type": "string"
+            },
+            "days_left": {
+              "description": "Days until it: 0 on the day, negative once it has passed.",
+              "format": "int64",
+              "type": "integer"
+            },
+            "learned": {
+              "description": "Cards past their first learning steps.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "new_per_day": {
+              "description": "New cards a day until the last days before the date, which are kept\nfor review; null on the day and after.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "on_track": {
+              "description": "Keeping to the plan made when the date was set.",
+              "type": "boolean"
+            },
+            "passed": {
+              "description": "The date has passed; the deck is studied as any other again.",
+              "type": "boolean"
+            },
+            "total": {
+              "description": "Cards in the deck and its subdecks.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "date",
+            "days_left",
+            "passed",
+            "on_track",
+            "behind_by",
+            "learned",
+            "total"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "account": {
+          "$ref": "#/$defs/AccountLimitsOut"
+        },
+        "decks": {
+          "items": {
+            "$ref": "#/$defs/DeckLimitsOut"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "account",
+        "decks"
+      ],
+      "type": "object"
+    },
+    "title": "Get limits"
+  },
+  {
+    "_meta": {
+      "openai/widgetAccessible": false,
+      "ui": {
+        "visibility": [
+          "model"
+        ]
+      }
+    },
+    "annotations": {
+      "destructiveHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": true,
+      "title": "List cards"
+    },
+    "description": "Use this when the user wants to see, find or check their cards, and before update_cards or delete_cards. Returns whole cards and editable sources, newest first, by deck or search text, with authenticated media URLs (GET with the connector Bearer token; never speak URLs or markup). Sources show cloze answers, so quiz with start_study_session. Edits to a shared source reach its sibling_card_ids. Page with next_cursor as before_card_id while has_more; trust has_more, not the count.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "before_card_id": {
+          "description": "For the next page: the next_cursor the previous page returned.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "deck": {
+          "default": null,
+          "description": "Filter to one deck by name.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "limit": {
+          "description": "Cards per page, 1-500; 50 when omitted.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "search": {
+          "default": null,
+          "description": "Substring search over fronts and backs.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "name": "list_cards",
+    "outputSchema": {
+      "$defs": {
+        "CardOut": {
+          "properties": {
+            "back_html": {
+              "type": "string"
+            },
+            "card_id": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "cloze_index": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "deck_id": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "front_html": {
+              "type": "string"
+            },
+            "media": {
+              "items": {
+                "$ref": "#/$defs/MediaOut"
+              },
+              "type": "array"
+            },
+            "ord": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "source": {
+              "$ref": "#/$defs/SourceOut"
+            },
+            "type_answer": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "card_id",
+            "deck_id",
+            "ord",
+            "front_html",
+            "back_html",
+            "source",
+            "media"
+          ],
+          "type": "object"
+        },
+        "MediaOut": {
+          "properties": {
+            "filename": {
+              "type": "string"
+            },
+            "media_id": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "mime": {
+              "type": "string"
+            },
+            "size": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "media_id",
+            "url",
+            "mime",
+            "filename",
+            "size"
+          ],
+          "type": "object"
+        },
+        "SourceOut": {
+          "properties": {
+            "back_html": {
+              "type": "string"
+            },
+            "front_html": {
+              "type": "string"
+            },
+            "note_id": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "note_type": {
+              "type": "string"
+            },
+            "read_only_reason": {
+              "description": "Non-null when a legacy import lacks a lossless editable source.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "sibling_card_ids": {
+              "items": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "tags": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "note_type",
+            "front_html",
+            "back_html",
+            "tags",
+            "sibling_card_ids"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "cards": {
+          "items": {
+            "$ref": "#/$defs/CardOut"
+          },
+          "type": "array"
+        },
+        "has_more": {
+          "type": "boolean"
+        },
+        "next_cursor": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "total_count": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cards",
+        "total_count",
+        "has_more"
+      ],
+      "type": "object"
+    },
+    "title": "List cards"
+  },
+  {
+    "_meta": {
+      "openai/widgetAccessible": false,
+      "ui": {
+        "visibility": [
+          "model"
+        ]
+      }
+    },
+    "annotations": {
+      "destructiveHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": true,
+      "title": "List decks"
+    },
+    "description": "Use this when the user asks what flashcard decks they have or what is due, or before choosing a deck to study or add cards to. Lists every deck with its due and new card counts. A name is a path: Parent::Child is a subdeck of Parent, and each deck is followed by its subdecks. A deck's counts already include its subdecks, so never add rows up. An archived deck keeps its place, with archived: true and zero counts.",
+    "inputSchema": {
+      "properties": {},
+      "type": "object"
+    },
+    "name": "list_decks",
+    "outputSchema": {
+      "$defs": {
+        "DeckOut": {
+          "properties": {
+            "archived": {
+              "description": "Archived: kept whole but out of study; its counts are zero.",
+              "type": "boolean"
+            },
+            "due": {
+              "description": "Reviews due now.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "goal": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/GoalOut"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Present when the deck has a goal date."
+            },
+            "name": {
+              "type": "string"
+            },
+            "new": {
+              "description": "New cards available today.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "name",
+            "due",
+            "new",
+            "archived"
+          ],
+          "type": "object"
+        },
+        "GoalOut": {
+          "description": "A deck's goal date and how the deck stands toward it, over the deck\nand its subdecks.",
+          "properties": {
+            "behind_by": {
+              "description": "New cards behind that plan; studying that many more today catches up.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "date": {
+              "description": "The date, YYYY-MM-DD, on the user's calendar.",
+              "type": "string"
+            },
+            "days_left": {
+              "description": "Days until it: 0 on the day, negative once it has passed.",
+              "format": "int64",
+              "type": "integer"
+            },
+            "learned": {
+              "description": "Cards past their first learning steps.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "new_per_day": {
+              "description": "New cards a day until the last days before the date, which are kept\nfor review; null on the day and after.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "on_track": {
+              "description": "Keeping to the plan made when the date was set.",
+              "type": "boolean"
+            },
+            "passed": {
+              "description": "The date has passed; the deck is studied as any other again.",
+              "type": "boolean"
+            },
+            "total": {
+              "description": "Cards in the deck and its subdecks.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "date",
+            "days_left",
+            "passed",
+            "on_track",
+            "behind_by",
+            "learned",
+            "total"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "decks": {
+          "items": {
+            "$ref": "#/$defs/DeckOut"
+          },
+          "type": "array"
+        },
+        "note": {
+          "description": "Present only when the account has no cards at all: what to offer.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "decks"
+      ],
+      "type": "object"
+    },
+    "title": "List decks"
+  },
+  {
+    "_meta": {
+      "openai/widgetAccessible": false,
+      "ui": {
+        "visibility": [
+          "model"
+        ]
+      }
+    },
+    "annotations": {
+      "destructiveHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": true,
+      "title": "List tags"
+    },
+    "description": "Use this when the user wants to study one part of their cards, such as a chapter, a lesson or an exam, and the tag names are needed to narrow start_study_session. Lists the user's tags with how many cards carry each, in one deck (and its subdecks) or across every deck.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "deck": {
+          "default": null,
+          "description": "Deck whose tags to list, as a path (Parent::Child), with its\nsubdecks. Omit for every deck.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "name": "list_tags",
+    "outputSchema": {
+      "$defs": {
+        "TagOut": {
+          "properties": {
+            "cards": {
+              "description": "Cards carrying it.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "cards"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "tags": {
+          "items": {
+            "$ref": "#/$defs/TagOut"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "tags"
+      ],
+      "type": "object"
+    },
+    "title": "List tags"
+  },
+  {
+    "_meta": {
+      "openai/widgetAccessible": true,
+      "ui": {
+        "visibility": [
+          "app"
+        ]
+      }
+    },
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": false,
+      "title": "Study panel: archive"
+    },
+    "description": "Used by Flash's study panel only; never call it yourself. Takes the card on screen out of study after the user tapped Archive (or puts it back on Undo) and returns the panel's next card.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "archived": {
+          "description": "True takes the card out of study; false puts it back (Undo).",
+          "type": "boolean"
+        },
+        "card_id": {
+          "description": "The card on screen.",
+          "format": "int64",
+          "type": "integer"
+        },
+        "session_id": {
+          "description": "The session the panel is showing.",
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "session_id",
+        "card_id",
+        "archived"
+      ],
+      "type": "object"
+    },
+    "name": "panel_archive",
+    "outputSchema": {
+      "$defs": {
+        "DayAheadOut": {
+          "description": "One study day of the week ahead.",
+          "properties": {
+            "at_ms": {
+              "description": "When the study day starts, in ms since the epoch.",
+              "format": "int64",
+              "type": "integer"
+            },
+            "cards": {
+              "description": "How many cards come due that day.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "at_ms",
+            "cards"
+          ],
+          "type": "object"
+        },
+        "NextDueOut": {
+          "description": "When the next cards come, for a session with nothing left to study.",
+          "properties": {
+            "at_ms": {
+              "description": "When the first of them is due, in ms since the epoch.",
+              "format": "int64",
+              "type": "integer"
+            },
+            "cards": {
+              "description": "How many come that day.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "in_days": {
+              "description": "Study days away: 1 is tomorrow, 0 later today.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "at_ms",
+            "in_days",
+            "cards"
+          ],
+          "type": "object"
+        },
+        "PanelCardOut": {
+          "properties": {
+            "card_id": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "front_html": {
+              "type": "string"
+            },
+            "front_lang": {
+              "description": "The front's language, for its `lang`; absent when nothing says it.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "card_id",
+            "front_html"
+          ],
+          "type": "object"
+        },
+        "PanelGoalOut": {
+          "description": "The goal a finished session counted toward, for the panel's finished\nscreen: the web's done-screen block, its words in the account's\nlanguage.",
+          "properties": {
+            "behind": {
+              "description": "Behind its plan: the ring in amber.",
+              "type": "boolean"
+            },
+            "caption": {
+              "description": "How much is learned, then the days left or how to catch up.",
+              "type": "string"
+            },
+            "catch_up": {
+              "description": "New cards \"Study N more\" adds to the deck today; 0 for no button.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "deck": {
+              "description": "The deck the goal is on, as boost_new_today names it.",
+              "type": "string"
+            },
+            "head": {
+              "description": "\"On track for Dec 18\", \"15 cards behind for Dec 18\".",
+              "type": "string"
+            },
+            "percent": {
+              "description": "How much of the deck is learned, out of 100: the ring.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "percent_label": {
+              "description": "The share learned as text (\"40%\"), shown when there is no button.",
+              "type": "string"
+            },
+            "study_more": {
+              "description": "The button's words.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "deck",
+            "percent",
+            "behind",
+            "head",
+            "caption",
+            "percent_label",
+            "catch_up",
+            "study_more"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "card": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PanelCardOut"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "deck": {
+          "description": "The session's deck and tags as asked for: the tags are the header's\nchips, and both let the panel start the session again after\nallowing more new cards; start only.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "deck_label": {
+          "description": "The deck as the site shows it (`Cardio › ECG`), for the panel's\nheader; start only.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "goal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PanelGoalOut"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The goal the session counted toward, once the queue is empty."
+        },
+        "held_by_limit": {
+          "description": "Cards today's limits hold back.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "next_card": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PanelCardOut"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The card expected after this one, its front only, so the panel can\nshow it the moment a grade is tapped and record the grade behind\nit. The grade's own answer still says which card really comes."
+        },
+        "next_due": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NextDueOut"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "When the next cards come, once the queue is empty."
+        },
+        "preload": {
+          "description": "Signed links to warm: this card's back and the next card's front.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "recorded": {
+          "description": "False only from panel_grade, when the card had already been graded\nelsewhere (in the chat) and this grade was not recorded.",
+          "type": "boolean"
+        },
+        "remaining": {
+          "description": "Cards in the queue, this one included.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "reminders_offer": {
+          "description": "Whether the finished screen offers reminders (panel_reminders):\nonly once the queue is empty, and only when the server can send\nthis account reminders it has not turned on.",
+          "type": "boolean"
+        },
+        "reviewed": {
+          "description": "Reviews recorded in this session so far, in the panel or the chat:\nwith `remaining`, the panel's progress (\"2 / 10\").",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "session_id": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "site_url": {
+          "description": "The site's front page, for the finished screen's \"Study on the\nweb\": the cards live there too.",
+          "type": "string"
+        },
+        "state": {
+          "description": "`card` (one to show), `held` (today's limits hold the rest back),\n`caught_up` (nothing due), or `empty` (no cards in the scope at all).",
+          "type": "string"
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "ui_lang": {
+          "description": "The language the account reads Flash in (`panel_lang`); start\nonly.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "view": {
+          "description": "Which of the panel's views this is: always `study`.",
+          "type": "string"
+        },
+        "week": {
+          "description": "The seven study days after today and the cards due on each, once\nthe queue is empty, for the finished screen's week.",
+          "items": {
+            "$ref": "#/$defs/DayAheadOut"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "view",
+        "session_id",
+        "state",
+        "remaining",
+        "reviewed",
+        "held_by_limit",
+        "preload",
+        "recorded",
+        "site_url"
+      ],
+      "type": "object"
+    },
+    "title": "Study panel: archive"
+  },
+  {
+    "_meta": {
+      "openai/widgetAccessible": true,
+      "ui": {
+        "visibility": [
+          "app"
+        ]
+      }
+    },
+    "annotations": {
+      "destructiveHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": true,
+      "title": "Panel: more cards"
+    },
+    "description": "Used by Flash's panel only; never call it yourself (use list_cards). Returns more of the cards the panel is paging through, both sides.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "card_ids": {
+          "description": "Up to 20 of the card_ids the panel was given.",
+          "items": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "card_ids"
+      ],
+      "type": "object"
+    },
+    "name": "panel_cards",
+    "outputSchema": {
+      "$defs": {
+        "PanelBefore": {
+          "properties": {
+            "back_html": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "front_html": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "type": "object"
+        },
+        "PanelShownCard": {
+          "description": "One card whole, both sides, for the panel to show; its media links\nsigned.",
+          "properties": {
+            "back_html": {
+              "type": "string"
+            },
+            "back_lang": {
+              "type": "string"
+            },
+            "before": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/PanelBefore"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "An edited card's sides from before the edit, each only when it\nchanged."
+            },
+            "card_id": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "front_html": {
+              "type": "string"
+            },
+            "front_lang": {
+              "description": "Each side's language, for its `lang`; absent when nothing says it.",
+              "type": "string"
+            },
+            "tags": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "card_id",
+            "front_html",
+            "back_html",
+            "tags"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "cards": {
+          "items": {
+            "$ref": "#/$defs/PanelShownCard"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "cards"
+      ],
+      "type": "object"
+    },
+    "title": "Panel: more cards"
+  },
+  {
+    "_meta": {
+      "openai/widgetAccessible": true,
+      "ui": {
+        "visibility": [
+          "app"
+        ]
+      }
+    },
+    "annotations": {
+      "destructiveHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": true,
+      "title": "Study panel: card to edit"
+    },
+    "description": "Used by Flash's study panel only; never call it yourself (use list_cards). Returns the two fields behind a card for the panel's quick edit.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "card_id": {
+          "description": "The card whose answer to show: the card_id of the front just asked.",
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "card_id"
+      ],
+      "type": "object"
+    },
+    "name": "panel_edit_source",
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "back_html": {
+          "type": "string"
+        },
+        "card_id": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "card_url": {
+          "description": "The card's own page on the site, for Advanced edit. A plain link:\nit signs no one in. The panel may have no other link to the site,\nin a host that hands it only what the model reads (Le Chat).",
+          "type": "string"
+        },
+        "front_html": {
+          "type": "string"
+        },
+        "labels": {
+          "description": "What the two fields are called for this note type, as the card\neditor says it: Front and Back, or Text and Extra for a cloze.",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        },
+        "note_type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "card_id",
+        "note_type",
+        "labels",
+        "front_html",
+        "back_html",
+        "card_url"
+      ],
+      "type": "object"
+    },
+    "title": "Study panel: card to edit"
+  },
+  {
+    "_meta": {
+      "openai/widgetAccessible": true,
+      "ui": {
+        "visibility": [
+          "app"
+        ]
+      }
+    },
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": false,
+      "title": "Study panel: grade"
+    },
+    "description": "Used by Flash's study panel only; never call it yourself (use submit_review). Records the grade the user tapped and returns the panel's next card.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "answer_ms": {
+          "default": null,
+          "description": "How long the card's front was on screen before the grade, in ms,\nas the panel measured it.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "card_id": {
+          "description": "The card the user graded.",
+          "format": "int64",
+          "type": "integer"
+        },
+        "rating": {
+          "description": "1=Again 2=Hard 3=Good 4=Easy",
+          "format": "int64",
+          "type": "integer"
+        },
+        "session_id": {
+          "description": "The session the panel is showing.",
+          "format": "int64",
+          "type": "integer"
+        },
+        "ui_locale": {
+          "default": null,
+          "description": "The language the host told the panel its person reads (a BCP 47\ntag), sent with a page's first grade.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "session_id",
+        "card_id",
+        "rating"
+      ],
+      "type": "object"
+    },
+    "name": "panel_grade",
+    "outputSchema": {
+      "$defs": {
+        "DayAheadOut": {
+          "description": "One study day of the week ahead.",
+          "properties": {
+            "at_ms": {
+              "description": "When the study day starts, in ms since the epoch.",
+              "format": "int64",
+              "type": "integer"
+            },
+            "cards": {
+              "description": "How many cards come due that day.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "at_ms",
+            "cards"
+          ],
+          "type": "object"
+        },
+        "NextDueOut": {
+          "description": "When the next cards come, for a session with nothing left to study.",
+          "properties": {
+            "at_ms": {
+              "description": "When the first of them is due, in ms since the epoch.",
+              "format": "int64",
+              "type": "integer"
+            },
+            "cards": {
+              "description": "How many come that day.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "in_days": {
+              "description": "Study days away: 1 is tomorrow, 0 later today.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "at_ms",
+            "in_days",
+            "cards"
+          ],
+          "type": "object"
+        },
+        "PanelCardOut": {
+          "properties": {
+            "card_id": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "front_html": {
+              "type": "string"
+            },
+            "front_lang": {
+              "description": "The front's language, for its `lang`; absent when nothing says it.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "card_id",
+            "front_html"
+          ],
+          "type": "object"
+        },
+        "PanelGoalOut": {
+          "description": "The goal a finished session counted toward, for the panel's finished\nscreen: the web's done-screen block, its words in the account's\nlanguage.",
+          "properties": {
+            "behind": {
+              "description": "Behind its plan: the ring in amber.",
+              "type": "boolean"
+            },
+            "caption": {
+              "description": "How much is learned, then the days left or how to catch up.",
+              "type": "string"
+            },
+            "catch_up": {
+              "description": "New cards \"Study N more\" adds to the deck today; 0 for no button.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "deck": {
+              "description": "The deck the goal is on, as boost_new_today names it.",
+              "type": "string"
+            },
+            "head": {
+              "description": "\"On track for Dec 18\", \"15 cards behind for Dec 18\".",
+              "type": "string"
+            },
+            "percent": {
+              "description": "How much of the deck is learned, out of 100: the ring.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "percent_label": {
+              "description": "The share learned as text (\"40%\"), shown when there is no button.",
+              "type": "string"
+            },
+            "study_more": {
+              "description": "The button's words.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "deck",
+            "percent",
+            "behind",
+            "head",
+            "caption",
+            "percent_label",
+            "catch_up",
+            "study_more"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "card": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PanelCardOut"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "deck": {
+          "description": "The session's deck and tags as asked for: the tags are the header's\nchips, and both let the panel start the session again after\nallowing more new cards; start only.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "deck_label": {
+          "description": "The deck as the site shows it (`Cardio › ECG`), for the panel's\nheader; start only.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "goal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PanelGoalOut"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The goal the session counted toward, once the queue is empty."
+        },
+        "held_by_limit": {
+          "description": "Cards today's limits hold back.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "next_card": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PanelCardOut"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The card expected after this one, its front only, so the panel can\nshow it the moment a grade is tapped and record the grade behind\nit. The grade's own answer still says which card really comes."
+        },
+        "next_due": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NextDueOut"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "When the next cards come, once the queue is empty."
+        },
+        "preload": {
+          "description": "Signed links to warm: this card's back and the next card's front.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "recorded": {
+          "description": "False only from panel_grade, when the card had already been graded\nelsewhere (in the chat) and this grade was not recorded.",
+          "type": "boolean"
+        },
+        "remaining": {
+          "description": "Cards in the queue, this one included.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "reminders_offer": {
+          "description": "Whether the finished screen offers reminders (panel_reminders):\nonly once the queue is empty, and only when the server can send\nthis account reminders it has not turned on.",
+          "type": "boolean"
+        },
+        "reviewed": {
+          "description": "Reviews recorded in this session so far, in the panel or the chat:\nwith `remaining`, the panel's progress (\"2 / 10\").",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "session_id": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "site_url": {
+          "description": "The site's front page, for the finished screen's \"Study on the\nweb\": the cards live there too.",
+          "type": "string"
+        },
+        "state": {
+          "description": "`card` (one to show), `held` (today's limits hold the rest back),\n`caught_up` (nothing due), or `empty` (no cards in the scope at all).",
+          "type": "string"
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "ui_lang": {
+          "description": "The language the account reads Flash in (`panel_lang`); start\nonly.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "view": {
+          "description": "Which of the panel's views this is: always `study`.",
+          "type": "string"
+        },
+        "week": {
+          "description": "The seven study days after today and the cards due on each, once\nthe queue is empty, for the finished screen's week.",
+          "items": {
+            "$ref": "#/$defs/DayAheadOut"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "view",
+        "session_id",
+        "state",
+        "remaining",
+        "reviewed",
+        "held_by_limit",
+        "preload",
+        "recorded",
+        "site_url"
+      ],
+      "type": "object"
+    },
+    "title": "Study panel: grade"
+  },
+  {
+    "_meta": {
+      "openai/widgetAccessible": true,
+      "ui": {
+        "visibility": [
+          "app"
+        ]
+      }
+    },
+    "annotations": {
+      "destructiveHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false,
+      "title": "Study panel: remind me"
+    },
+    "description": "Used by Flash's study panel only; never call it yourself. Turns on reminders when cards are due, at this time of day, after the user tapped the panel's offer.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "timezone": {
+          "default": null,
+          "description": "The browser's IANA time zone, e.g. `America/New_York`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "name": "panel_reminders",
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "message": {
+          "description": "What was set up, for the person to read.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "on": {
+          "description": "Whether reminders are on now.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "on"
+      ],
+      "type": "object"
+    },
+    "title": "Study panel: remind me"
+  },
+  {
+    "_meta": {
+      "openai/widgetAccessible": true,
+      "ui": {
+        "visibility": [
+          "app"
+        ]
+      }
+    },
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": false,
+      "title": "Study panel: save edit"
+    },
+    "description": "Used by Flash's study panel only; never call it yourself (use update_cards). Saves the panel's quick edit of a card's two fields and returns the card as it now reads.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "back_html": {
+          "type": "string"
+        },
+        "card_id": {
+          "description": "The card the panel is showing.",
+          "format": "int64",
+          "type": "integer"
+        },
+        "front_html": {
+          "description": "The note's two fields as the quick edit left them.",
+          "type": "string"
+        },
+        "next_card_id": {
+          "default": null,
+          "description": "The card the panel expects after it, which the edit may also have\nchanged (a sibling of the same note).",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "card_id",
+        "front_html",
+        "back_html"
+      ],
+      "type": "object"
+    },
+    "name": "panel_save_edit",
+    "outputSchema": {
+      "$defs": {
+        "PanelAnswerOut": {
+          "description": "The back of a card for the panel, its media links signed.",
+          "properties": {
+            "back_html": {
+              "type": "string"
+            },
+            "back_lang": {
+              "description": "The back's language, for its `lang`; absent when nothing says it.",
+              "type": "string"
+            },
+            "card_id": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "comes_back_in_ms": {
+              "description": "How long until the card comes back after each grade, Again, Hard,\nGood, Easy, in ms: what the grade buttons say.",
+              "items": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "maxItems": 4,
+              "minItems": 4,
+              "type": [
+                "array",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "card_id",
+            "back_html"
+          ],
+          "type": "object"
+        },
+        "PanelCardOut": {
+          "properties": {
+            "card_id": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "front_html": {
+              "type": "string"
+            },
+            "front_lang": {
+              "description": "The front's language, for its `lang`; absent when nothing says it.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "card_id",
+            "front_html"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "answer": {
+          "$ref": "#/$defs/PanelAnswerOut"
+        },
+        "card": {
+          "$ref": "#/$defs/PanelCardOut"
+        },
+        "next_card": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PanelCardOut"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "preload": {
+          "description": "Images to fetch ahead, as a study view's.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "card",
+        "answer",
+        "preload"
+      ],
+      "type": "object"
+    },
+    "title": "Study panel: save edit"
+  },
+  {
+    "_meta": {
+      "openai/widgetAccessible": true,
+      "ui": {
+        "visibility": [
+          "app"
+        ]
+      }
+    },
+    "annotations": {
+      "destructiveHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": true,
+      "title": "Study panel: show answer"
+    },
+    "description": "Used by Flash's study panel only; never call it yourself (use show_answer). Returns a card's back for the panel.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "card_id": {
+          "description": "The card whose answer to show: the card_id of the front just asked.",
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "card_id"
+      ],
+      "type": "object"
+    },
+    "name": "panel_show_answer",
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "back_html": {
+          "type": "string"
+        },
+        "back_lang": {
+          "description": "The back's language, for its `lang`; absent when nothing says it.",
+          "type": "string"
+        },
+        "card_id": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "comes_back_in_ms": {
+          "description": "How long until the card comes back after each grade, Again, Hard,\nGood, Easy, in ms: what the grade buttons say.",
+          "items": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "card_id",
+        "back_html"
+      ],
+      "type": "object"
+    },
+    "title": "Study panel: show answer"
+  },
+  {
+    "_meta": {
+      "openai/widgetAccessible": false,
+      "ui": {
+        "visibility": [
+          "model"
+        ]
+      }
+    },
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": false,
+      "title": "Rename or move deck"
+    },
+    "description": "Use this when the user asks to rename a deck, nest it under another, or pull it out to the top level. new_name is the full path: Pharm::Cardio moves Cardio into Pharm (created if missing). Its subdecks, cards and review history follow. Refused if a deck already has that name (decks are never merged) or the target is inside the deck itself.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "deck": {
+          "description": "The deck's current full name, e.g. \"Cardio\" or \"Pharm::Cardio\".",
+          "type": "string"
+        },
+        "new_name": {
+          "description": "Its new full name. \"Pharm::Cardio\" puts it inside Pharm; a name\nwith no \"::\" puts it at the top level.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "deck",
+        "new_name"
+      ],
+      "type": "object"
+    },
+    "name": "rename_deck",
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "decks_renamed": {
+          "description": "Every deck that has a new name: the deck and its subdecks.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "name": {
+          "description": "The deck's full name now.",
+          "type": "string"
+        },
+        "renamed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "renamed",
+        "name",
+        "decks_renamed"
+      ],
+      "type": "object"
+    },
+    "title": "Rename or move deck"
+  },
+  {
+    "_meta": {
+      "openai/outputTemplate": "{PANEL_URI}",
+      "openai/toolInvocation/invoked": "Card restored",
+      "openai/toolInvocation/invoking": "Restoring your card",
+      "openai/widgetAccessible": false,
+      "ui": {
+        "resourceUri": "{PANEL_URI}",
+        "visibility": [
+          "model"
+        ]
+      },
+      "ui/resourceUri": "{PANEL_URI}"
+    },
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": false,
+      "title": "Restore cards"
+    },
+    "description": "Use this when the user wants an earlier version of a card back, for example after an edit they did not want. Every edit keeps the text it replaced. Give card_id alone to list the card's earlier versions, newest first, and confirm with the user which one; then call again with its revision_id. A restore rewrites the card's source and its sibling cards in place, keeping their schedules and review history, and keeps the text it replaces too. A restore that would remove cards is refused.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "card_id": {
+          "description": "The card whose earlier versions to list or restore, from\nlist_cards. A version covers the card's whole source, siblings\nincluded.",
+          "format": "int64",
+          "type": "integer"
+        },
+        "revision_id": {
+          "default": null,
+          "description": "The version to put back: a revision_id this tool listed for the\ncard, or one update_cards returned. Omit to list the versions.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "card_id"
+      ],
+      "type": "object"
+    },
+    "name": "restore_cards",
+    "outputSchema": {
+      "$defs": {
+        "RevisionOut": {
+          "description": "One earlier version of a card's source.",
+          "properties": {
+            "back_preview": {
+              "description": "The source's back as plain text, shortened.",
+              "type": "string"
+            },
+            "front_preview": {
+              "description": "The source's front as plain text, shortened.",
+              "type": "string"
+            },
+            "note_type": {
+              "type": "string"
+            },
+            "replaced_at_ms": {
+              "description": "When an edit replaced this version, ms since the epoch.",
+              "format": "int64",
+              "type": "integer"
+            },
+            "replaced_by": {
+              "description": "What made that edit: web, mcp, api, sync or restore.",
+              "type": "string"
+            },
+            "revision_id": {
+              "description": "Pass as revision_id to restore this version.",
+              "format": "int64",
+              "type": "integer"
+            },
+            "tags": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "revision_id",
+            "replaced_at_ms",
+            "replaced_by",
+            "note_type",
+            "front_preview",
+            "back_preview",
+            "tags"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "card_ids": {
+          "items": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "created": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "deck_totals": {
+          "items": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "format": "int64",
+                "type": "integer"
+              },
+              {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              }
+            ],
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "note": {
+          "description": "How to reply when the cards are already on screen; on new cards,\nalso where else the user can study them.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "revision_ids": {
+          "description": "One per source in source_ids: the earlier version of that source\nthis edit kept, which restore_cards can put back; null when the\nedit changed nothing.",
+          "items": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "type": "array"
+        },
+        "revisions": {
+          "description": "The card's earlier versions, newest first; empty after a restore\nand for a card that was never edited.",
+          "items": {
+            "$ref": "#/$defs/RevisionOut"
+          },
+          "type": "array"
+        },
+        "source_ids": {
+          "items": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "updated": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "revisions"
+      ],
+      "type": "object"
+    },
+    "title": "Restore cards"
+  },
+  {
+    "_meta": {
+      "openai/widgetAccessible": false,
+      "ui": {
+        "visibility": [
+          "model"
+        ]
+      }
+    },
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": false,
+      "title": "Set limits"
+    },
+    "description": "Use this when the user wants to change how many new cards or reviews they get per day, for every deck or for one, or gives the date they need to know a deck by (an exam, a test, a deadline): goal_date paces that deck toward it. Without a deck it sets the account defaults; with a deck it sets that deck's override (-1 clears it so the deck inherits the account default). Omitted fields are left unchanged. For extra new cards today only, use boost_new_today.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "deck": {
+          "default": null,
+          "description": "Deck name to set an override for; omit to set the account defaults.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "goal_date": {
+          "default": null,
+          "description": "With a deck only: the date the user needs to know it by (an exam, a\ntest, a trip, a deadline), YYYY-MM-DD on their calendar. Flash paces\nthe deck's new cards to finish before it and brings back, in the\nlast days, the cards that need it. An empty string clears it; omit\nto leave it unchanged.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "new_per_day": {
+          "description": "New cards per day. Omit to leave unchanged; for a deck, -1 clears\nthe override so it inherits the account default.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "reviews_per_day": {
+          "description": "Max reviews per day. Omit to leave unchanged; for a deck, -1 clears\nthe override so it inherits the account default.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "name": "set_limits",
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "saved": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "saved"
+      ],
+      "type": "object"
+    },
+    "title": "Set limits"
+  },
+  {
+    "_meta": {
+      "openai/widgetAccessible": false,
+      "ui": {
+        "visibility": [
+          "model"
+        ]
+      }
+    },
+    "annotations": {
+      "destructiveHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": true,
+      "title": "Show answer"
+    },
+    "description": "Use this when the user gives up on the card just asked in a study session, or asks for its answer. Returns the card's back and records nothing: tell the user the answer, then call submit_review with rating 1 (Again). To read whole cards outside a session, use list_cards.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "card_id": {
+          "description": "The card whose answer to show: the card_id of the front just asked.",
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "card_id"
+      ],
+      "type": "object"
+    },
+    "name": "show_answer",
+    "outputSchema": {
+      "$defs": {
+        "MediaOut": {
+          "properties": {
+            "filename": {
+              "type": "string"
+            },
+            "media_id": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "mime": {
+              "type": "string"
+            },
+            "size": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "media_id",
+            "url",
+            "mime",
+            "filename",
+            "size"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "back_html": {
+          "type": "string"
+        },
+        "media": {
+          "items": {
+            "$ref": "#/$defs/MediaOut"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "back_html",
+        "media"
+      ],
+      "type": "object"
+    },
+    "title": "Show answer"
+  },
+  {
+    "_meta": {
+      "openai/outputTemplate": "{PANEL_URI}",
+      "openai/toolInvocation/invoked": "Cards ready",
+      "openai/toolInvocation/invoking": "Opening your cards",
+      "openai/widgetAccessible": true,
+      "ui": {
+        "resourceUri": "{PANEL_URI}",
+        "visibility": [
+          "model",
+          "app"
+        ]
+      },
+      "ui/resourceUri": "{PANEL_URI}"
+    },
+    "annotations": {
+      "destructiveHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false,
+      "title": "Start study session"
+    },
+    "description": "Use this when the user wants to study, review, practice, be quizzed on or drill their flashcards, including cards made moments ago. Starts a spaced-repetition session over the cards due now: all of them, one deck (with its subdecks), or the cards carrying every given tag (list_tags has the names). Progress counts only for cards asked here and graded with submit_review, so ask each card from this session, never from the conversation. To make new cards use create_cards. Returns the first card's front (ask it and wait for the user's answer), how many cards are due, and grading_mode. Render front_html for display or interpret it for speech; present cloze gaps without revealing answers, and never read raw markup or URLs aloud. Fetch media URLs with the connector Bearer token if needed. Follow grading_mode for the whole session. Internal fields (ids, counts) are never read aloud.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "deck": {
+          "default": null,
+          "description": "Deck name to study (omit to study everything due). A deck includes\nits subdecks; name Parent::Child to study one subdeck.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tag": {
+          "default": null,
+          "description": "One tag to study, e.g. \"exam-2\": the same as a `tags` of one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tags": {
+          "default": null,
+          "description": "Tags the cards must all carry, e.g. [\"exam-2\", \"cardio\"], at most\nten. With a deck they narrow that deck. Names come from list_tags.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "name": "start_study_session",
+    "outputSchema": {
+      "$defs": {
+        "CardFrontOut": {
+          "description": "Rich question only. Editable source is deliberately absent during study.",
+          "properties": {
+            "card_id": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "front_html": {
+              "type": "string"
+            },
+            "media": {
+              "items": {
+                "$ref": "#/$defs/MediaOut"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "card_id",
+            "front_html",
+            "media"
+          ],
+          "type": "object"
+        },
+        "MediaOut": {
+          "properties": {
+            "filename": {
+              "type": "string"
+            },
+            "media_id": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "mime": {
+              "type": "string"
+            },
+            "size": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "media_id",
+            "url",
+            "mime",
+            "filename",
+            "size"
+          ],
+          "type": "object"
+        },
+        "NextDueOut": {
+          "description": "When the next cards come, for a session with nothing left to study.",
+          "properties": {
+            "at_ms": {
+              "description": "When the first of them is due, in ms since the epoch.",
+              "format": "int64",
+              "type": "integer"
+            },
+            "cards": {
+              "description": "How many come that day.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "in_days": {
+              "description": "Study days away: 1 is tomorrow, 0 later today.",
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "at_ms",
+            "in_days",
+            "cards"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "cards_due": {
+          "description": "Cards in this session's queue right now.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "first_card": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CardFrontOut"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "First card to ask, or null when nothing is due."
+        },
+        "grading_mode": {
+          "description": "How to report grades for the whole session; follow it exactly.",
+          "type": "string"
+        },
+        "next_due": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NextDueOut"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Present only when the queue is empty and more cards are coming:\nwhen the next ones are due."
+        },
+        "note": {
+          "description": "Present only when the queue is empty: why, and what to do next.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "session_id": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "session_id",
+        "cards_due",
+        "grading_mode"
+      ],
+      "type": "object"
+    },
+    "title": "Start study session"
+  },
+  {
+    "_meta": {
+      "openai/widgetAccessible": false,
+      "ui": {
+        "visibility": [
+          "model"
+        ]
+      }
+    },
+    "annotations": {
+      "destructiveHint": false,
+      "openWorldHint": false,
+      "readOnlyHint": false,
+      "title": "Submit review"
+    },
+    "description": "Use this after the user answers the card just asked in a study session: records how well they knew it, which sets when the card comes back, and returns the next card. Grade STRICTLY against the card's back: facts, numbers, doses, and units must match precisely. An imprecise answer is 1 (Again), never 'close enough'; only phrasing may differ. Part of an answer is a miss, so '60' for '60 to 100 bpm' is 1. 1=Again (wrong, blank, or anything the card asks for left out), 2=Hard (the whole answer, but slowly or unsurely), 3=Good (the whole answer), 4=Easy (the whole answer at once). 2, 3 and 4 all record that the user knew it. State the exact answer on a miss, then immediately ask next_card's front. A null next_card ends the session. Wrap up briefly.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "card_id": {
+          "description": "The card just asked: the card_id of the front the user answered.",
+          "format": "int64",
+          "type": "integer"
+        },
+        "rating": {
+          "description": "1=Again 2=Hard 3=Good 4=Easy",
+          "format": "int64",
+          "type": "integer"
+        },
+        "session_id": {
+          "description": "The session_id start_study_session returned.",
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "session_id",
+        "card_id",
+        "rating"
+      ],
+      "type": "object"
+    },
+    "name": "submit_review",
+    "outputSchema": {
+      "$defs": {
+        "CardFrontOut": {
+          "description": "Rich question only. Editable source is deliberately absent during study.",
+          "properties": {
+            "card_id": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "front_html": {
+              "type": "string"
+            },
+            "media": {
+              "items": {
+                "$ref": "#/$defs/MediaOut"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "card_id",
+            "front_html",
+            "media"
+          ],
+          "type": "object"
+        },
+        "MediaOut": {
+          "properties": {
+            "filename": {
+              "type": "string"
+            },
+            "media_id": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "mime": {
+              "type": "string"
+            },
+            "size": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "media_id",
+            "url",
+            "mime",
+            "filename",
+            "size"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "next_card": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CardFrontOut"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Next card to ask immediately, or null when the session is finished."
+        },
+        "note": {
+          "description": "Present only when the queue is empty: why, and what to do next.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "recorded": {
+          "type": "boolean"
+        },
+        "remaining": {
+          "description": "Cards left in the queue.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "recorded",
+        "remaining"
+      ],
+      "type": "object"
+    },
+    "title": "Submit review"
+  },
+  {
+    "_meta": {
+      "openai/widgetAccessible": false,
+      "ui": {
+        "visibility": [
+          "model"
+        ]
+      }
+    },
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": false,
+      "title": "Unarchive deck"
+    },
+    "description": "Use this when the user wants to study an archived deck again. Puts it back into study: its cards come back with the review history they had, so whatever came due while it was archived is due now, within the daily limits. Its subdecks come back with it, and so do the decks it sits in.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "deck": {
+          "description": "The deck's full name, e.g. \"Pharm::Cardio\" (list_decks has the\nnames).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "deck"
+      ],
+      "type": "object"
+    },
+    "name": "unarchive_deck",
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "saved": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "saved"
+      ],
+      "type": "object"
+    },
+    "title": "Unarchive deck"
+  },
+  {
+    "_meta": {
+      "openai/outputTemplate": "{PANEL_URI}",
+      "openai/toolInvocation/invoked": "Cards updated",
+      "openai/toolInvocation/invoking": "Saving your edits",
+      "openai/widgetAccessible": false,
+      "ui": {
+        "resourceUri": "{PANEL_URI}",
+        "visibility": [
+          "model"
+        ]
+      },
+      "ui/resourceUri": "{PANEL_URI}"
+    },
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false,
+      "readOnlyHint": false,
+      "title": "Update cards"
+    },
+    "description": "Use this when the user asks to fix, reword, correct or retag cards they already have. Changes 1-500 cards atomically: give card_id and only the fields to change (front_html, back_html, tags); the rest stay, cards keep their schedule and review history, and restore_cards can undo the edit. Read list_cards first; for a shared source copy its sibling_card_ids, one edit per source. The note type stays; an edit that would remove cards is refused (use delete_cards). Follow create_cards' field notes.",
+    "inputSchema": {
+      "$defs": {
+        "CardPatch": {
+          "additionalProperties": false,
+          "properties": {
+            "back_html": {
+              "default": null,
+              "description": "The answer to exactly what the front asks, as short as it can be while complete. Anything more (why, an example, a source) comes after the answer, set apart.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "back_speech": {
+              "description": "With a back_html it changes: the new back's speech blocks.",
+              "items": {
+                "$ref": "#/$defs/SpeechBlockArg"
+              },
+              "type": [
+                "array",
+                "null"
+              ]
+            },
+            "card_id": {
+              "description": "The card to change, from list_cards.",
+              "format": "int64",
+              "type": "integer"
+            },
+            "front_html": {
+              "default": null,
+              "description": "The prompt, answerable on its own: one question, cue or cloze sentence carrying everything needed to answer it (the choices of a multiple-choice question, the context a case depends on). One idea per card: a list, a multi-part rule or a comparison becomes several cards, or a cloze with one blank per part.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "front_speech": {
+              "description": "With a front_html it changes: the new front's speech blocks (see\ncreate_cards).",
+              "items": {
+                "$ref": "#/$defs/SpeechBlockArg"
+              },
+              "type": [
+                "array",
+                "null"
+              ]
+            },
+            "sibling_card_ids": {
+              "default": [],
+              "description": "Every card made from this card's source, this card included,\nexactly as list_cards shows them in source.sibling_card_ids. Needed\nwhen the source makes more than one card (a reversed pair, a cloze\nwith several gaps).",
+              "items": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "tags": {
+              "default": null,
+              "description": "A few short lowercase topic words (a chapter, a lesson, a theme), so the user can study one part later.",
+              "items": {
+                "type": "string"
+              },
+              "type": [
+                "array",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "card_id"
+          ],
+          "type": "object"
+        },
+        "CueBlock": {
+          "additionalProperties": false,
+          "properties": {
+            "say": {
+              "description": "\"equation\" for a formula too long to read, \"look\" for anything\nthat cannot be said aloud.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "say"
+          ],
+          "type": "object"
+        },
+        "SayBlock": {
+          "additionalProperties": false,
+          "properties": {
+            "lang": {
+              "description": "The language the words are in: an ISO 639-1 code, with a region\nwhere the accent matters (\"es-MX\").",
+              "type": "string"
+            },
+            "text": {
+              "description": "The words, as they are said.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "lang",
+            "text"
+          ],
+          "type": "object"
+        },
+        "SpeechBlockArg": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SayBlock"
+            },
+            {
+              "$ref": "#/$defs/CueBlock"
+            }
+          ],
+          "description": "One block of what is read aloud: words in one language, or a cue."
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "cards": {
+          "description": "On both sides keep the material's own terms, names and numbers. Write what plain text loses as HTML (10<sup>5</sup>, not 105; H<sub>2</sub>O; <br> between lines), and write each text in one script, as the material or the user writes it, never switching alphabets inside a word.",
+          "items": {
+            "$ref": "#/$defs/CardPatch"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "cards"
+      ],
+      "type": "object"
+    },
+    "name": "update_cards",
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "card_ids": {
+          "items": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "created": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "deck_totals": {
+          "items": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "format": "int64",
+                "type": "integer"
+              },
+              {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              }
+            ],
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "note": {
+          "description": "How to reply when the cards are already on screen; on new cards,\nalso where else the user can study them.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "revision_ids": {
+          "description": "One per source in source_ids: the earlier version of that source\nthis edit kept, which restore_cards can put back; null when the\nedit changed nothing.",
+          "items": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "type": "array"
+        },
+        "source_ids": {
+          "items": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "updated": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "source_ids",
+        "card_ids",
+        "created",
+        "updated",
+        "deck_totals",
+        "revision_ids"
+      ],
+      "type": "object"
+    },
+    "title": "Update cards"
+  }
+]

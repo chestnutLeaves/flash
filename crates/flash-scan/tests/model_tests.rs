@@ -50,7 +50,7 @@ fn functions_carry_kind_visibility_params_and_lets() {
             pub(crate) fn helper(user: UserId) {}
             fn private(&self) {}
         }
-        pub trait CommunityOps {
+        pub trait DeckOps {
             fn publish(&self, user: UserId, deck: DeckId, now: i64) -> Result<()>;
             fn defaulted(&self) {}
         }
@@ -94,7 +94,7 @@ fn functions_carry_kind_visibility_params_and_lets() {
     assert_eq!(
         publish.kind,
         FnKind::TraitDecl {
-            trait_: "CommunityOps".into(),
+            trait_: "DeckOps".into(),
             has_default: false
         }
     );

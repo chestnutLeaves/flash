@@ -1,8 +1,9 @@
 //! Users and their settings.
 
 use flash_core::{GradingMode, UserId, UserSettings};
-use rusqlite::{params, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension};
 
+use crate::repo::ids::{next_id, IdTable};
 use crate::{exec_expect_row, Result, Store, StoreError};
 
 /// Lockout window for repeated password failures (see
@@ -17,6 +18,49 @@ pub struct AccountRow {
     pub email: Option<String>,
     pub role: String,
     pub theme: String,
+}
+
+/// Where an account's language came from: the browser it signs in with,
+/// the assistant it studies in, its phone, or the person's own choice
+/// (`locale_source`; `account_locales` keeps the three learned ones).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LocaleSource {
+    Browser,
+    Host,
+    App,
+    Chosen,
+}
+
+impl LocaleSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            LocaleSource::Browser => "browser",
+            LocaleSource::Host => "host",
+            LocaleSource::App => "app",
+            LocaleSource::Chosen => "chosen",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<LocaleSource> {
+        match s {
+            "browser" => Some(LocaleSource::Browser),
+            "host" => Some(LocaleSource::Host),
+            "app" => Some(LocaleSource::App),
+            "chosen" => Some(LocaleSource::Chosen),
+            _ => None,
+        }
+    }
+}
+
+/// One learned signal of an account's language, first and last seen.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocaleSignal {
+    pub source: LocaleSource,
+    pub tag: String,
+    /// A browser's preferences, most wanted first ("es-MX,es,en").
+    pub prefs: Option<String>,
+    pub first_at: i64,
+    pub last_at: i64,
 }
 
 /// What the password login handler needs about an account.
@@ -50,6 +94,82 @@ pub struct AdminUserRow {
     pub mcp_clients: Vec<String>,
 }
 
+// The account writes an enrollment or a reset makes, on a connection or
+// a transaction the caller holds (`Store::with_tx`): each `Store`
+// method below is its `_tx` form on the store's own connection.
+
+/// `Store::create_user` on `conn`.
+pub fn create_user_tx(
+    conn: &Connection,
+    display_name: &str,
+    email: Option<&str>,
+    role: &str,
+    now_ms: i64,
+) -> Result<UserId> {
+    let id = next_id(conn, IdTable::Users)?;
+    conn.execute(
+        "INSERT INTO users (id, display_name, email, role, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![id, display_name, email, role, now_ms],
+    )?;
+    // The application default is the source of truth for a new account's
+    // settings; the column defaults in the schema are history.
+    let defaults = UserSettings::default();
+    conn.execute(
+        "INSERT INTO user_settings (user_id, timezone) VALUES (?1, ?2)",
+        params![id, defaults.timezone],
+    )?;
+    Ok(UserId::from_db(id))
+}
+
+/// `Store::email_taken` on `conn`.
+pub fn email_taken_tx(conn: &Connection, email: &str) -> Result<bool> {
+    Ok(conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM users WHERE email = ?1)",
+        [email],
+        |r| r.get(0),
+    )?)
+}
+
+/// `Store::set_password_hash` on `conn`.
+pub fn set_password_hash_tx(conn: &Connection, user: UserId, phc: Option<&str>) -> Result<()> {
+    exec_expect_row(
+        conn,
+        "user",
+        "UPDATE users SET password_hash = ?1 WHERE id = ?2",
+        params![phc, user.raw()],
+    )
+}
+
+/// `Store::clear_password_failures` on `conn`.
+pub fn clear_password_failures_tx(conn: &Connection, user: UserId) -> Result<()> {
+    conn.execute(
+        "UPDATE users SET pw_failed_count = 0, pw_failed_at = NULL WHERE id = ?1",
+        [user.raw()],
+    )?;
+    Ok(())
+}
+
+/// `Store::account_row` on `conn`.
+pub fn account_row_tx(conn: &Connection, user: UserId) -> Result<AccountRow> {
+    conn.query_row(
+        "SELECT u.display_name, u.email, u.role, s.theme
+         FROM users u JOIN user_settings s ON s.user_id = u.id
+         WHERE s.user_id = ?1",
+        [user.raw()],
+        |r| {
+            Ok(AccountRow {
+                display_name: r.get(0)?,
+                email: r.get(1)?,
+                role: r.get(2)?,
+                theme: r.get(3)?,
+            })
+        },
+    )
+    .optional()?
+    .ok_or(StoreError::NotFound("user"))
+}
+
 impl Store {
     /// Creates a user with default settings; returns the new id.
     pub fn create_user(
@@ -59,48 +179,44 @@ impl Store {
         role: &str,
         now_ms: i64,
     ) -> Result<UserId> {
-        let conn = self.conn();
-        conn.execute(
-            "INSERT INTO users (display_name, email, role, created_at)
-             VALUES (?1, ?2, ?3, ?4)",
-            params![display_name, email, role, now_ms],
-        )?;
-        let id = conn.last_insert_rowid();
-        // The application default is the source of truth for a new account's
-        // settings; the column defaults in the schema are history.
-        let defaults = UserSettings::default();
-        conn.execute(
-            "INSERT INTO user_settings (user_id, timezone) VALUES (?1, ?2)",
-            params![id, defaults.timezone],
-        )?;
-        Ok(UserId::from_db(id))
+        // Both rows or neither: an account without settings breaks every
+        // page it opens.
+        self.with_tx(|tx| create_user_tx(tx, display_name, email, role, now_ms))
     }
 
     pub fn get_settings(&self, user: UserId) -> Result<UserSettings> {
         let conn = self.conn();
         conn.query_row(
             "SELECT grading_mode, desired_retention, new_per_day, day_cutoff_hour, timezone,
-                    fsrs_params, reviews_per_day, boost_new, boost_day
+                    fsrs_params, reviews_per_day, boost_new, boost_day, due_by_day
              FROM user_settings WHERE user_id = ?1",
             [user.raw()],
             |r| {
                 Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, f64>(1)?,
-                    r.get::<_, i64>(2)?,
-                    r.get::<_, i64>(3)?,
-                    r.get::<_, String>(4)?,
-                    r.get::<_, Option<String>>(5)?,
-                    r.get::<_, i64>(6)?,
-                    r.get::<_, i64>(7)?,
-                    r.get::<_, i64>(8)?,
+                    (
+                        r.get::<_, String>(0)?,
+                        r.get::<_, f64>(1)?,
+                        r.get::<_, i64>(2)?,
+                        r.get::<_, i64>(3)?,
+                        r.get::<_, String>(4)?,
+                    ),
+                    (
+                        r.get::<_, Option<String>>(5)?,
+                        r.get::<_, i64>(6)?,
+                        r.get::<_, i64>(7)?,
+                        r.get::<_, i64>(8)?,
+                        r.get::<_, bool>(9)?,
+                    ),
                 ))
             },
         )
         .optional()?
         .ok_or(StoreError::NotFound("user_settings"))
         .and_then(
-            |(mode, retention, new_per_day, cutoff, tz, params_json, reviews, boost, boost_day)| {
+            |(
+                (mode, retention, new_per_day, cutoff, tz),
+                (params_json, reviews, boost, boost_day, due_by_day),
+            )| {
                 let fsrs_params =
                     match params_json {
                         None => None,
@@ -119,6 +235,7 @@ impl Store {
                     day_cutoff_hour: cutoff as u8,
                     timezone: tz,
                     fsrs_params,
+                    due_by_day,
                 })
             },
         )
@@ -170,12 +287,7 @@ impl Store {
 
     /// Sets or clears (None) the password verifier.
     pub fn set_password_hash(&self, user: UserId, phc: Option<&str>) -> Result<()> {
-        exec_expect_row(
-            &self.conn(),
-            "user",
-            "UPDATE users SET password_hash = ?1 WHERE id = ?2",
-            params![phc, user.raw()],
-        )
+        set_password_hash_tx(&self.conn(), user, phc)
     }
 
     pub fn get_password_hash(&self, user: UserId) -> Result<Option<String>> {
@@ -204,21 +316,12 @@ impl Store {
     }
 
     pub fn clear_password_failures(&self, user: UserId) -> Result<()> {
-        self.conn().execute(
-            "UPDATE users SET pw_failed_count = 0, pw_failed_at = NULL WHERE id = ?1",
-            [user.raw()],
-        )?;
-        Ok(())
+        clear_password_failures_tx(&self.conn(), user)
     }
 
     /// Whether any user already claimed this (normalized) email.
     pub fn email_taken(&self, email: &str) -> Result<bool> {
-        let taken: bool = self.conn().query_row(
-            "SELECT EXISTS(SELECT 1 FROM users WHERE email = ?1)",
-            [email],
-            |r| r.get(0),
-        )?;
-        Ok(taken)
+        email_taken_tx(&self.conn(), email)
     }
 
     pub fn set_display_name(&self, user: UserId, display_name: &str) -> Result<()> {
@@ -361,23 +464,7 @@ impl Store {
     }
 
     pub fn account_row(&self, user: UserId) -> Result<AccountRow> {
-        self.conn()
-            .query_row(
-                "SELECT u.display_name, u.email, u.role, s.theme
-                 FROM users u JOIN user_settings s ON s.user_id = u.id
-                 WHERE s.user_id = ?1",
-                [user.raw()],
-                |r| {
-                    Ok(AccountRow {
-                        display_name: r.get(0)?,
-                        email: r.get(1)?,
-                        role: r.get(2)?,
-                        theme: r.get(3)?,
-                    })
-                },
-            )
-            .optional()?
-            .ok_or(StoreError::NotFound("user"))
+        account_row_tx(&self.conn(), user)
     }
 
     /// The UI theme (validated by the caller against the known set).
@@ -390,30 +477,161 @@ impl Store {
         )
     }
 
-    /// Timezone, day cutoff, and desired retention; `None` leaves a
-    /// field as it is. Validation is the caller's job.
+    /// Timezone, day cutoff, desired retention, and whether reviews are
+    /// due by the day; `None` leaves a field as it is. Validation is the
+    /// caller's job.
     pub fn set_study_settings(
         &self,
         user: UserId,
         timezone: Option<&str>,
         day_cutoff_hour: Option<u8>,
         desired_retention: Option<f32>,
+        due_by_day: Option<bool>,
     ) -> Result<()> {
         exec_expect_row(
             &self.conn(),
             "user_settings",
             "UPDATE user_settings SET
                timezone = COALESCE(?1, timezone),
+               timezone_source = CASE WHEN ?1 IS NULL THEN timezone_source ELSE 'chosen' END,
                day_cutoff_hour = COALESCE(?2, day_cutoff_hour),
-               desired_retention = COALESCE(?3, desired_retention)
-             WHERE user_id = ?4",
+               desired_retention = COALESCE(?3, desired_retention),
+               due_by_day = COALESCE(?4, due_by_day)
+             WHERE user_id = ?5",
             params![
                 timezone,
                 day_cutoff_hour.map(|h| h as i64),
                 desired_retention.map(|r| r as f64),
+                due_by_day,
                 user.raw()
             ],
         )
+    }
+
+    /// Sets the time zone only while it is still the one every account
+    /// starts with and nobody chose it, so a zone somebody chose (UTC
+    /// included) is never replaced by a browser's guess. Recorded as
+    /// learned from the browser (`timezone_source`). True when it changed.
+    pub fn adopt_timezone(&self, user: UserId, timezone: &str) -> Result<bool> {
+        let changed = self.conn().execute(
+            "UPDATE user_settings SET timezone = ?1, timezone_source = 'browser'
+             WHERE user_id = ?2 AND timezone = ?3 AND timezone <> ?1
+               AND timezone_source = 'default'",
+            params![timezone, user.raw(), UserSettings::default().timezone],
+        )?;
+        Ok(changed > 0)
+    }
+
+    /// Records one signal of the language an account reads in: `tag` is
+    /// the first preference, normalized, and `prefs` a browser's whole
+    /// list ("es-MX,es,en"). The first sighting is kept; a later one
+    /// moves `last_at` at most once a day, or at once when the language
+    /// changed.
+    pub fn observe_locale(
+        &self,
+        user: UserId,
+        source: LocaleSource,
+        tag: &str,
+        prefs: Option<&str>,
+        now_ms: i64,
+    ) -> Result<()> {
+        use flash_core::scheduler::MS_PER_DAY as DAY_MS;
+        self.conn().execute(
+            "INSERT INTO account_locales (user_id, source, tag, prefs, first_at, last_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?5)
+             ON CONFLICT (user_id, source) DO UPDATE SET
+               tag = excluded.tag, prefs = excluded.prefs, last_at = excluded.last_at
+             WHERE account_locales.tag <> excluded.tag
+                OR account_locales.prefs IS NOT excluded.prefs
+                OR excluded.last_at - account_locales.last_at >= ?6",
+            params![user.raw(), source.as_str(), tag, prefs, now_ms, DAY_MS],
+        )?;
+        Ok(())
+    }
+
+    /// Takes a learned language as the account's while nobody chose one:
+    /// the newest signal wins over an older learned one, never over a
+    /// choice. True when it changed.
+    pub fn adopt_locale(&self, user: UserId, source: LocaleSource, tag: &str) -> Result<bool> {
+        let changed = self.conn().execute(
+            "UPDATE user_settings SET locale = ?1, locale_source = ?2
+             WHERE user_id = ?3 AND locale_source <> 'chosen'
+               AND (locale IS NOT ?1 OR locale_source <> ?2)",
+            params![tag, source.as_str(), user.raw()],
+        )?;
+        Ok(changed > 0)
+    }
+
+    /// The language the person chose; a signal never replaces it.
+    pub fn set_chosen_locale(&self, user: UserId, tag: &str) -> Result<()> {
+        exec_expect_row(
+            &self.conn(),
+            "user_settings",
+            "UPDATE user_settings SET locale = ?1, locale_source = 'chosen' WHERE user_id = ?2",
+            params![tag, user.raw()],
+        )
+    }
+
+    /// Back to learning: the account takes the newest signal kept for it,
+    /// or none while there is none.
+    pub fn clear_chosen_locale(&self, user: UserId) -> Result<()> {
+        exec_expect_row(
+            &self.conn(),
+            "user_settings",
+            "UPDATE user_settings SET
+               locale = (SELECT tag FROM account_locales WHERE user_id = ?1
+                         ORDER BY last_at DESC, source LIMIT 1),
+               locale_source = COALESCE(
+                 (SELECT source FROM account_locales WHERE user_id = ?1
+                  ORDER BY last_at DESC, source LIMIT 1), 'default')
+             WHERE user_id = ?1",
+            params![user.raw()],
+        )
+    }
+
+    /// The account's language and where it came from; None while nothing
+    /// has been learned or chosen.
+    pub fn account_locale(&self, user: UserId) -> Result<Option<(String, LocaleSource)>> {
+        let row: Option<(Option<String>, String)> = self
+            .conn()
+            .query_row(
+                "SELECT locale, locale_source FROM user_settings WHERE user_id = ?1",
+                [user.raw()],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        Ok(row.and_then(|(tag, source)| Some((tag?, LocaleSource::parse(&source)?))))
+    }
+
+    pub fn locale_signals(&self, user: UserId) -> Result<Vec<LocaleSignal>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT source, tag, prefs, first_at, last_at FROM account_locales
+             WHERE user_id = ?1 ORDER BY source",
+        )?;
+        let rows = stmt.query_map([user.raw()], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get(3)?,
+                r.get(4)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (source, tag, prefs, first_at, last_at) = row?;
+            if let Some(source) = LocaleSource::parse(&source) {
+                out.push(LocaleSignal {
+                    source,
+                    tag,
+                    prefs,
+                    first_at,
+                    last_at,
+                });
+            }
+        }
+        Ok(out)
     }
 
     /// Addresses of admins that have one, for whatever an extension needs
@@ -437,20 +655,22 @@ impl Store {
     }
 
     /// Removes an account and everything it owns in one transaction:
-    /// cards (and their state/tags/media links), the generation ledger,
-    /// drafts, notes, jobs, figure pins, readings and sources, decks,
-    /// tags, media rows, study sessions, web sessions, password resets,
-    /// OAuth codes and tokens, passkeys, settings, the user row, and
+    /// cards (and their state/tags/media links), notes (and their
+    /// revisions), the `ai_*` and voice rows, decks, tags, media rows,
+    /// study sessions, web sessions, password resets, OAuth codes and
+    /// tokens, passkeys, settings, the user row, and
     /// finally its review log (permitted by the V008 trigger once the
     /// user row is gone). Invites the user issued survive with
-    /// `created_by` nulled; an extension's own audit rows are its
+    /// `created_by` nulled; an extension's own rows are its
     /// `before_delete_user` hook's call.
     ///
-    /// Foreign keys are ON with no cascades, so the order below matters:
-    /// cards name notes, notes and drafts name jobs, jobs name decks,
-    /// figure pins name media. Blobs are content-addressed and shared
-    /// across users (a card's media and a generation source alike), so
-    /// the caller removes only the hashes returned in `orphan_blobs`.
+    /// Foreign keys are ON with no cascades but one, so the order below
+    /// matters: cards name notes, notes name `ai_jobs`, which name decks,
+    /// and `ai_figures` name media. The one cascade is a note's
+    /// revisions, which go with their note. Blobs are content-addressed and shared
+    /// across users (`media` and `ai_sources` rows alike), so
+    /// only the hashes nothing else holds are owed to a `delete_blobs`
+    /// job, written in the same transaction.
     pub fn delete_user_account(&self, user: UserId) -> Result<DeletedAccount> {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
@@ -500,6 +720,10 @@ impl Store {
             "DELETE FROM oauth_tokens WHERE user_id = ?1",
             "DELETE FROM webauthn_credentials WHERE user_id = ?1",
             "DELETE FROM voice_clip_refs WHERE user_id = ?1",
+            // What was owed to them is owed to nobody now.
+            "DELETE FROM jobs WHERE user_id = ?1",
+            "DELETE FROM import_commits WHERE user_id = ?1",
+            "DELETE FROM account_locales WHERE user_id = ?1",
             "DELETE FROM user_settings WHERE user_id = ?1",
             "UPDATE invites SET created_by = NULL WHERE created_by = ?1",
             "DELETE FROM users WHERE id = ?1",
@@ -515,16 +739,18 @@ impl Store {
                 orphan_blobs.push(sha);
             }
         }
+        crate::repo::jobs::owe_blob_deletes(&tx, &orphan_blobs)?;
         tx.commit()?;
         Ok(DeletedAccount { orphan_blobs })
     }
 }
 
-/// What the server still has to clean up after a purge.
+/// What a purge left behind in storage.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DeletedAccount {
-    /// Blob hashes (card media and generation sources) no remaining user
-    /// references; safe to remove from storage.
+    /// Blob hashes (`media` and `ai_sources` rows) no remaining user
+    /// references. The purge already owes their removal from storage
+    /// (`JOB_DELETE_BLOBS`).
     pub orphan_blobs: Vec<String>,
 }
 

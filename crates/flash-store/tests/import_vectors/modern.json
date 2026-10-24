@@ -1,0 +1,77 @@
+{
+  "history": [],
+  "parsed": {
+    "media": {
+      "audio": 0,
+      "images": 0,
+      "missing": 0,
+      "total_bytes": 0,
+      "unsupported": 0,
+      "video": 0
+    },
+    "messages": [
+      {
+        "args": [
+          [
+            "notes",
+            1.0
+          ],
+          [
+            "cards",
+            2.0
+          ]
+        ],
+        "id": "import-cloze-expanded"
+      }
+    ],
+    "progress_reviews": 0,
+    "rows": [
+      {
+        "anki_card_id": 1700000000001,
+        "back": "Vitamin <b>K</b>",
+        "back_html": null,
+        "cloze_index": null,
+        "cloze_text": null,
+        "deck": "Seed",
+        "front": "Warfarin antidote?",
+        "front_html": null,
+        "media": [],
+        "suspended": false,
+        "tags": [
+          "exam-2"
+        ],
+        "type_answer": null
+      },
+      {
+        "anki_card_id": 1700000000003,
+        "back": "Paris\nExtra",
+        "back_html": "<span class=\"cloze-answer\">Paris</span> is in France<br>Extra",
+        "cloze_index": 1,
+        "cloze_text": "{{c1::Paris}} is in {{c2::France}}\u001fExtra",
+        "deck": "Seed",
+        "front": "[...] is in France",
+        "front_html": "<span class=\"cloze-blank\">[...]</span> is in France",
+        "media": [],
+        "suspended": false,
+        "tags": [],
+        "type_answer": null
+      },
+      {
+        "anki_card_id": null,
+        "back": "France\nExtra",
+        "back_html": "Paris is in <span class=\"cloze-answer\">France</span><br>Extra",
+        "cloze_index": 2,
+        "cloze_text": "{{c1::Paris}} is in {{c2::France}}\u001fExtra",
+        "deck": "Seed",
+        "front": "Paris is in [...]",
+        "front_html": "Paris is in <span class=\"cloze-blank\">[...]</span>",
+        "media": [],
+        "suspended": false,
+        "tags": [],
+        "type_answer": null
+      }
+    ],
+    "settings": null,
+    "skipped": 0
+  }
+}

@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use flash_core::queue::{QueueEntry, StudyScope};
+use flash_core::queue::{Due, QueueEntry, StudyScope};
 use flash_core::{CardId, CardState, DeckId, Phase, ReviewOutcome, SessionId, UserId};
 use rusqlite::{params, OptionalExtension};
 
@@ -23,14 +23,23 @@ pub struct ImportedReview {
     pub card: CardId,
     pub reviewed_at_ms: i64,
     pub outcome: ReviewOutcome,
+    /// How long it took to answer, when the other app kept it.
+    pub answer_ms: Option<i64>,
 }
+
+/// How long a card may count as on screen before its grade: past ten
+/// minutes the page was left open, not the card thought about.
+pub const ANSWER_MS_MAX: i64 = 10 * 60 * 1000;
 
 /// The one INSERT into review_log. The row lands only when the card is
 /// the user's; the conflict target is the import index (user, time,
 /// source `import`), so a replayed review the user already holds is
 /// skipped while Flash's own reviews never collide. True when written.
+/// A written row counts on its session (`reviews`, `last_review_at`):
+/// a session's length is read from its reviews, since only some
+/// clients end one.
 #[allow(clippy::too_many_arguments)]
-fn insert_review(
+pub fn insert_review(
     conn: &rusqlite::Connection,
     user: UserId,
     card: CardId,
@@ -39,12 +48,13 @@ fn insert_review(
     source: &str,
     client: Option<&str>,
     session: Option<SessionId>,
+    answer_ms: Option<i64>,
 ) -> Result<bool> {
     let n = conn.execute(
         "INSERT INTO review_log (card_id, user_id, reviewed_at, rating, phase_before,
            elapsed_ms, stability_after, difficulty_after, due_after, source, session_id,
-           client)
-         SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12
+           client, answer_ms)
+         SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13
          WHERE EXISTS (SELECT 1 FROM cards c WHERE c.id = ?1 AND c.user_id = ?2)
          ON CONFLICT (user_id, reviewed_at) WHERE source = 'import' DO NOTHING",
         params![
@@ -60,13 +70,24 @@ fn insert_review(
             source,
             session.map(|s| s.0),
             client,
+            answer_ms.map(|ms| ms.clamp(0, ANSWER_MS_MAX)),
         ],
     )?;
+    if n == 1 {
+        if let Some(session) = session {
+            conn.execute(
+                "UPDATE study_sessions SET reviews = reviews + 1,
+                   last_review_at = MAX(COALESCE(last_review_at, 0), ?1)
+                 WHERE id = ?2 AND user_id = ?3",
+                params![reviewed_at_ms, session.0, user.raw()],
+            )?;
+        }
+    }
     Ok(n == 1)
 }
 
 /// The one UPDATE of a card's scheduling state, for the user's own card.
-fn write_card_state(
+pub fn write_card_state(
     conn: &rusqlite::Connection,
     user: UserId,
     card: CardId,
@@ -121,37 +142,39 @@ impl Store {
     /// or has come due, in an active deck (an archived deck's cards are
     /// out of every scope, the deck's own included). A deck's scope holds
     /// its subdecks: each entry names the deck the card lives in, which is
-    /// the deck whose budget it spends. Ordering and new-card budgeting
-    /// happen in flash_core::queue over this projection.
+    /// the deck whose budget it spends. A scope's tags are an
+    /// intersection, and they narrow the deck when it names one: a card
+    /// is a candidate only when it carries every tag. Ordering and
+    /// new-card budgeting happen in flash_core::queue over this
+    /// projection.
+    ///
+    /// Of each deck's new cards only the first `new_per_deck` by id are
+    /// kept, the ones flash_core::queue would take first
+    /// (`Budgets::most_new_per_deck`), so an account holding thousands of
+    /// unstudied cards hands the queue the few a day can use. The count
+    /// beside the entries is how many new cards in scope that left out:
+    /// today's limits hold them back as surely as the ones the queue
+    /// refuses.
     pub fn queue_entries(
         &self,
         user: UserId,
         scope: &StudyScope,
-        now_ms: i64,
-    ) -> Result<Vec<QueueEntry>> {
+        due: Due,
+        new_per_deck: u32,
+    ) -> Result<(Vec<QueueEntry>, u32)> {
         let conn = self.conn();
-        let (deck, tag_filter) = match scope {
-            StudyScope::All => (None, None),
-            StudyScope::Deck(id) => (Some(*id), None),
-            StudyScope::Tag(tag) => (None, Some(tag.trim().to_lowercase())),
-        };
-        let deck_filter = super::cards::subtree_filter(&conn, user, deck)?;
-        let mut stmt = conn.prepare(
-            "SELECT s.card_id, c.deck_id, s.phase, s.due FROM card_state s
-             JOIN cards c ON c.id = s.card_id
-             JOIN decks d ON d.id = c.deck_id
-             WHERE c.user_id = ?1 AND c.deleted_at IS NULL AND c.suspended = 0
-               AND d.archived_at IS NULL
-               AND (?2 IS NULL OR c.deck_id IN (SELECT value FROM json_each(?2)))
-               AND (?3 IS NULL OR EXISTS (
-                     SELECT 1 FROM card_tags ct JOIN tags t ON t.id = ct.tag_id
-                     WHERE ct.card_id = c.id AND t.name = ?3))
-               AND (s.phase = 0 OR s.due <= ?4
-                    OR (s.phase IN (1, 3) AND s.due <= ?5))",
-        )?;
-        let learn_ahead_ms = now_ms + flash_core::queue::LEARN_AHEAD_MS;
+        let (deck_filter, tag_filter, tag_count) = scope_filters(&conn, user, scope)?;
+        let mut stmt = conn.prepare(&queue_sql())?;
+        let learn_ahead_ms = due.now_ms + flash_core::queue::LEARN_AHEAD_MS;
         let rows = stmt.query_map(
-            params![user.raw(), deck_filter, tag_filter, now_ms, learn_ahead_ms],
+            params![
+                user.raw(),
+                deck_filter,
+                tag_filter,
+                tag_count,
+                due.reviews_before_ms,
+                learn_ahead_ms
+            ],
             |r| {
                 Ok(QueueEntry {
                     card_id: CardId(r.get(0)?),
@@ -161,19 +184,109 @@ impl Store {
                 })
             },
         )?;
-        Ok(rows.collect::<rusqlite::Result<_>>()?)
+        // Every new card in scope is still read: the ones left out are
+        // counted. `kept` restarts at each deck, so this needs the rows
+        // deck by deck, as `queue_sql` orders them.
+        let mut entries = Vec::new();
+        let mut deck = None;
+        let mut kept = 0;
+        let mut left_out = 0;
+        for entry in rows {
+            let entry = entry?;
+            if deck != Some(entry.deck_id) {
+                deck = Some(entry.deck_id);
+                kept = 0;
+            }
+            if entry.phase == Phase::New {
+                if kept >= new_per_deck {
+                    left_out += 1;
+                    continue;
+                }
+                kept += 1;
+            }
+            entries.push(entry);
+        }
+        Ok((entries, left_out))
     }
 
-    /// How many new cards were introduced (first-ever review) since `since_ms`.
-    /// Used to enforce the daily new-card budget across sessions.
-    pub fn new_cards_introduced_since(&self, user: UserId, since_ms: i64) -> Result<u32> {
-        let n: i64 = self.conn().query_row(
-            "SELECT COUNT(*) FROM review_log
-             WHERE user_id = ?1 AND phase_before = 0 AND reviewed_at >= ?2",
-            params![user.raw(), since_ms],
+    /// Whether the scope names any card at all: due or not, suspended or
+    /// in an archived deck. An empty queue over a scope with cards means
+    /// caught up (or set aside); over one without, there is nothing there
+    /// to study yet.
+    pub fn scope_has_cards(&self, user: UserId, scope: &StudyScope) -> Result<bool> {
+        let conn = self.conn();
+        let (deck_filter, tag_filter, tag_count) = scope_filters(&conn, user, scope)?;
+        Ok(conn.query_row(
+            &format!(
+                "SELECT EXISTS(SELECT 1 FROM cards c JOIN decks d ON d.id = c.deck_id
+                 WHERE c.user_id = ?1 AND {NAMED_BY_SCOPE})"
+            ),
+            params![user.raw(), deck_filter, tag_filter, tag_count],
+            |r| r.get(0),
+        )?)
+    }
+
+    /// When the first card in scope that is not due by `due` comes due,
+    /// among cards already seen (a new card has no due time; the daily
+    /// limit decides when it comes). None when nothing is scheduled.
+    pub fn next_due_after(
+        &self,
+        user: UserId,
+        scope: &StudyScope,
+        due: Due,
+    ) -> Result<Option<i64>> {
+        let conn = self.conn();
+        let (deck_filter, tag_filter, tag_count) = scope_filters(&conn, user, scope)?;
+        Ok(conn.query_row(
+            &format!(
+                "SELECT MIN(s.due) FROM card_state s
+                 JOIN cards c ON c.id = s.card_id
+                 JOIN decks d ON d.id = c.deck_id
+                 WHERE c.user_id = ?1 AND {NAMED_BY_SCOPE} {STUDYABLE}
+                   AND ((s.phase = 2 AND s.due >= ?5)
+                        OR (s.phase IN (1, 3) AND s.due > ?6))"
+            ),
+            params![
+                user.raw(),
+                deck_filter,
+                tag_filter,
+                tag_count,
+                due.reviews_before_ms,
+                due.now_ms
+            ],
+            |r| r.get(0),
+        )?)
+    }
+
+    /// How many cards in scope, already seen, come due in `[from_ms, before_ms)`.
+    pub fn count_due_between(
+        &self,
+        user: UserId,
+        scope: &StudyScope,
+        from_ms: i64,
+        before_ms: i64,
+    ) -> Result<u32> {
+        let conn = self.conn();
+        let (deck_filter, tag_filter, tag_count) = scope_filters(&conn, user, scope)?;
+        let n: i64 = conn.query_row(
+            &format!(
+                "SELECT COUNT(*) FROM card_state s
+                 JOIN cards c ON c.id = s.card_id
+                 JOIN decks d ON d.id = c.deck_id
+                 WHERE c.user_id = ?1 AND {NAMED_BY_SCOPE} {STUDYABLE}
+                   AND s.phase != 0 AND s.due >= ?5 AND s.due < ?6"
+            ),
+            params![
+                user.raw(),
+                deck_filter,
+                tag_filter,
+                tag_count,
+                from_ms,
+                before_ms
+            ],
             |r| r.get(0),
         )?;
-        Ok(n as u32)
+        Ok(n.max(0) as u32)
     }
 
     /// Per-deck consumption of today's limits since `since_ms`: new cards
@@ -219,6 +332,33 @@ impl Store {
         client: Option<&str>,
         session: Option<SessionId>,
     ) -> Result<()> {
+        self.record_review_timed(
+            user,
+            card,
+            outcome,
+            reviewed_at_ms,
+            source,
+            client,
+            session,
+            None,
+        )
+    }
+
+    /// `record_review` with how long the card was on screen before the
+    /// grade, as the page that showed it measured (`answer_ms`, clamped
+    /// to `ANSWER_MS_MAX`).
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_review_timed(
+        &self,
+        user: UserId,
+        card: CardId,
+        outcome: &ReviewOutcome,
+        reviewed_at_ms: i64,
+        source: &str,
+        client: Option<&str>,
+        session: Option<SessionId>,
+        answer_ms: Option<i64>,
+    ) -> Result<()> {
         let mut conn = self.conn();
         let tx = conn.transaction()?;
         if !insert_review(
@@ -230,6 +370,7 @@ impl Store {
             source,
             client,
             session,
+            answer_ms,
         )? {
             return Err(StoreError::NotFound("card"));
         }
@@ -259,6 +400,7 @@ impl Store {
                 "import",
                 None,
                 None,
+                r.answer_ms,
             )? {
                 written += 1;
             }
@@ -340,12 +482,52 @@ impl Store {
         Ok(SessionId(conn.last_insert_rowid()))
     }
 
+    /// A session opened from `surface` (web, mcp, panel, mobile). With
+    /// `reuse_ms`, an open session of this account on the same scope and
+    /// surface, started within that long and not graded in yet, is
+    /// handed back instead of a new one: a study page loaded again is
+    /// the same sitting, not another session nobody finished.
+    pub fn open_session(
+        &self,
+        user: UserId,
+        scope: &StudyScope,
+        surface: &str,
+        reuse_ms: Option<i64>,
+        now_ms: i64,
+    ) -> Result<SessionId> {
+        let conn = self.conn();
+        let scope = scope.as_string();
+        if let Some(window) = reuse_ms {
+            let open: Option<i64> = conn
+                .query_row(
+                    "SELECT id FROM study_sessions
+                     WHERE user_id = ?1 AND scope = ?2 AND surface = ?3
+                       AND ended_at IS NULL AND reviews = 0 AND started_at > ?4
+                     ORDER BY started_at DESC LIMIT 1",
+                    params![user.raw(), scope, surface, now_ms - window],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            if let Some(id) = open {
+                return Ok(SessionId(id));
+            }
+        }
+        conn.execute(
+            "INSERT INTO study_sessions (user_id, started_at, scope, surface)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![user.raw(), now_ms, scope, surface],
+        )?;
+        Ok(SessionId(conn.last_insert_rowid()))
+    }
+
     /// Ends a session; returns None if the session isn't this user's.
+    /// The first end stands: ending it again changes nothing.
     pub fn end_session(&self, user: UserId, session: SessionId, now_ms: i64) -> Result<()> {
         exec_expect_row(
             &self.conn(),
             "study_session",
-            "UPDATE study_sessions SET ended_at = ?1 WHERE id = ?2 AND user_id = ?3",
+            "UPDATE study_sessions SET ended_at = COALESCE(ended_at, ?1)
+             WHERE id = ?2 AND user_id = ?3",
             params![now_ms, session.0, user.raw()],
         )
     }
@@ -360,7 +542,7 @@ impl Store {
             )
             .optional()?
             .ok_or(StoreError::NotFound("study_session"))?;
-        Ok(parse_scope(&scope))
+        Ok(StudyScope::parse(&scope))
     }
 
     /// Whether a session of the user's has not been ended; another
@@ -399,14 +581,339 @@ impl Store {
         }
         Ok(stats)
     }
+
+    /// When the session started and when its last review was, or None
+    /// when it has no review (or is not this user's).
+    pub fn session_span(&self, user: UserId, session: SessionId) -> Result<Option<(i64, i64)>> {
+        Ok(self
+            .conn()
+            .query_row(
+                "SELECT s.started_at, MAX(r.reviewed_at) FROM study_sessions s
+                 JOIN review_log r ON r.session_id = s.id AND r.user_id = s.user_id
+                 WHERE s.user_id = ?1 AND s.id = ?2",
+                params![user.raw(), session.0],
+                |r| Ok((r.get::<_, Option<i64>>(0)?, r.get::<_, Option<i64>>(1)?)),
+            )
+            .optional()?
+            .and_then(|(start, last)| start.zip(last)))
+    }
 }
 
-fn parse_scope(s: &str) -> StudyScope {
-    if let Some(id) = s.strip_prefix("deck:").and_then(|v| v.parse().ok()) {
-        StudyScope::Deck(flash_core::DeckId(id))
-    } else if let Some(tag) = s.strip_prefix("tag:") {
-        StudyScope::Tag(tag.to_string())
-    } else {
-        StudyScope::All
+/// `queue_entries`' candidates: review cards by `due.reviews_before_ms`
+/// (?5); learning steps up to the learn-ahead window (?6), which
+/// flash_core::queue narrows to what is due. Deck by deck, each in id
+/// order, the order new cards are taken in: idx_cards_study walks it, so
+/// nothing is sorted and no card's own row is read.
+fn queue_sql() -> String {
+    format!(
+        "SELECT s.card_id, c.deck_id, s.phase, s.due FROM card_state s
+         JOIN cards c ON c.id = s.card_id
+         JOIN decks d ON d.id = c.deck_id
+         WHERE c.user_id = ?1 AND {NAMED_BY_SCOPE} {STUDYABLE}
+           AND (s.phase = 0 OR (s.phase = 2 AND s.due < ?5)
+                OR (s.phase IN (1, 3) AND s.due <= ?6))
+         ORDER BY c.deck_id, c.id"
+    )
+}
+
+/// The scope's tags as a JSON list, to bind for `json_each`. A tag may
+/// hold any character, so this goes through serde rather than joining.
+fn tag_list(tags: &[String]) -> String {
+    serde_json::json!(tags).to_string()
+}
+
+/// The cards a study scope names, over `cards c JOIN decks d`, after the
+/// query's own `c.user_id = ?1` (spelled out in each statement, where
+/// the scoped-SQL check reads it): live cards inside the deck's subtree
+/// when the scope names one (?2), carrying every tag it names (?3,
+/// counted against ?4). Bound by `scope_filters`. Suspended cards and
+/// archived decks are still in it; with `STUDYABLE` after it, it is what
+/// a session studies.
+const NAMED_BY_SCOPE: &str = "c.deleted_at IS NULL
+    AND (?2 IS NULL OR c.deck_id IN (SELECT value FROM json_each(?2)))
+    AND (?3 IS NULL OR (
+          SELECT COUNT(*) FROM card_tags ct JOIN tags t ON t.id = ct.tag_id
+          WHERE ct.card_id = c.id AND t.user_id = ?1
+            AND t.name IN (SELECT value FROM json_each(?3))) = ?4)";
+
+/// Of the cards a scope names, the ones a session studies: unsuspended,
+/// in active decks.
+const STUDYABLE: &str = "AND c.suspended = 0 AND d.archived_at IS NULL";
+
+/// The scope filters' ?2, ?3 and ?4 for a scope.
+fn scope_filters(
+    conn: &rusqlite::Connection,
+    user: UserId,
+    scope: &StudyScope,
+) -> Result<(Option<String>, Option<String>, i64)> {
+    let deck_filter = super::decks::subtree_filter(conn, user, scope.deck)?;
+    // The fields are public, so normalize defensively: the tag count is
+    // only exact over a deduplicated list.
+    let tags = flash_core::queue::normalize_tags(&scope.tags);
+    let tag_filter = (!tags.is_empty()).then(|| tag_list(&tags));
+    Ok((deck_filter, tag_filter, tags.len() as i64))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use flash_core::queue::{order_queue, Budgets, DeckBudget, LEARN_AHEAD_MS};
+    use flash_core::{validate_card_text, CardState};
+
+    const NOW: i64 = 1_700_000_000_000;
+    const MINUTE: i64 = 60_000;
+
+    /// The candidates as `queue_entries` read them before new cards were
+    /// bounded: every one in scope.
+    fn every_candidate(
+        store: &Store,
+        user: UserId,
+        scope: &StudyScope,
+        due: Due,
+    ) -> Vec<QueueEntry> {
+        let conn = store.conn();
+        let (deck_filter, tag_filter, tag_count) = scope_filters(&conn, user, scope).unwrap();
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT s.card_id, c.deck_id, s.phase, s.due FROM card_state s
+                 JOIN cards c ON c.id = s.card_id
+                 JOIN decks d ON d.id = c.deck_id
+                 WHERE c.user_id = ?1 AND {NAMED_BY_SCOPE} {STUDYABLE}
+                   AND (s.phase = 0 OR (s.phase = 2 AND s.due < ?5)
+                        OR (s.phase IN (1, 3) AND s.due <= ?6))"
+            ))
+            .unwrap();
+        let rows = stmt
+            .query_map(
+                params![
+                    user.raw(),
+                    deck_filter,
+                    tag_filter,
+                    tag_count,
+                    due.reviews_before_ms,
+                    due.now_ms + LEARN_AHEAD_MS
+                ],
+                |r| {
+                    Ok(QueueEntry {
+                        card_id: CardId(r.get(0)?),
+                        deck_id: DeckId(r.get(1)?),
+                        phase: Phase::from_i64(r.get(2)?).unwrap(),
+                        due_ms: r.get(3)?,
+                    })
+                },
+            )
+            .unwrap();
+        rows.collect::<rusqlite::Result<_>>().unwrap()
+    }
+
+    fn state(phase: Phase, due_ms: i64) -> CardState {
+        CardState {
+            phase,
+            stability: Some(3.0),
+            difficulty: Some(5.0),
+            due_ms,
+            last_review_ms: Some(NOW - 3 * 24 * 60 * MINUTE),
+            reps: 2,
+            lapses: 0,
+        }
+    }
+
+    /// Leaving out each deck's new cards past the most any deck can take
+    /// changes no queue: over subdecks, an archived subdeck, tags, every
+    /// kind of due card (with ties), and budgets with per-deck limits, a
+    /// boost, goal-paced decks and a deck with fewer new cards than its
+    /// budget, the order is the same as over every candidate, and what is
+    /// left out makes up exactly the cards the shorter list no longer
+    /// holds back.
+    #[test]
+    fn bounding_new_cards_changes_no_queue() {
+        let store = Store::open_in_memory().unwrap();
+        let user = store
+            .create_user("FlashTester", None, "member", NOW)
+            .unwrap();
+        let deck = |name: &str| store.create_deck(user, name, "", NOW).unwrap();
+        let (bio, cells, old, chem, exam, lang) = (
+            deck("Bio"),
+            deck("Bio::Cells"),
+            deck("Bio::Old"),
+            deck("Chem"),
+            deck("Exam"),
+            deck("Lang"),
+        );
+        // Card by card across the decks, so their ids interleave; Chem
+        // gets two.
+        let mut cards: HashMap<DeckId, Vec<CardId>> = HashMap::new();
+        for round in 0..12 {
+            for d in [bio, cells, old, chem, exam, lang] {
+                if d == chem && round >= 2 {
+                    continue;
+                }
+                let n = cards.values().map(Vec::len).sum::<usize>();
+                let tags: Vec<String> = [(n % 3 == 0, "exam"), (n % 2 == 0, "core")]
+                    .into_iter()
+                    .filter(|(on, _)| *on)
+                    .map(|(_, tag)| tag.to_string())
+                    .collect();
+                let text = validate_card_text(&format!("q{n}"), "a").unwrap();
+                let id = store
+                    .create_cards(user, d, &[(text, tags)], None, NOW)
+                    .unwrap()[0];
+                cards.entry(d).or_default().push(id);
+            }
+        }
+        let day = 24 * 60 * MINUTE;
+        store
+            .set_card_states(
+                user,
+                &[
+                    // Reviews due: two at the same moment in two decks, one
+                    // later today, one tomorrow.
+                    (cards[&bio][0], state(Phase::Review, NOW - day)),
+                    (cards[&cells][0], state(Phase::Review, NOW - day)),
+                    (cards[&bio][1], state(Phase::Review, NOW + 3 * 60 * MINUTE)),
+                    (cards[&bio][2], state(Phase::Review, NOW + day)),
+                    (cards[&exam][0], state(Phase::Review, NOW - 2 * day)),
+                    // Steps: one due, one within the learn-ahead window,
+                    // one relearning.
+                    (cards[&lang][0], state(Phase::Learning, NOW - MINUTE)),
+                    (cards[&lang][1], state(Phase::Learning, NOW + 5 * MINUTE)),
+                    (cards[&cells][1], state(Phase::Relearning, NOW)),
+                ],
+            )
+            .unwrap();
+        store.set_deck_archived(user, old, Some(NOW)).unwrap();
+        store
+            .set_card_suspended(user, cards[&exam][3], true, NOW)
+            .unwrap();
+        store.delete_card(user, cards[&lang][4], NOW).unwrap();
+
+        let scopes = [
+            StudyScope::all(),
+            StudyScope::deck(bio),
+            StudyScope::deck(cells),
+            StudyScope::deck(old),
+            StudyScope::deck(chem),
+            StudyScope::deck(exam),
+            StudyScope::tagged(["exam"]),
+            StudyScope::tagged(["exam", "core"]),
+            StudyScope::new(Some(bio), ["core"]),
+        ];
+        let limit = |new: u32, reviews: u32| DeckBudget { new, reviews };
+        let per_deck: [(&str, HashMap<DeckId, DeckBudget>); 4] = [
+            ("account limits only", HashMap::new()),
+            (
+                "tight limits",
+                [bio, cells, chem, exam, lang]
+                    .into_iter()
+                    .map(|d| (d, limit(2, 1)))
+                    .collect(),
+            ),
+            (
+                "mixed limits, Chem's above its 2 new cards",
+                HashMap::from([
+                    (bio, limit(0, 5)),
+                    (cells, limit(4, 0)),
+                    (chem, limit(9, 5)),
+                    (exam, limit(30, 5)),
+                    (lang, limit(1, 5)),
+                ]),
+            ),
+            (
+                "Lang boosted past the total",
+                HashMap::from([(lang, limit(40, 5))]),
+            ),
+        ];
+        let paced = [vec![], vec![exam], vec![exam, chem]];
+        let dues = [Due::exact(NOW), Due::by_day(NOW, NOW + 6 * 60 * MINUTE)];
+
+        let mut compared = 0;
+        let mut bounded = 0;
+        for scope in &scopes {
+            for due in dues {
+                let all = every_candidate(&store, user, scope, due);
+                let eligible = |entries: &[QueueEntry]| {
+                    entries
+                        .iter()
+                        .filter(|e| due.is_due(e.phase, e.due_ms))
+                        .count()
+                };
+                let mut new_by_deck: HashMap<DeckId, u32> = HashMap::new();
+                for e in all.iter().filter(|e| e.phase == Phase::New) {
+                    *new_by_deck.entry(e.deck_id).or_default() += 1;
+                }
+                for new_total in [0, 1, 3, 8, 50] {
+                    for review_total in [0, 50] {
+                        for (limits, deck_budgets) in &per_deck {
+                            for paced in &paced {
+                                let budgets = Budgets {
+                                    new_total,
+                                    review_total,
+                                    per_deck: deck_budgets.clone(),
+                                    paced: paced.iter().copied().collect(),
+                                };
+                                let k = budgets.most_new_per_deck();
+                                let (kept, left_out) =
+                                    store.queue_entries(user, scope, due, k).unwrap();
+                                let case = format!(
+                                    "{scope:?}, {due:?}, totals {new_total}/{review_total}, \
+                                     {limits}, paced {paced:?}"
+                                );
+                                assert_eq!(
+                                    order_queue(&kept, due, &budgets),
+                                    order_queue(&all, due, &budgets),
+                                    "{case}"
+                                );
+                                assert_eq!(
+                                    eligible(&kept) + left_out as usize,
+                                    eligible(&all),
+                                    "{case}"
+                                );
+                                // Every deck's new cards past the first k
+                                // are left out, however the decks' ids
+                                // interleave.
+                                assert_eq!(
+                                    left_out,
+                                    new_by_deck
+                                        .values()
+                                        .map(|n| n.saturating_sub(k))
+                                        .sum::<u32>(),
+                                    "{case}"
+                                );
+                                compared += 1;
+                                bounded += usize::from(left_out > 0);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(compared, 9 * 2 * 5 * 2 * 4 * 3);
+        assert_ne!(bounded, 0, "the bound never left a card out");
+    }
+
+    /// What every grade and dashboard view asks walks idx_cards_study and
+    /// sorts nothing, so an account's cards cost an index step each.
+    #[test]
+    fn the_study_queries_walk_the_study_index() {
+        let store = Store::open_in_memory().unwrap();
+        let conn = store.conn();
+        for sql in [
+            queue_sql(),
+            crate::repo::deck_goals::GOAL_COUNTS.to_string(),
+            crate::repo::decks::LIST_DECKS.to_string(),
+        ] {
+            let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+            let unbound = vec![rusqlite::types::Null; stmt.parameter_count()];
+            let plan = stmt
+                .query_map(rusqlite::params_from_iter(unbound), |r| {
+                    r.get::<_, String>(3)
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap()
+                .join("\n");
+            assert!(plan.contains("idx_cards_study"), "{plan}");
+            assert!(!plan.contains("TEMP B-TREE"), "{plan}");
+        }
     }
 }

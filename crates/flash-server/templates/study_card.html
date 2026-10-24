@@ -6,60 +6,125 @@
 {% if total > 0 %}
 <div class="fl-progress"><div style="width:{{ total.saturating_sub(remaining.clone()) * 100 / total }}%"></div></div>
 {% endif %}
-{# data-audio-front / data-audio-back name this card's clips in the
-   chosen voice, when the server has made them; the page plays those
-   and reads the spoken text itself otherwise. data-answer-hints carries
-   the answer's words for the recognizer while the front shows. #}
-<div class="fl-card study-card" data-card-id="{{ card.card_id }}" data-spoken-front="{{ card.spoken_front }}"{% if let Some(r) = revealed %} data-spoken-back="{{ r.spoken_back }}"{% endif %}{% if let Some(h) = card.hints_json %} data-answer-hints="{{ h }}"{% endif %}{% if let Some(u) = audio_front %} data-audio-front="{{ u }}"{% endif %}{% if let Some(u) = audio_back %} data-audio-back="{{ u }}"{% endif %}>
-  <div class="front">{% if let Some(html) = card.front_html %}<div class="card-rich">{{ html|safe }}</div>{% else %}{{ card.front }}{% endif %}</div>
+{# The session, counts, front time, revealed state, typed answer and
+   next card let an edit show this card again exactly as it was
+   (study.js). #}
+<div class="fl-card study-card" data-card-id="{{ card.card_id }}" data-session="{{ session_id }}" data-remaining="{{ remaining }}" data-total="{{ total }}" data-shown="{{ shown_at }}"{% if revealed.is_some() %} data-revealed="1"{% endif %}{% if let Some(t) = typed %} data-typed="{{ t }}"{% endif %}{% for (name, value) in card.ext_data %} data-{{ name }}="{{ value }}"{% endfor %}{% if let Some(n) = card.next_card %} data-next-card="{{ n }}"{% endif %}>
+  {# Edit and Archive for this card, in a menu on its top right corner. #}
+  <div class="study-more-corner">{% include "study_more.html" %}</div>
+  <div class="front" dir="auto" lang="{{ card.front_lang }}">{% if let Some(html) = card.front_html %}<div class="card-rich" dir="auto">{{ html|safe }}</div>{% else %}{{ card.front }}{% endif %}</div>
   {% if let Some(r) = revealed %}
   {% if let Some(diff) = r.typed_diff %}
   <div class="type-diff mono">{% for s in diff %}<span class="{% if s.ok %}type-ok{% else %}type-bad{% endif %}">{{ s.text }}</span>{% endfor %}</div>
   {% endif %}
-  <div class="study-back">{% if let Some(html) = r.back_html %}<div class="card-rich">{{ html|safe }}</div>{% else %}{{ r.back }}{% endif %}</div>
+  <div class="study-back" dir="auto" lang="{{ r.back_lang }}">{% if let Some(html) = r.back_html %}<div class="card-rich" dir="auto">{{ html|safe }}</div>{% else %}{{ r.back }}{% endif %}</div>
   {% endif %}
 </div>
-{% if revealed.is_some() %}
-<div class="row grade-row">
-  <button id="grade-1" class="fl-btn fl-btn-danger" hx-post="/study/review" hx-target="#study"
-          hx-vals='{"session": {{ session_id }}, "card": {{ card.card_id }}, "rating": 1, "total": {{ total }}}'>Again <kbd>1</kbd></button>
-  <button id="grade-2" class="fl-btn fl-btn-secondary grade-hard" hx-post="/study/review" hx-target="#study"
-          hx-vals='{"session": {{ session_id }}, "card": {{ card.card_id }}, "rating": 2, "total": {{ total }}}'>Hard <kbd>2</kbd></button>
-  <button id="grade-3" class="fl-btn fl-btn-secondary" hx-post="/study/review" hx-target="#study"
-          hx-vals='{"session": {{ session_id }}, "card": {{ card.card_id }}, "rating": 3, "total": {{ total }}}'>Good <kbd>3</kbd></button>
-  <button id="grade-4" class="fl-btn fl-btn-secondary" hx-post="/study/review" hx-target="#study"
-          hx-vals='{"session": {{ session_id }}, "card": {{ card.card_id }}, "rating": 4, "total": {{ total }}}'>Easy <kbd>4</kbd></button>
-  {% include "study_speak.html" %}
+{% if let Some(r) = revealed %}
+{# Each grade says when the card comes back after it, as the study
+   panel's buttons do. Keys 1-4 still grade; the buttons don't print
+   them, to keep the row quiet. #}
+<div class="row grade-row{% if !r.comes_back.is_empty() %} has-when{% endif %}">
+  <button id="grade-1" class="fl-btn fl-btn-danger" aria-keyshortcuts="1" hx-post="/study/review" hx-target="#study"
+          hx-vals='{"session": {{ session_id }}, "card": {{ card.card_id }}, "rating": 1, "total": {{ total }}, "shown": {{ shown_at }}}'><span>{{ "study-grade-again"|t }}</span>{% if let Some(w) = r.comes_back.get(0) %}<span class="grade-when">{{ w }}</span>{% endif %}</button>
+  <button id="grade-2" class="fl-btn fl-btn-secondary grade-hard" aria-keyshortcuts="2" hx-post="/study/review" hx-target="#study"
+          hx-vals='{"session": {{ session_id }}, "card": {{ card.card_id }}, "rating": 2, "total": {{ total }}, "shown": {{ shown_at }}}'><span>{{ "study-grade-hard"|t }}</span>{% if let Some(w) = r.comes_back.get(1) %}<span class="grade-when">{{ w }}</span>{% endif %}</button>
+  <button id="grade-3" class="fl-btn fl-btn-secondary" aria-keyshortcuts="3" hx-post="/study/review" hx-target="#study"
+          hx-vals='{"session": {{ session_id }}, "card": {{ card.card_id }}, "rating": 3, "total": {{ total }}, "shown": {{ shown_at }}}'><span>{{ "study-grade-good"|t }}</span>{% if let Some(w) = r.comes_back.get(2) %}<span class="grade-when">{{ w }}</span>{% endif %}</button>
+  <button id="grade-4" class="fl-btn fl-btn-secondary" aria-keyshortcuts="4" hx-post="/study/review" hx-target="#study"
+          hx-vals='{"session": {{ session_id }}, "card": {{ card.card_id }}, "rating": 4, "total": {{ total }}, "shown": {{ shown_at }}}'><span>{{ "study-grade-easy"|t }}</span>{% if let Some(w) = r.comes_back.get(3) %}<span class="grade-when">{{ w }}</span>{% endif %}</button>
 </div>
 {% else %}
 <div class="row">
   {% if card.wants_typing %}
-  <input id="type-input" class="fl-input type-input" type="text" name="typed"
-         placeholder="Type the answer…" autocomplete="off" autocapitalize="off" spellcheck="false" autofocus>
+  <input id="type-input" class="fl-input type-input" type="text" name="typed" dir="auto"
+         placeholder="{{ "study-type-answer"|t }}" autocomplete="off" autocapitalize="off" spellcheck="false" autofocus>
   {% endif %}
   <button id="reveal-btn" class="fl-btn fl-btn-primary" hx-post="/study/reveal" hx-target="#study"
           {% if card.wants_typing %}hx-include="#type-input"{% endif %}
-          hx-vals='{"session": {{ session_id }}, "card": {{ card.card_id }}, "remaining": {{ remaining }}, "total": {{ total }}}'>Show answer</button>
-  <kbd>{% if card.wants_typing %}enter{% else %}space{% endif %}</kbd>
-  {% include "study_speak.html" %}
+          hx-vals='{"session": {{ session_id }}, "card": {{ card.card_id }}, "remaining": {{ remaining }}, "total": {{ total }}, "shown": {{ shown_at }}}'>{{ "study-show-answer"|t }}</button>
+  <kbd>{% if card.wants_typing %}{{ "study-key-enter"|t }}{% else %}{{ "study-key-space"|t }}{% endif %}</kbd>
 </div>
 {% endif %}
-<p class="mono small muted">{{ remaining }} left</p>
+<p class="mono small muted">{{ "study-left"|tn(remaining) }}</p>
 {% when None %}
+{# A finished session, as the MCP panel shows one: what was done, the
+   week ahead, when the next cards come. #}
+{% if let Some(d) = done %}
 <div class="fl-card study-done">
+  <div class="done-hero">
+    <div>
+      <h2>{% if held_by_limit > 0 %}{{ "study-done-limit-heading"|t }}{% else if d.reviewed > 0 %}{{ "study-done-heading"|t }}{% else %}{{ "study-done-caught-up"|t }}{% endif %}</h2>
+      <p class="muted">{% if held_by_limit > 0 %}{{ "study-done-held-html"|tn(held_by_limit)|safe }}{% if d.reviewed > 0 %} {% if let Some(took) = d.took %}{{ "study-done-held-reviewed-took"|tna(d.reviewed, "took", took) }}{% else %}{{ "study-done-held-reviewed"|tn(d.reviewed) }}{% endif %}{% endif %}{% else if d.reviewed > 0 %}{% if let Some(took) = d.took %}{{ "study-done-reviewed-took"|tna(d.reviewed, "took", took) }}{% else %}{{ "study-done-reviewed"|tn(d.reviewed) }}{% endif %}{% else %}{{ "study-done-nothing-due"|t }}{% endif %}</p>
+    </div>
+    {% if !d.pills.is_empty() %}
+    <div class="done-score">{% for p in d.pills %}<span class="done-pill done-{{ p.kind }}">{{ p.label }}</span>{% endfor %}</div>
+    {% endif %}
+  </div>
   {% if held_by_limit > 0 %}
-  <p class="muted">That's today's allowance done. Nice work. <strong>{{ held_by_limit }}</strong> more
-  card{% if held_by_limit != 1 %}s{% endif %} are ready but held back by your daily limit.</p>
   <form class="row" method="post" action="{% if let Some(d) = scope_deck %}/decks/{{ d }}/boost{% else %}/study/boost{% endif %}" hx-boost="true" hx-push-url="false" hx-select="#study" hx-target="#study" hx-swap="outerHTML show:none">
     <input type="hidden" name="back" value="study">
-    <span class="fl-hint">More new cards today:</span>
+    <input type="hidden" name="tags" value="{{ scope_tags|join(",") }}">
+    <span class="fl-hint">{{ "study-more-new"|t }}</span>
     <button class="fl-btn fl-btn-sm fl-btn-secondary" type="submit" name="extra" value="5">+5</button>
     <button class="fl-btn fl-btn-sm fl-btn-secondary" type="submit" name="extra" value="10">+10</button>
     <button class="fl-btn fl-btn-sm fl-btn-secondary" type="submit" name="extra" value="20">+20</button>
   </form>
-  {% else %}
-  <p class="muted">Session complete. Nothing else due right now.</p>
   {% endif %}
-  <a class="fl-btn fl-btn-secondary" href="/">Back to today</a>
+  {% if let Some(g) = d.goal %}
+  <div class="done-goal{% if g.behind %} is-behind{% endif %}" data-done-goal>
+    <svg class="goal-ring" width="{{ g.ring.size }}" height="{{ g.ring.size }}" viewBox="0 0 {{ g.ring.size }} {{ g.ring.size }}" aria-hidden="true"><circle class="goal-track" cx="{{ g.ring.mid }}" cy="{{ g.ring.mid }}" r="{{ g.ring.r }}" fill="none" stroke-width="{{ g.ring.stroke }}"/><circle class="goal-arc" cx="{{ g.ring.mid }}" cy="{{ g.ring.mid }}" r="{{ g.ring.r }}" fill="none" stroke-width="{{ g.ring.stroke }}" stroke-linecap="round" stroke-dasharray="{{ g.ring.dash }}"/></svg>
+    <div class="done-goal-text">
+      <b>{{ g.head }}</b>
+      <span class="done-caption" dir="auto">{{ g.learned }}{% if let Some(tail) = g.tail %} {{ tail }}{% endif %}</span>
+    </div>
+    {% if g.behind && g.catch_up > 0 %}
+    <form method="post" action="/decks/{{ g.deck_id }}/boost" hx-boost="true" hx-push-url="false" hx-select="#study" hx-target="#study" hx-swap="outerHTML show:none">
+      <input type="hidden" name="back" value="study">
+      <button class="fl-btn fl-btn-sm fl-btn-primary" type="submit" name="extra" value="{{ g.catch_up }}">{{ g.study_more }}</button>
+    </form>
+    {% else %}
+    <span class="done-goal-pct">{{ g.percent }}</span>
+    {% endif %}
+  </div>
+  {% endif %}
+  {% if !d.week.is_empty() %}
+  <div class="done-week" aria-label="{{ "study-week"|t }}">
+    {% for day in d.week %}
+    <div class="done-day{% if day.next %} done-day-next{% endif %}"><b>{{ day.cards }}</b><i style="height:{{ day.bar_px }}px"></i><span>{{ day.name }}</span></div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% if d.next.is_some() || d.remind %}
+  <div class="done-next">
+    <b>{% if let Some(next) = d.next %}{{ next }}{% else %}{{ "study-nothing-scheduled"|t }}{% endif %}</b>
+    {% if d.remind %}
+    <div class="done-remind" id="done-remind">
+      <span class="done-caption">{{ "study-remind"|t }}</span>
+      <button class="done-switch" type="button" role="switch" aria-checked="false" aria-label="{{ "study-remind"|t }}"
+              hx-post="/study/remind" hx-target="#done-remind" hx-swap="outerHTML"></button>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+  <div class="done-acts">
+    {{ d.add_cards|safe }}
+    <a class="fl-btn fl-btn-primary" href="/">{{ "study-back-today"|t }}</a>
+  </div>
 </div>
+{% else %}
+<div class="fl-card study-done study-empty">
+  <p class="muted">{{ "study-empty"|t }}</p>
+  <a class="fl-btn fl-btn-secondary" href="/decks">{{ "study-go-decks"|t }}</a>
+</div>
+{% endif %}
 {% endmatch %}
+{# After Archive: what happened, where the card went, and the way back.
+   It stays until the next thing the page does, with no timer to race. #}
+{% if let Some(id) = archived %}
+<div class="study-undo" role="status">
+  <span>{{ "study-archived"|t }}</span>
+  <button class="fl-btn fl-btn-sm fl-btn-secondary" type="button" id="undo-archive" aria-keyshortcuts="z" hx-post="/study/unarchive" hx-target="#study"
+          hx-vals='{"session": {{ session_id }}, "card": {{ id }}, "total": {{ total }}}'>{{ "study-undo"|t }}</button>
+</div>
+{% endif %}

@@ -7,7 +7,9 @@
 
 pub mod export;
 pub mod ext;
+pub mod fold;
 pub mod import;
+pub mod labels;
 pub mod media;
 mod migrations;
 pub mod notes;
@@ -21,33 +23,54 @@ use std::sync::Arc;
 
 use parking_lot::{Mutex, MutexGuard};
 
-use rusqlite::{Connection, Transaction};
+/// The connection the `_tx` functions and the extension hooks write on:
+/// the store's own, or a transaction from `Store::with_tx`.
+pub use rusqlite::Connection;
+/// What `Store::with_tx` hands its closure.
+pub use rusqlite::Transaction;
 
 use ext::StoreExtension;
 
 pub use migrations::MONOLITH_MARKER;
-pub use repo::ai::{
-    AiCallNew, AiCallRow, AiCallStep, AiDraftCounts, AiDraftNew, AiDraftRow, AiDraftStatus,
-    AiExtractionNew, AiExtractionRow, AiJobNew, AiJobOp, AiJobRow, AiJobState, AiSourceKind,
-    AiSourceNew, AiSourceRow, AiTurnNew, AiTurnRole, AiTurnRow, AiUsageSince,
+pub use repo::auth::{
+    add_passkey_tx, consume_invite_tx, consume_password_reset_tx, delete_unused_password_resets_tx,
+    lookup_invite_tx, lookup_password_reset_tx, InviteInfo, StoredPasskey, WebSessionHit,
+    WebSessionRow,
 };
-pub use repo::auth::{InviteInfo, StoredPasskey};
+pub use repo::card_bulk::{CardFilter, CardStatus, DeckFacet, MAX_BULK_CARDS};
 pub use repo::cards::{
-    check_tags, CardExtras, CardRow, DeckLimits, DeckSummary, DeletedDeck, MAX_DECKS_PER_USER,
-    MAX_TAGS_PER_CARD, MAX_TAG_LEN,
+    check_tags, CardExtras, CardRow, ImportedCard, MAX_TAGS_PER_CARD, MAX_TAG_LEN,
+};
+pub use repo::client_errors::{
+    ClientErrorNew, ClientErrorRecorded, ClientErrorSummary, CLIENT_ERROR_QUIET_MS,
+    CLIENT_ERROR_ROWS_PER_DAY,
+};
+pub use repo::deck_goals::{DeckGoal, GoalCounts};
+pub use repo::decks::{require_deck, DeckLimits, DeckSummary, DeletedDeck, MAX_DECKS_PER_USER};
+pub use repo::ids::{next_id, IdTable};
+pub use repo::import_commits::ImportClaim;
+pub use repo::jobs::{
+    enqueue_job, job_counts_tx, owe_blob_deletes, JobCounts, JobRow, JobState, NewJob,
+    JOB_DELETE_BLOBS,
 };
 pub use repo::mcp::{McpDeletionPreview, McpDeletionReceipt, McpMutationReceipt, SourceEdit};
 pub use repo::media::MediaRow;
-pub use repo::notes::{NoteRow, NoteSave};
+pub use repo::notes::{
+    CardSide, NoteLangs, NoteRevision, NoteRow, NoteSave, NoteSpeech, NoteUpdate, RestoredRevision,
+    RevisionSource, REVISIONS_KEPT, REVISION_MAX_AGE_MS, SPEECH_BY_ASSISTANT,
+};
 pub use repo::oauth::{
-    ApiTokenInfo, CodeConsume, CodeGrant, GrantRow, OAuthClient, RefreshGrant, TokenRow,
+    revoke_all_tokens_for_user_tx, revoke_tokens_for_user_tx, ApiTokenInfo, CodeConsume, CodeGrant,
+    GrantRow, NextPair, OAuthClient, RefreshGrant, RefreshOutcome, TokenRow, REFRESH_GRACE_MS,
 };
 pub use repo::reviews::{ImportedReview, SessionStats};
+pub use repo::speech::parse_speech_hints;
+pub use repo::tags::TagCount;
 pub use repo::users::{
-    AccountRow, AdminUserRow, DeletedAccount, PasswordLogin, PW_LOCKOUT_THRESHOLD,
-    PW_LOCKOUT_WINDOW_MS,
+    account_row_tx, clear_password_failures_tx, create_user_tx, email_taken_tx,
+    set_password_hash_tx, AccountRow, AdminUserRow, DeletedAccount, LocaleSignal, LocaleSource,
+    PasswordLogin, PW_LOCKOUT_THRESHOLD, PW_LOCKOUT_WINDOW_MS,
 };
-pub use repo::voice::{VoiceClipKind, VoiceClipNew, VoiceClipRow, VoiceSide};
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -92,9 +115,13 @@ pub fn exec_expect_row<P: rusqlite::Params>(
     Ok(())
 }
 
+/// Told after each write the store commits (`Store::on_commit`).
+pub type CommitListener = Box<dyn Fn() + Send + Sync>;
+
 pub struct Store {
     conn: Mutex<Connection>,
     extensions: Vec<Arc<dyn StoreExtension>>,
+    commit_listeners: Arc<Mutex<Vec<CommitListener>>>,
 }
 
 impl Store {
@@ -104,6 +131,29 @@ impl Store {
 
     pub fn open_in_memory() -> Result<Self> {
         Self::open_in_memory_with(Vec::new())
+    }
+
+    /// Opens a database the server has already brought up to this
+    /// binary's schema, for a command run beside a live server: a missing
+    /// file or an older schema is refused, never created or migrated
+    /// under a server that may still be running the old code.
+    pub fn open_current(path: &Path) -> Result<Self> {
+        if !path.is_file() {
+            return Err(StoreError::Invalid(format!(
+                "no database at {}",
+                path.display()
+            )));
+        }
+        let conn = Connection::open(path)?;
+        let found: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
+        let expected = migrations::core_version();
+        if found < expected {
+            return Err(StoreError::Invalid(format!(
+                "the database is at schema {found} and this binary needs {expected}: \
+                 start the server once to upgrade it, then run this again"
+            )));
+        }
+        Self::init(conn, Vec::new())
     }
 
     /// Opens with extensions, which are consulted by the core's
@@ -119,10 +169,30 @@ impl Store {
     fn init(conn: Connection, extensions: Vec<Arc<dyn StoreExtension>>) -> Result<Self> {
         pragmas::apply(&conn)?;
         migrations::run(&conn, &extensions)?;
+        let commit_listeners: Arc<Mutex<Vec<CommitListener>>> = Arc::default();
+        let listeners = commit_listeners.clone();
+        // One hook on the one connection sees every write, whichever
+        // path made it; returning false lets the commit go ahead.
+        conn.commit_hook(Some(move || {
+            for listener in listeners.lock().iter() {
+                listener();
+            }
+            false
+        }))?;
         Ok(Self {
             conn: Mutex::new(conn),
             extensions,
+            commit_listeners,
         })
+    }
+
+    /// Calls `listener` whenever a write commits (a transaction, or a
+    /// statement outside one), for a downstream extension that reacts to
+    /// changes wherever they were made. It runs inside the commit, with
+    /// the connection locked: it must only signal (wake a task, set a
+    /// flag), never touch the store.
+    pub fn on_commit(&self, listener: impl Fn() + Send + Sync + 'static) {
+        self.commit_listeners.lock().push(Box::new(listener));
     }
 
     /// The core's schema cursor (PRAGMA user_version).
@@ -147,8 +217,9 @@ impl Store {
     /// The one connection, locked. A panic while the guard is held cannot
     /// poison it (parking_lot has no such state); an open transaction is
     /// rolled back as its guard unwinds, so the next caller sees a clean
-    /// connection rather than a permanently panicking lock.
-    pub(crate) fn conn(&self) -> MutexGuard<'_, Connection> {
+    /// connection rather than a permanently panicking lock. A store
+    /// extension's queries take it as the store's own do.
+    pub fn conn(&self) -> MutexGuard<'_, Connection> {
         self.conn.lock()
     }
 

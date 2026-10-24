@@ -1,7 +1,7 @@
 //! Settings and account security: the overview the settings screen
-//! renders, each form's endpoint, login-method management, billing as
-//! a read-only view, export, and self-serve deletion. Every rule is the
-//! web's (`flows::account`, `Services`), reached through a JSON body.
+//! renders, each form's endpoint, login-method management, export, and
+//! self-serve deletion. Every rule is the web's (`flows::account`,
+//! `Services`), reached through a JSON body.
 
 use axum::extract::{Path, State};
 use axum::http::{header, StatusCode};
@@ -14,7 +14,7 @@ use serde::Deserialize;
 use super::auth::{ceremony_error, Ceremony};
 use super::dto::Settings;
 use super::{call, ApiError, ApiJson, ApiResult, BearerUser};
-use crate::ext::{AccountView, Surface};
+use crate::ext::{AccountEvent, AccountView, Surface};
 use crate::flows::account::{self, DeleteRefusal, KeepSession, RemoveOutcome};
 use crate::flows::export_flow;
 use crate::password;
@@ -28,7 +28,7 @@ pub fn router() -> Router<AppState> {
         .route("/settings/profile", axum::routing::patch(profile))
         .route("/settings/grading", put(grading))
         .route("/settings/theme", put(theme))
-        .route("/settings/voice", put(voice))
+        .route("/settings/language", put(language))
         .route("/settings/limits", put(limits))
         .route("/settings/study", put(study))
         .route(
@@ -47,6 +47,7 @@ async fn overview(State(state): State<AppState>, user: BearerUser) -> ApiResult<
     let app = state.clone();
     let settings = call(state.services.clone(), move |s| {
         let mut settings = Settings::from_overview(s.settings_overview(user.id, now_ms())?);
+        settings.language = language_of(&app, s.store(), user.id)?;
         settings.extra = app
             .ext
             .account_json(&app, &s, user.id, AccountView::Settings)?;
@@ -54,6 +55,77 @@ async fn overview(State(state): State<AppState>, user: BearerUser) -> ApiResult<
     })
     .await?;
     Ok(Json(settings))
+}
+
+fn language_of(
+    state: &AppState,
+    store: &flash_store::Store,
+    user: UserId,
+) -> Result<super::dto::LanguageDto, ServiceError> {
+    let chosen = chosen_language(store, user, state.i18n.shipped())?;
+    let shipped = state
+        .i18n
+        .shipped()
+        .iter()
+        .map(|l| super::dto::LanguageOption {
+            tag: l.tag(),
+            name: l.native_name(),
+        })
+        .collect();
+    Ok(super::dto::LanguageDto { chosen, shipped })
+}
+
+pub(super) fn chosen_language(
+    store: &flash_store::Store,
+    user: UserId,
+    shipped: &[flash_core::locale::UiLocale],
+) -> Result<Option<&'static str>, ServiceError> {
+    Ok(match store.account_locale(user)? {
+        Some((tag, flash_store::LocaleSource::Chosen)) => {
+            let zone = store.get_settings(user).ok().map(|s| s.timezone);
+            flash_core::locale::negotiate_tags(&[&tag], zone.as_deref(), shipped)
+                .map(|n| n.locale.tag())
+        }
+        _ => None,
+    })
+}
+
+#[derive(Deserialize)]
+struct LanguageBody {
+    /// One of the languages Flash ships ("es-ES"), or null for automatic.
+    #[serde(default, deserialize_with = "crate::bounds::opt_keyword")]
+    language: Option<String>,
+}
+
+/// The account's language, the same choice the website's settings make:
+/// a language Flash ships, or null to go back to what the phone (or the
+/// browser, or the assistant) says.
+async fn language(
+    State(state): State<AppState>,
+    user: BearerUser,
+    ApiJson(body): ApiJson<LanguageBody>,
+) -> Result<StatusCode, ApiError> {
+    let picked = match body.language.as_deref() {
+        None => None,
+        Some(asked) => Some(
+            state
+                .i18n
+                .shipped()
+                .iter()
+                .map(|l| l.tag())
+                .find(|tag| tag.eq_ignore_ascii_case(asked))
+                .ok_or_else(|| ApiError::malformed("unknown language"))?,
+        ),
+    };
+    call(state.services.clone(), move |s| {
+        match picked {
+            Some(tag) => s.store().set_chosen_locale(user.id, tag)?,
+            None => s.store().clear_chosen_locale(user.id)?,
+        }
+        Ok::<_, ServiceError>(())
+    })
+    .await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 // ---- simple forms ----
@@ -112,67 +184,6 @@ async fn theme(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Any subset of the voice settings: the app saves one control at a
-/// time.
-#[derive(Deserialize)]
-struct VoiceBody {
-    #[serde(default, deserialize_with = "crate::bounds::opt_keyword")]
-    voice_id: Option<String>,
-    speech_rate: Option<f32>,
-    #[serde(default, deserialize_with = "crate::bounds::opt_keyword")]
-    voice_apply: Option<String>,
-    sound_cues: Option<bool>,
-}
-
-async fn voice(
-    State(state): State<AppState>,
-    user: BearerUser,
-    ApiJson(body): ApiJson<VoiceBody>,
-) -> Result<StatusCode, ApiError> {
-    let patch = voice_patch(
-        body.voice_id,
-        body.speech_rate,
-        body.voice_apply,
-        body.sound_cues,
-    )
-    .map_err(ApiError::invalid)?;
-    let tts = state.tts.clone();
-    call(state.services.clone(), move |s| {
-        s.set_voice_settings(user.id, &patch)?;
-        // A new voice starts with a cold cache: the card on screen and
-        // the next few are queued in it now, ahead of anyone asking.
-        if let (Some(tts), Some(_)) = (tts, &patch.voice_id) {
-            crate::tts::prefetch_queue_head(&tts, &s, user.id, now_ms());
-        }
-        Ok::<_, ServiceError>(())
-    })
-    .await?;
-    Ok(StatusCode::NO_CONTENT)
-}
-
-/// The patch a voice settings form or body describes; the enums are
-/// parsed here so a bad word is a 400 with the sentence.
-pub(crate) fn voice_patch(
-    voice_id: Option<String>,
-    speech_rate: Option<f32>,
-    voice_apply: Option<String>,
-    sound_cues: Option<bool>,
-) -> Result<flash_core::VoiceSettingsPatch, String> {
-    let apply = match voice_apply {
-        None => None,
-        Some(a) => Some(
-            flash_core::VoiceApply::from_str(&a)
-                .ok_or_else(|| format!("unknown grading setting {a:?}"))?,
-        ),
-    };
-    Ok(flash_core::VoiceSettingsPatch {
-        voice_id,
-        speech_rate,
-        apply,
-        sound_cues,
-    })
-}
-
 #[derive(Deserialize)]
 struct LimitsBody {
     new_per_day: u32,
@@ -197,6 +208,7 @@ struct StudyBody {
     timezone: Option<String>,
     day_cutoff_hour: Option<u8>,
     desired_retention: Option<f32>,
+    due_by_day: Option<bool>,
 }
 
 async fn study(
@@ -208,6 +220,7 @@ async fn study(
         timezone: body.timezone,
         day_cutoff_hour: body.day_cutoff_hour,
         desired_retention: body.desired_retention,
+        due_by_day: body.due_by_day,
     };
     call(state.services.clone(), move |s| {
         s.set_study_settings(user.id, &patch)
@@ -224,17 +237,14 @@ fn wrong_password() -> ApiError {
     ApiError::new(
         StatusCode::FORBIDDEN,
         "wrong_password",
-        "that password is incorrect",
+        crate::i18n::t("settings-delete-error-password"),
     )
 }
 
 /// Removing the only way into the account; shared with the extension's
 /// provider unlink routes.
 pub fn last_method() -> ApiError {
-    ApiError::conflict(
-        "last_login_method",
-        "that's the only way to sign in, so add another method first",
-    )
+    ApiError::conflict("last_login_method", crate::i18n::t("api-last-login-method"))
 }
 
 /// Verifies the account's current password, feeding the same lockout
@@ -279,14 +289,15 @@ async fn set_or_change_password(
     user: BearerUser,
     ApiJson(body): ApiJson<PasswordBody>,
 ) -> Result<StatusCode, ApiError> {
-    password::validate_new_password(&body.password).map_err(ApiError::invalid)?;
+    password::validate_new_password(&body.password)
+        .map_err(|id| ApiError::invalid(crate::i18n::t(id)))?;
     let has_password = call(state.services.clone(), move |s| {
         Ok::<_, ApiError>(s.store().get_password_hash(user.id)?.is_some())
     })
     .await?;
     if has_password {
         let Some(current) = body.current.as_deref() else {
-            return Err(ApiError::invalid("the current password is required"));
+            return Err(ApiError::invalid(crate::i18n::t("api-current-password")));
         };
         verify_current(&state, user.id, current).await?;
     }
@@ -320,7 +331,7 @@ async fn remove_password(
     ApiJson(body): ApiJson<CurrentBody>,
 ) -> Result<StatusCode, ApiError> {
     if !verify_current(&state, user.id, &body.current).await? {
-        return Err(ApiError::invalid("no password is set"));
+        return Err(ApiError::malformed("no password is set"));
     }
     let ext = state.ext.clone();
     match call(state.services.clone(), move |s| {
@@ -411,7 +422,7 @@ async fn delete_account(
     ApiJson(body): ApiJson<DeleteBody>,
 ) -> Result<StatusCode, ApiError> {
     if body.confirm.trim() != "DELETE" {
-        return Err(ApiError::invalid("type DELETE exactly to confirm"));
+        return Err(ApiError::malformed("type DELETE exactly to confirm"));
     }
     let has_password = call(state.services.clone(), move |s| {
         Ok::<_, ApiError>(s.store().get_password_hash(user.id)?.is_some())
@@ -426,20 +437,18 @@ async fn delete_account(
     })
     .await?;
     match outcome {
-        Ok(deleted) => {
-            crate::media::remove_orphans(
-                state.services.clone(),
-                state.media.clone(),
-                &deleted.orphan_blobs,
-            );
+        Ok(_deleted) => {
+            // The purge owes its orphaned blobs to the job worker.
+            crate::jobs::wake(&state);
             Ok(StatusCode::NO_CONTENT)
         }
         Err(refusal) => Err(match refusal {
-            DeleteRefusal::LastAdmin => ApiError::conflict(
-                "last_admin",
-                "you're the only admin, so make someone else admin first",
-            ),
-            DeleteRefusal::Ext { code, message } => ApiError::conflict(code, message),
+            DeleteRefusal::LastAdmin => {
+                ApiError::conflict("last_admin", crate::i18n::t("settings-delete-error-admin"))
+            }
+            DeleteRefusal::Ext { code, message } => {
+                ApiError::conflict(code, crate::i18n::t(message))
+            }
         }),
     }
 }
@@ -475,10 +484,7 @@ async fn export_apkg(
     state.ext.account_event(
         &state.services,
         user.id,
-        "export",
-        Surface::Mobile,
-        Some("apkg"),
-        None,
+        AccountEvent::new("export", Surface::Mobile).detail(Some("apkg")),
     );
     Ok(export_flow::attachment_stream(
         export,
@@ -498,10 +504,7 @@ async fn export_csv(State(state): State<AppState>, user: BearerUser) -> Result<R
     state.ext.account_event(
         &state.services,
         user.id,
-        "export",
-        Surface::Mobile,
-        Some("csv"),
-        None,
+        AccountEvent::new("export", Surface::Mobile).detail(Some("csv")),
     );
     Ok(attachment(
         csv.into_bytes(),

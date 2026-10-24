@@ -5,7 +5,22 @@
 use serde::Serialize;
 
 use crate::service::{self, AccountOverview};
-pub use crate::tts::serve::ClipDescriptor;
+
+/// A tag with the number of the user's live cards carrying it.
+#[derive(Debug, Serialize)]
+pub struct Tag {
+    pub name: String,
+    pub cards: u32,
+}
+
+impl From<flash_store::TagCount> for Tag {
+    fn from(t: flash_store::TagCount) -> Self {
+        Self {
+            name: t.name,
+            cards: t.cards,
+        }
+    }
+}
 
 /// A deck with today's budgeted counts, as the lists show it. A list of
 /// these is in tree order: each deck followed by the decks under it.
@@ -27,6 +42,39 @@ pub struct Deck {
     /// Epoch ms when the deck was archived; null while it is active. An
     /// archived deck's counts are zero.
     pub archived_at: Option<i64>,
+    pub goal: Option<Goal>,
+}
+
+/// A deck's goal date and how the deck stands toward it, over the deck
+/// and the decks under it.
+#[derive(Debug, Serialize)]
+pub struct Goal {
+    /// `YYYY-MM-DD` on the account's calendar.
+    pub date: String,
+    /// Days until it: 0 on the day, negative once it has passed.
+    pub days_left: i64,
+    /// New cards behind the plan made when it was set.
+    pub behind_by: u32,
+    /// New cards a day until the last days before it; null from the day on.
+    pub new_per_day: Option<u32>,
+    /// The day new cards stop and the last reviews begin.
+    pub cutoff: Option<String>,
+    pub learned: u32,
+    pub total: u32,
+}
+
+impl From<crate::service::goals::GoalView> for Goal {
+    fn from(g: crate::service::goals::GoalView) -> Self {
+        Goal {
+            cutoff: g.cutoff().map(|d| d.to_string()),
+            date: g.date.to_string(),
+            days_left: g.days_left,
+            behind_by: g.behind_by,
+            new_per_day: g.plan.map(|p| p.pace),
+            learned: g.learned,
+            total: g.total,
+        }
+    }
 }
 
 impl From<service::DeckRow> for Deck {
@@ -41,6 +89,7 @@ impl From<service::DeckRow> for Deck {
             due: d.due_count,
             new: d.new_count,
             archived_at: d.archived_at,
+            goal: d.goal.map(Into::into),
         }
     }
 }
@@ -100,6 +149,8 @@ pub struct DeckDetail {
     /// Decks under this one, at any depth: what archiving or deleting it
     /// takes along.
     pub subdeck_count: u32,
+    /// Languages the cards are in, as the deck's settings name them.
+    pub speech_language_hints: Vec<String>,
 }
 
 impl From<service::DeckDetail> for DeckDetail {
@@ -115,6 +166,7 @@ impl From<service::DeckDetail> for DeckDetail {
             },
             card_count: d.card_count,
             subdeck_count: d.subdeck_count,
+            speech_language_hints: d.speech_language_hints,
         }
     }
 }
@@ -130,6 +182,15 @@ pub struct EditorSeed {
     pub back_html: String,
     pub tags: Vec<String>,
     pub sibling_count: usize,
+    /// The language picked for each field, as a tag; null where none is.
+    pub langs: LangsOut,
+}
+
+/// The language picked for each field of a card.
+#[derive(Debug, Serialize)]
+pub struct LangsOut {
+    pub front: Option<String>,
+    pub back: Option<String>,
 }
 
 impl From<service::EditorSeed> for EditorSeed {
@@ -143,6 +204,10 @@ impl From<service::EditorSeed> for EditorSeed {
             back_html: s.back_html,
             tags: s.tags,
             sibling_count: s.sibling_count,
+            langs: LangsOut {
+                front: s.langs.front,
+                back: s.langs.back,
+            },
         }
     }
 }
@@ -153,43 +218,34 @@ pub struct StudyCard {
     pub card_id: i64,
     pub front: String,
     pub front_html: Option<String>,
-    /// The front as read aloud: a cloze deletion is "blank", a picture
-    /// its alt text.
-    pub spoken_front: String,
-    /// The front in the account's natural voice, when this server has
-    /// one and the clip is made; null reads with the device's voice.
-    pub audio_front: Option<ClipDescriptor>,
     pub wants_typing: bool,
     /// Image ids on this card's hidden back: fetch before the reveal.
     pub preload_media: Vec<i64>,
     /// Image ids on the next card, both sides: fetch at low priority.
     pub prefetch_media: Vec<i64>,
-    /// Words to prime a speech recognizer with while this front is
-    /// shown: the answer's words and their spelled-out forms ("Au" and
-    /// "A U"). Present before the reveal by design; never show them.
-    pub answer_hints: Vec<String>,
-}
-
-/// Where the API serves a card side's clip.
-pub fn card_audio_url(card_id: i64, side: &str) -> String {
-    format!("/api/v1/study/cards/{card_id}/audio?side={side}")
+    /// The card after this one, for a client that prepares it while this
+    /// one is being answered. Null on the last card.
+    pub next_card_id: Option<i64>,
+    /// The languages this card's own deck is in, as the deck's settings
+    /// name them (`["fr", "en"]`); empty when they name none.
+    pub speech_language_hints: Vec<String>,
+    /// A downstream extension's fields (`ServerExtension::study_card_json`).
+    #[serde(flatten)]
+    pub extra: crate::ext::JsonFields,
 }
 
 impl From<service::StudyCard> for StudyCard {
     fn from(c: service::StudyCard) -> Self {
         StudyCard {
             card_id: c.card_id.0,
-            audio_front: c
-                .audio_front
-                .as_ref()
-                .map(|clip| ClipDescriptor::new(card_audio_url(c.card_id.0, "front"), clip)),
             front: c.front,
             front_html: c.front_html,
-            spoken_front: c.spoken_front,
             wants_typing: c.wants_typing,
             preload_media: c.preload_media,
             prefetch_media: c.prefetch_media,
-            answer_hints: c.answer_hints,
+            next_card_id: c.next_card.map(|id| id.0),
+            speech_language_hints: c.speech_language_hints,
+            extra: crate::ext::JsonFields::new(),
         }
     }
 }
@@ -213,35 +269,22 @@ impl From<service::DiffSpan> for DiffSpan {
 pub struct Reveal {
     pub back: String,
     pub back_html: Option<String>,
-    /// Both sides as read aloud: the front with its deletion hidden,
-    /// the back with the word.
-    pub spoken_front: String,
-    pub spoken_back: String,
-    /// Both sides in the account's natural voice, when the clips exist.
-    pub audio_front: Option<ClipDescriptor>,
-    pub audio_back: Option<ClipDescriptor>,
     /// Present when the card asked for typing and something was typed.
     pub typed_diff: Option<Vec<DiffSpan>>,
+    /// A downstream extension's fields (`ServerExtension::reveal_json`).
+    #[serde(flatten)]
+    pub extra: crate::ext::JsonFields,
 }
 
 impl From<service::Reveal> for Reveal {
     fn from(r: service::Reveal) -> Self {
         Reveal {
-            audio_front: r
-                .audio_front
-                .as_ref()
-                .map(|clip| ClipDescriptor::new(card_audio_url(r.card_id.0, "front"), clip)),
-            audio_back: r
-                .audio_back
-                .as_ref()
-                .map(|clip| ClipDescriptor::new(card_audio_url(r.card_id.0, "back"), clip)),
             back: r.back,
             back_html: r.back_html,
-            spoken_front: r.spoken_front,
-            spoken_back: r.spoken_back,
             typed_diff: r
                 .typed_diff
                 .map(|spans| spans.into_iter().map(Into::into).collect()),
+            extra: crate::ext::JsonFields::new(),
         }
     }
 }
@@ -267,8 +310,8 @@ impl From<flash_store::SessionStats> for SessionSummary {
     }
 }
 
-/// The signed-in account as the app sees it. The extension's fields
-/// (plan, connected providers) are flattened in through `extra`.
+/// The signed-in account as the app sees it. The extension's fields are
+/// flattened in through `extra`.
 #[derive(Debug, Serialize)]
 pub struct Me {
     pub id: i64,
@@ -278,6 +321,9 @@ pub struct Me {
     pub theme: String,
     pub grading_mode: &'static str,
     pub login_methods: LoginMethods,
+    /// The language the account chose ("es-ES"), which the app shows
+    /// itself in; null while it reads what the phone says.
+    pub language: Option<&'static str>,
     #[serde(flatten)]
     pub extra: crate::ext::JsonFields,
 }
@@ -301,6 +347,7 @@ impl From<AccountOverview> for Me {
                 password: a.has_password,
                 passkeys: a.passkeys,
             },
+            language: None,
             extra: crate::ext::JsonFields::new(),
         }
     }
@@ -322,8 +369,8 @@ pub struct SettingsLoginMethods {
     pub passkeys: Vec<Passkey>,
 }
 
-/// Everything the settings screen renders. The extension's fields (plan,
-/// usage, billing, connected providers) are flattened in through `extra`.
+/// Everything the settings screen renders. The extension's fields are
+/// flattened in through `extra`.
 #[derive(Debug, Serialize)]
 pub struct Settings {
     pub display_name: String,
@@ -336,31 +383,32 @@ pub struct Settings {
     pub timezone: String,
     pub day_cutoff_hour: u8,
     pub desired_retention: f32,
+    /// Review cards due for their whole study day (true) or at their
+    /// exact time.
+    pub due_by_day: bool,
     pub login_methods: SettingsLoginMethods,
     pub card_count: u32,
-    pub voice: VoiceSettingsDto,
+    pub language: LanguageDto,
     #[serde(flatten)]
     pub extra: crate::ext::JsonFields,
 }
 
-/// How the account studies by voice, on every surface.
-#[derive(Debug, Serialize)]
-pub struct VoiceSettingsDto {
-    pub voice_id: String,
-    pub speech_rate: f32,
-    pub voice_apply: &'static str,
-    pub sound_cues: bool,
+/// The language the account reads Flash in, everywhere (app, website,
+/// emails, the study panel): the one it chose, or null for automatic
+/// (what the phone, the browser or the assistant says).
+#[derive(Debug, Serialize, Default)]
+pub struct LanguageDto {
+    /// The chosen language, as Flash files its words ("en", "es-ES",
+    /// "es-419"); null when none is chosen.
+    pub chosen: Option<&'static str>,
+    /// The languages Flash ships, English first, each named in itself.
+    pub shipped: Vec<LanguageOption>,
 }
 
-impl From<flash_core::VoiceSettings> for VoiceSettingsDto {
-    fn from(v: flash_core::VoiceSettings) -> Self {
-        VoiceSettingsDto {
-            voice_id: v.voice_id,
-            speech_rate: v.speech_rate,
-            voice_apply: v.apply.as_str(),
-            sound_cues: v.sound_cues,
-        }
-    }
+#[derive(Debug, Serialize)]
+pub struct LanguageOption {
+    pub tag: &'static str,
+    pub name: &'static str,
 }
 
 impl Settings {
@@ -389,8 +437,9 @@ impl Settings {
             timezone: o.timezone,
             day_cutoff_hour: o.day_cutoff_hour,
             desired_retention: o.desired_retention,
+            due_by_day: o.due_by_day,
             card_count: o.card_count,
-            voice: o.voice.into(),
+            language: LanguageDto::default(),
             extra: crate::ext::JsonFields::new(),
         }
     }
@@ -408,12 +457,12 @@ pub struct TokenPair {
 }
 
 impl TokenPair {
-    pub fn new(access_token: String, refresh_token: String, user: Me) -> Self {
+    pub fn new(access_token: String, refresh_token: String, expires_in: i64, user: Me) -> Self {
         TokenPair {
             access_token,
             refresh_token,
             token_type: "Bearer",
-            expires_in: crate::oauth::ACCESS_TTL_MS / 1000,
+            expires_in,
             user,
         }
     }

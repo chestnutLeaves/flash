@@ -3,10 +3,71 @@
 Every user-visible change to the open core, newest first. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 versions follow [Semantic Versioning](https://semver.org/): before 1.0, a
-minor bump may change behaviour and a patch bump only fixes. Each entry
-names the issue it answers and the person who raised it.
+minor bump may change behaviour and a patch bump only fixes. An entry
+that answers an issue names it and the person who raised it.
 
 ## [Unreleased]
+
+## [0.4.0] - 2026-10-23
+
+### Added
+
+- Preview a deck: go through every card, marked Missed or Got it, without
+  touching its schedule.
+- Change many of a deck's cards at once: archive, move, tag or delete,
+  with Undo.
+- Filter a deck's cards by status, subdeck and tags, and export a single
+  deck as an Anki package.
+- Goal dates: Flash paces a deck's new cards so they are all learned by
+  the day you set.
+- Spanish, Portuguese (Brazil and Portugal) and French, picked from the
+  browser or the account.
+- Archive a card to keep its history while leaving it out of study.
+- Edit a card in the middle of a session, and see and restore its
+  history; every card has its own page.
+- Study by tags.
+- A study panel inside assistants that show MCP Apps, and connection
+  steps for Le Chat and Gemini.
+- A Devices list in Settings, a per-request access log
+  (`FLASH_ACCESS_LOG=1`), and a graceful stop on SIGTERM.
+- `flash-server reset-link <email>` prints a one-time password reset
+  link, for a server that sends no mail.
+
+### Changed
+
+- A deck's page has a new layout, and a finished session shows its
+  numbers and the week ahead.
+- Review cards are due for their whole study day, as in Anki.
+- Search ignores case and accents in every alphabet.
+- MCP tools describe themselves more clearly, and every refusal carries
+  an error code.
+- Building from source no longer needs OpenSSL.
+
+### Fixed
+
+- Gemini's custom MCP connector calls tools again.
+  (#10, reported by @DHEERAJKUMAR24)
+- Connecting an assistant works from ChatGPT's mobile site, from Android
+  apps, and with a long OAuth `state`.
+- Back and Forward on a deck's page load it again cleanly.
+- A card deleted from a note stays deleted when the note is saved again.
+- Anki exports carry every media file, and several at once cannot fill
+  the disk.
+- A deleted deck, note, card or account never hands its id to a new one.
+- Right-to-left cards read right to left, and typing with an input method
+  no longer triggers shortcuts.
+- Old time zone names such as `Asia/Calcutta` are accepted.
+
+### Security
+
+- Signing in with a passkey no longer lists other accounts' passkeys.
+  A passkey a security key made before 0.4.0 has to be added again: sign
+  in with the password, or a link from `flash-server reset-link`, then
+  add it in Settings.
+- Refresh tokens rotate with reuse detection, and signing out everywhere
+  else also ends unused tokens.
+- Dependencies updated past seven RustSec advisories, among them
+  RUSTSEC-2026-0367, -0368 and -0369 (#5, #6, #7).
 
 ## [0.3.0] - 2026-09-19
 
@@ -45,9 +106,8 @@ in the README.
   A deck's own page has a "Subdecks" link beside Settings that opens and
   closes the list of its subdecks, with how many there are; it is closed
   whenever the page loads and is not remembered, and an archived subdeck
-  is unarchived from its row there, as on the deck list. "Generate" on a
-  deck's page moved from the buttons in the heading to a link across
-  from "Add a card". A deck's path reads `Pharmacology › Cardio`
+  is unarchived from its row there, as on the deck list. A deck's path
+  reads `Pharmacology › Cardio`
   wherever a page shows one (a picker, a title, the import preview);
   `::` is what is stored and what the API, MCP and Anki files use.
 - An import keeps the decks its file names. An Anki package's nested
@@ -66,18 +126,12 @@ in the README.
   for a deletion batch. Reads include pagination and total counts, and
   bound each page by size so a deck of rich cards never overflows a
   client; writes return affected IDs and counts.
-- Generated cards can go into a new deck named on the spot. The deck
-  switcher on the generate page and on the review of the drafts offers
-  "New deck" beside the decks you have, so an account with none is no
-  longer sent away to make one first. The API takes the same thing as
-  `deck_name` on `POST /ai/jobs` and on a keep.
 
 ### Changed
 
 - The MCP contract changes, with no aliases for the old tools:
   `update_cards` and `delete_cards` replace the single-card tools, and
-  content uses HTML source fields and media references. Spoken fields are
-  removed: clients choose how to display or speak cards. Refresh connector
+  content uses HTML source fields and media references. Refresh connector
   tool definitions after upgrading. See
   [MCP contract](crates/flash-server/MCP.md).
 - Archived decks show in place in the deck list, with "(archived)" after
@@ -103,9 +157,8 @@ in the README.
   a completed deletion returns its original result. A deck deletion asks
   about the cards the deck shows. Pending approvals cannot
   delete replacement cards or decks that reuse an original target's ID.
-- Long pages no longer scroll past their own content. The review of
-  generated cards grew a second scrollbar that ran for the height of the
-  card list and pulled the sidebar off the top of the window.
+- Long pages no longer scroll past their own content. A second scrollbar
+  used to pull the sidebar off the top of the window.
 
 ## [0.2.0] - 2026-09-17
 
@@ -120,17 +173,6 @@ card, review and media file kept. See "Upgrading" in the README.
   the web, in the JSON API (`POST /api/v1/decks/{id}/archive` and
   `/unarchive`) and as the MCP tools `archive_deck` and `unarchive_deck`.
   (#1, suggested by @xblr)
-- Card generation with your own model. PDFs, images, video, audio,
-  YouTube links and pasted text become drafts you review, edit by chat
-  and keep. `FLASH_AI_PROVIDER` picks the API: `openai` for any endpoint
-  speaking the OpenAI Chat Completions protocol, hosted or on your own
-  machine, or `gemini` for the native adapter, which also reads PDFs,
-  video and YouTube links. See "Using your own model" in the README.
-- Voice mode: study hands-free, natively in the app and on the web. The
-  cards are read to you in a natural voice from the `tools/flash-tts`
-  sidecar (`FLASH_TTS_URL`, with English, Japanese and Mandarin voices),
-  your spoken answer is graded by the model, and you can ask about the
-  card, grade, repeat or skip by speaking.
 - An Anki import brings the whole review history, and the stats page can
   show a single year.
 
@@ -142,7 +184,8 @@ MCP endpoint (Streamable HTTP with OAuth 2.1). Accounts are created by an
 admin; the first admin enrolls from a one-time link in the boot log. Ships
 as a static Linux binary and a Docker image.
 
-[Unreleased]: https://github.com/flash-cards/flash/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/flash-cards/flash/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/flash-cards/flash/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/flash-cards/flash/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/flash-cards/flash/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/flash-cards/flash/releases/tag/v0.1.0

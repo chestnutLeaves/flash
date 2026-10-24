@@ -18,7 +18,7 @@ mod proto;
 mod template;
 
 pub use apkg::{parse_apkg, review_history};
-pub use apkg_media::{extract_media_file, read_media_manifest, ApkgMediaEntry};
+pub use apkg_media::{extract_media_file, open_package, read_media_manifest, ApkgMediaEntry};
 pub use colorize::{parse_css_class_colors, remap_colors, ClassColorMap};
 pub use csv_file::parse_csv;
 pub use deck_options::ImportedSettings;
@@ -44,6 +44,9 @@ pub struct HistoryEntry {
     /// The Anki card it graded; matched to `ImportRow::anki_card_id`.
     pub anki_card_id: i64,
     pub rating: flash_core::Rating,
+    /// How long the card was on screen before the answer, when Anki
+    /// kept it.
+    pub answer_ms: Option<i64>,
 }
 
 /// Most per-row messages a parse keeps (a file of nothing but bad rows
@@ -73,11 +76,106 @@ pub(crate) const MAX_LOOKUP_ROWS: usize = 10_000;
 /// the first byte of content is read.
 pub const MAX_PACKAGE_ENTRIES: usize = 20_000;
 
-/// The sentence a file over `MAX_ROWS` gets.
+/// What a file over `MAX_ROWS` is told.
 pub fn too_many_cards() -> ImportError {
-    ImportError::user(format!(
-        "that file has more than {MAX_ROWS} cards; imports are capped at {MAX_ROWS} per file. Split it in Anki first"
-    ))
+    ImportError::user(ImportNote::new("import-too-many-cards").num("max", MAX_ROWS))
+}
+
+/// Something an import says to the person: the id of a message in the
+/// server's catalog (`crates/flash-server/locales/en/import.ftl`) and
+/// its variables, and the file of the package it is about, if one. The
+/// store never words it; whoever shows it does, in the reader's
+/// language.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ImportNote {
+    pub id: String,
+    pub args: Vec<(String, NoteArg)>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+}
+
+impl From<&str> for ImportNote {
+    fn from(id: &str) -> Self {
+        ImportNote::new(id)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(untagged)]
+pub enum NoteArg {
+    Number(f64),
+    Text(String),
+}
+
+impl ImportNote {
+    pub fn new(id: &str) -> Self {
+        debug_assert!(
+            id.starts_with("import-") && !id.contains(' '),
+            "an import note is a message id, not a sentence: {id}"
+        );
+        Self {
+            id: id.to_string(),
+            args: Vec::new(),
+            file: None,
+        }
+    }
+
+    /// With the number `value` as `$name`.
+    pub fn num(mut self, name: &str, value: impl NoteNumber) -> Self {
+        self.args
+            .push((name.to_string(), NoteArg::Number(value.as_f64())));
+        self
+    }
+
+    /// With the text `value` as `$name`.
+    pub fn text(mut self, name: &str, value: impl Into<String>) -> Self {
+        self.args
+            .push((name.to_string(), NoteArg::Text(value.into())));
+        self
+    }
+
+    /// About the package's file `name` ("image.png: ...").
+    pub fn about(mut self, name: &str) -> Self {
+        self.file = Some(name.to_string());
+        self
+    }
+
+    pub fn arg(&self, name: &str) -> Option<&NoteArg> {
+        self.args.iter().find(|(k, _)| k == name).map(|(_, v)| v)
+    }
+}
+
+pub trait NoteNumber {
+    fn as_f64(&self) -> f64;
+}
+
+macro_rules! note_numbers {
+    ($($t:ty),*) => {
+        $(impl NoteNumber for $t {
+            fn as_f64(&self) -> f64 {
+                *self as f64
+            }
+        })*
+    };
+}
+note_numbers!(u32, u64, usize, i64, f64);
+
+/// The id and its variables, for a log line or a test's failure message;
+/// a person reads the server's wording of it instead.
+impl std::fmt::Display for ImportNote {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(file) = &self.file {
+            write!(f, "{file}: ")?;
+        }
+        f.write_str(&self.id)?;
+        for (k, v) in &self.args {
+            match v {
+                NoteArg::Number(n) => write!(f, " {k}={n}")?,
+                NoteArg::Text(t) => write!(f, " {k}={t:?}")?,
+            }
+        }
+        Ok(())
+    }
 }
 
 /// `s` cut to at most `MAX_RAW_FIELD_BYTES` on a character boundary.
@@ -161,19 +259,20 @@ pub mod fuzz {
     }
 }
 
-/// Why an upload could not be parsed, in two voices: `public` is the
-/// sentence the uploader sees, `detail` is what the library said, for
-/// the log. The split is the type's whole point: a caller cannot show
-/// the detail by accident, because `Display` is the public sentence.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Why an upload could not be parsed, in two voices: `public` is what
+/// the uploader is told (a note the server words), `detail` is what the
+/// library said, for the log. The split is the type's whole point: a
+/// caller cannot show the detail by accident, because `Display` is the
+/// public note.
+#[derive(Debug, Clone, PartialEq)]
 pub struct ImportError {
-    public: String,
+    public: ImportNote,
     detail: String,
 }
 
 impl ImportError {
     /// A failure with something worth logging behind it.
-    pub fn new(public: impl Into<String>, detail: impl std::fmt::Display) -> Self {
+    pub fn new(public: impl Into<ImportNote>, detail: impl std::fmt::Display) -> Self {
         Self {
             public: public.into(),
             detail: detail.to_string(),
@@ -181,14 +280,14 @@ impl ImportError {
     }
 
     /// A failure that is entirely the file's own doing; nothing to log.
-    pub fn user(public: impl Into<String>) -> Self {
+    pub fn user(public: impl Into<ImportNote>) -> Self {
         Self {
             public: public.into(),
             detail: String::new(),
         }
     }
 
-    pub fn public(&self) -> &str {
+    pub fn public(&self) -> &ImportNote {
         &self.public
     }
 
@@ -199,7 +298,7 @@ impl ImportError {
 
 impl std::fmt::Display for ImportError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.public)
+        self.public.fmt(f)
     }
 }
 
@@ -219,7 +318,7 @@ pub struct ImportRow {
     pub front: String,
     pub back: String,
     /// Sanitized rich HTML for the web UI; None = plain card (the text is
-    /// the whole content). MCP/voice always use the plain text. Typed:
+    /// the whole content). MCP and CSV use the plain text. Typed:
     /// a parked preview read back from disk is re-sanitized as it loads.
     #[serde(default)]
     pub front_html: Option<SanitizedHtml>,
@@ -251,8 +350,8 @@ pub struct ParsedImport {
     pub rows: Vec<ImportRow>,
     /// Rows skipped (empty sides, unsupported notetypes, ...).
     pub skipped: u32,
-    /// Human-readable notes for the preview screen.
-    pub messages: Vec<String>,
+    /// What the preview screen tells the person about the file.
+    pub messages: Vec<ImportNote>,
     /// What media the package's cards reference (deduped across cards).
     #[serde(default)]
     pub media: MediaSummary,

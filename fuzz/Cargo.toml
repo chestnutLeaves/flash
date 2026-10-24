@@ -15,8 +15,8 @@ libfuzzer-sys = "0.4"
 flash-store = { path = "../crates/flash-store", features = ["fuzzing"] }
 # For the structure-aware target, which builds the container around the
 # fuzzed bytes.
-zip = "8.6.0"
-zstd = "0.13.3"
+zip = "9.0.4"
+zstd = "0.14.3"
 
 # Its own workspace: nightly-only, never part of `cargo test --workspace`.
 [workspace]

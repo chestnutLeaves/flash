@@ -1,5 +1,7 @@
 /target
-/data/pdfium/
+# Everything the server writes at run time: the database, imported
+# media, the logs.
+/data/
 /fuzz/target
 /fuzz/artifacts
 /fuzz/corpus
@@ -7,8 +9,6 @@
 *.db-wal
 *.db-shm
 .env
-# The voice sidecar's local install leftovers (pip, pytest).
+# Python leftovers from the tools' scripts (pip, pytest).
 __pycache__/
 *.egg-info/
-/tools/flash-tts/build/
-/tools/flash-tts/.venv/
