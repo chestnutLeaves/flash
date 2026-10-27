@@ -11,6 +11,7 @@ pub mod client_errors;
 pub mod config;
 pub mod deck_languages;
 pub mod email;
+pub mod external_media;
 pub mod ext;
 pub mod flows;
 pub mod http;

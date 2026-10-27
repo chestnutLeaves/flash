@@ -395,6 +395,7 @@ impl NoteBody {
                 front: l.front,
                 back: l.back,
             }),
+            allow_external_images: false,
         })
     }
 }

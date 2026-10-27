@@ -108,6 +108,7 @@ impl NoteForm {
             tags: split_tags(&self.tags),
             speech: Default::default(),
             langs: None,
+            allow_external_images: false,
         })
     }
 }

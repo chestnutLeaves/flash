@@ -97,7 +97,7 @@ fn written_panel(view: Result<PanelCardsOut, ServiceError>) -> Option<PanelCards
 impl FlashMcp {
     #[tool(
         title = "Create cards",
-        description = "Use this when the user wants flashcards: made from notes, slides or a file they share, a topic they name, or this conversation, or to memorize something and review it later. Saves 1-500 cards into one deck of their Flash account (created if missing, with parents for Parent::Child), where spaced repetition schedules each card's reviews. Follow the field notes; cloze uses {{c1::answer}}; keep media as /media/{id}. To change existing cards use update_cards, not new copies.",
+        description = "Use this when the user wants flashcards: made from notes, slides or a file they share, a topic they name, or this conversation, or to memorize something and review it later. Saves 1-500 cards into one deck of their Flash account (created if missing, with parents for Parent::Child), where spaced repetition schedules each card's reviews. Follow the field notes; cloze uses {{c1::answer}}; keep local media as /media/{id}. HTTP(S) images are retained temporarily and localized asynchronously, then removed after repeated failed downloads. To change existing cards use update_cards, not new copies.",
         annotations(
             title = "Create cards",
             read_only_hint = false,
@@ -134,6 +134,7 @@ impl FlashMcp {
                         },
                         // An assistant's blocks say its languages.
                         langs: None,
+                        allow_external_images: true,
                     })
                 })
                 .collect::<Result<Vec<_>, ServiceError>>()?;

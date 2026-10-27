@@ -76,6 +76,10 @@ fn core_handlers() -> Vec<(&'static str, Handler)> {
             crate::oauth::JOB_OAUTH_CODE_CHECK,
             crate::oauth::oauth_code_check_job as Handler,
         ),
+        (
+            flash_store::JOB_EXTERNAL_MEDIA,
+            crate::external_media::job as Handler,
+        ),
     ]
 }
 

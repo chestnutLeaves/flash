@@ -5,6 +5,7 @@ pub mod ceremonies;
 pub mod client_errors;
 pub mod deck_goals;
 pub mod decks;
+pub mod external_media;
 pub mod ids;
 pub mod import_commits;
 pub mod jobs;

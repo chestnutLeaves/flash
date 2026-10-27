@@ -87,6 +87,7 @@ impl Services {
                 speech: patch.speech.clone(),
                 // An assistant's edit leaves the languages a person picked.
                 langs: None,
+                allow_external_images: false,
             });
             states.push(state);
         }
@@ -143,6 +144,7 @@ impl Services {
             tags: seed.tags.clone(),
             speech: Default::default(),
             langs: None,
+            allow_external_images: false,
         };
         let generated = self.prepare_note(user, &original)?;
         let mut seen_slots = std::collections::HashSet::new();
@@ -186,8 +188,13 @@ impl Services {
         if input.front_html.len() > MAX_FIELD_HTML || input.back_html.len() > MAX_FIELD_HTML {
             return Err(note_refused(flash_store::notes::NoteError::FieldTooLong));
         }
-        let front_html = richtext::sanitize_with_media(&input.front_html).trimmed();
-        let back_html = richtext::sanitize_with_media(&input.back_html).trimmed();
+        let sanitize = if input.allow_external_images {
+            richtext::sanitize_with_external_images
+        } else {
+            richtext::sanitize_with_media
+        };
+        let front_html = sanitize(&input.front_html).trimmed();
+        let back_html = sanitize(&input.back_html).trimmed();
         let generated =
             generate_cards(input.note_type, &front_html, &back_html).map_err(note_refused)?;
         let mut media = richtext::media_ids(&front_html);
@@ -321,6 +328,7 @@ impl Services {
             tags: seed.tags,
             speech: Default::default(),
             langs: None,
+            allow_external_images: false,
         };
         if let Some(note) = self.store.note_for_card(user, card)? {
             let p = self.prepare_note(user, &input)?;
@@ -477,6 +485,9 @@ pub struct NoteInput {
     /// The language a person picked for each field, from an editor that
     /// offers the choice; None leaves the note's as they are.
     pub langs: Option<flash_store::NoteLangs>,
+    /// MCP card creation may retain external image references temporarily;
+    /// browser/editor submissions never enable this mode.
+    pub allow_external_images: bool,
 }
 
 pub struct McpSourcePatch {

@@ -58,6 +58,9 @@ pub struct JobCounts {
 /// transaction; the server's worker deletes them from storage.
 pub const JOB_DELETE_BLOBS: &str = "delete_blobs";
 
+/// Localizes one external image referenced by an MCP-created note.
+pub const JOB_EXTERNAL_MEDIA: &str = "external_media";
+
 /// Owes the storage deletes of `hashes`, on the deletion's transaction.
 pub fn owe_blob_deletes(conn: &Connection, hashes: &[String]) -> Result<()> {
     if hashes.is_empty() {

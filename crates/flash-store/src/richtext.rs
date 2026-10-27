@@ -24,7 +24,9 @@ use crate::media::{classify, tag_name, MediaKind};
 /// through a sanitizer before returning, and any new rewriter that does
 /// not cannot store what it made: otherwise a class smuggled inside
 /// another attribute's value could be re-emitted as a real class by a
-/// rewriter and stored as-is.
+/// rewriter and stored as-is. The ordinary media profile admits only local
+/// `/media/<id>` sources; external image retention is an explicit MCP-only
+/// profile used by the asynchronous localization flow.
 ///
 /// Deserializing (the parked import preview, say) sanitizes
 /// on the way in: the file is ours, but the type's promise does not rest
@@ -222,16 +224,22 @@ fn is_highlight_class(token: &str) -> bool {
 /// Sanitizes card HTML to semantic structure only. Everything
 /// presentational is removed; text content of stripped tags survives.
 pub fn sanitize_card_html(html: &str) -> SanitizedHtml {
-    SanitizedHtml(sanitize_inner(html, false))
+    SanitizedHtml(sanitize_inner(html, false, false))
 }
 
 /// Sanitization profile for cards whose media has been ingested: also
 /// admits `img`/`audio`/`video` with a `src` locked to `/media/<id>`.
 pub fn sanitize_with_media(html: &str) -> SanitizedHtml {
-    SanitizedHtml(sanitize_inner(html, true))
+    SanitizedHtml(sanitize_inner(html, true, false))
 }
 
-fn sanitize_inner(html: &str, allow_media: bool) -> String {
+/// Sanitizes MCP card HTML while retaining HTTPS/HTTP image references until
+/// the asynchronous media-localization job can ingest them.
+pub fn sanitize_with_external_images(html: &str) -> SanitizedHtml {
+    SanitizedHtml(sanitize_inner(html, true, true))
+}
+
+fn sanitize_inner(html: &str, allow_media: bool, allow_external_images: bool) -> String {
     let mut tags: HashSet<&str> = [
         "b", "i", "u", "em", "strong", "s", "sub", "sup", "br", "p", "div", "span", "ul", "ol",
         "li", "hr", "table", "tr", "td", "th", "code", "pre", "img",
@@ -294,8 +302,16 @@ fn sanitize_inner(html: &str, allow_media: bool) -> String {
                 "lang" => flash_core::locale::normalize(value).map(Into::into),
                 // Media src must be exactly our own serving route.
                 "src" => {
-                    let id = value.strip_prefix("/media/")?;
-                    if !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit()) {
+                    if let Some(id) = value.strip_prefix("/media/") {
+                        if !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit()) {
+                            return Some(value.into());
+                        }
+                    }
+                    if allow_external_images
+                        && element == "img"
+                        && (value.starts_with("http://") || value.starts_with("https://"))
+                        && !value.chars().any(|c| c.is_control() || c.is_whitespace())
+                    {
                         Some(value.into())
                     } else {
                         None
@@ -307,6 +323,64 @@ fn sanitize_inner(html: &str, allow_media: bool) -> String {
         .clean(html)
         .to_string();
     nfc_markup(&cleaned)
+}
+
+/// Returns external image URLs in document order, deduplicated.
+pub fn external_image_urls(html: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = html;
+    while let Some(lt) = rest.find("<img") {
+        let tag = &rest[lt + 1..];
+        let Some(end) = tag.find('>') else { break };
+        let body = &tag[..end];
+        if let Some(src) = crate::media::attr_value(body, "src") {
+            if (src.starts_with("http://") || src.starts_with("https://"))
+                && !out.iter().any(|seen| seen.as_str() == src)
+            {
+                out.push(unescape_attr(src));
+            }
+        }
+        rest = &tag[end + 1..];
+    }
+    out
+}
+
+/// Replaces one external image reference with a local media source, or
+/// removes its entire `img` element when localization permanently failed.
+pub fn replace_external_image(
+    html: &str,
+    source_url: &str,
+    media_id: Option<i64>,
+) -> SanitizedHtml {
+    let escaped = esc_attr(source_url);
+    let mut out = String::with_capacity(html.len());
+    let mut rest = html;
+    while let Some(lt) = rest.find("<img") {
+        out.push_str(&rest[..lt]);
+        let tag = &rest[lt..];
+        let Some(end) = tag.find('>') else {
+            out.push_str(tag);
+            rest = "";
+            break;
+        };
+        let whole = &tag[..end + 1];
+        let is_target = crate::media::attr_value(&whole[1..], "src")
+            .map(unescape_attr)
+            .is_some_and(|url| url == source_url);
+        if is_target {
+            if let Some(id) = media_id {
+                out.push_str(&whole.replace(
+                    &format!("src=\"{escaped}\""),
+                    &format!("src=\"/media/{id}\""),
+                ));
+            }
+        } else {
+            out.push_str(whole);
+        }
+        rest = &tag[end + 1..];
+    }
+    out.push_str(rest);
+    sanitize_with_media(&out)
 }
 
 /// Sanitized HTML in one Unicode form (`flash_core::text::nfc`). The
@@ -718,6 +792,17 @@ mod tests {
         assert!(!out.contains("<img") && !out.contains("<video"));
         assert!(!out.contains("x.test"), "external refs dropped");
         assert!(out.contains("before") && out.contains("mid") && out.contains("after"));
+    }
+
+    #[test]
+    fn external_images_are_only_retained_by_the_mcp_profile() {
+        let html = r#"<p><img src="https://example.test/a.png" alt="a"><img src="data:image/png;base64,x"></p>"#;
+        let ordinary = sanitize_with_media(html);
+        assert!(!ordinary.contains("example.test"));
+        let pending = sanitize_with_external_images(html);
+        assert!(pending.contains("https://example.test/a.png"));
+        assert!(!pending.contains("data:image"));
+        assert_eq!(external_image_urls(&pending), vec!["https://example.test/a.png"]);
     }
 
     #[test]

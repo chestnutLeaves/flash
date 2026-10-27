@@ -51,7 +51,7 @@ pub use repo::ids::{next_id, IdTable};
 pub use repo::import_commits::ImportClaim;
 pub use repo::jobs::{
     enqueue_job, job_counts_tx, owe_blob_deletes, JobCounts, JobRow, JobState, NewJob,
-    JOB_DELETE_BLOBS,
+    JOB_DELETE_BLOBS, JOB_EXTERNAL_MEDIA,
 };
 pub use repo::mcp::{McpDeletionPreview, McpDeletionReceipt, McpMutationReceipt, SourceEdit};
 pub use repo::media::MediaRow;

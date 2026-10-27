@@ -7,6 +7,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use crate::notes::NoteType;
 use crate::richtext::SanitizedHtml;
 use crate::{NoteSave, Result, RevisionSource, Store, StoreError};
+use crate::richtext::external_image_urls;
 
 pub struct SourceEdit<'a> {
     pub card: CardId,
@@ -225,7 +226,39 @@ impl Store {
         let mut result = Vec::new();
         for save in saves {
             check_media(&tx, user, save)?;
-            result.push(self.create_note_tx(&tx, user, deck, save)?);
+            let created = self.create_note_tx(&tx, user, deck, save)?;
+            for (side, html) in [("front", save.front_html.as_str()), ("back", save.back_html.as_str())]
+            {
+                for url in external_image_urls(html) {
+                    let now = save.now_ms;
+                    tx.execute(
+                        "INSERT INTO external_media_refs
+                           (user_id, note_id, side, source_url, status, created_at, updated_at)
+                         VALUES (?1, ?2, ?3, ?4, 'pending', ?5, ?5)
+                         ON CONFLICT(user_id, note_id, side, source_url) DO NOTHING",
+                        params![user.raw(), created.0.0, side, url, now],
+                    )?;
+                    let payload = serde_json::json!({
+                        "note_id": created.0.0,
+                        "side": side,
+                        "url": url,
+                    })
+                    .to_string();
+                    let dedupe = format!("external_media:{}:{}:{}:{}", user.raw(), created.0.0, side, url);
+                    crate::repo::jobs::enqueue_job(
+                        &tx,
+                        &crate::repo::jobs::NewJob {
+                            kind: crate::repo::jobs::JOB_EXTERNAL_MEDIA,
+                            dedupe_key: Some(&dedupe),
+                            user: Some(user),
+                            payload: &payload,
+                            run_at: now,
+                        },
+                        now,
+                    )?;
+                }
+            }
+            result.push(created);
         }
         let receipt = McpMutationReceipt {
             created: result.iter().map(|(_, ids)| ids.len() as u32).sum(),

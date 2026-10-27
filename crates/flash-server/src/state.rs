@@ -321,6 +321,9 @@ impl AppState {
             support_email: config.support_email.clone(),
             i18n: i18n.clone(),
         });
+        let jobs_wake = Arc::new(tokio::sync::Notify::new());
+        let wake_jobs = jobs_wake.clone();
+        services.store().on_commit(move || wake_jobs.notify_one());
         Ok(Self {
             services,
             config: Arc::new(config),
@@ -345,7 +348,7 @@ impl AppState {
             panel_links,
             started_at_ms,
             shutdown: tokio_util::sync::CancellationToken::new(),
-            jobs_wake: Arc::new(tokio::sync::Notify::new()),
+            jobs_wake,
             i18n,
         })
     }

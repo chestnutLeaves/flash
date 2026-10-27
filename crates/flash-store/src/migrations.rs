@@ -281,7 +281,31 @@ const CORE: &[Migration] = &[
         sql: "CREATE INDEX idx_cards_study ON cards(user_id, suspended, deck_id)
                 WHERE deleted_at IS NULL;",
     },
+    Migration {
+        name: "v050_external_media",
+        sql: V050_EXTERNAL_MEDIA,
+    },
 ];
+
+/// A durable reference to an external image which is being localized by the
+/// job worker. The URL is retained only while the job is pending or retrying;
+/// successful work records the local media id and failed work removes it.
+const V050_EXTERNAL_MEDIA: &str = r#"
+CREATE TABLE external_media_refs (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  note_id INTEGER NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+  side TEXT NOT NULL CHECK (side IN ('front','back')),
+  source_url TEXT NOT NULL,
+  media_id INTEGER REFERENCES media(id),
+  status TEXT NOT NULL CHECK (status IN ('pending','imported','failed')),
+  last_error TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  UNIQUE (user_id, note_id, side, source_url)
+) STRICT;
+CREATE INDEX idx_external_media_pending ON external_media_refs(status, updated_at);
+"#;
 
 /// Refresh tokens rotate with reuse detection (`repo::oauth`).
 /// `oauth_spent_refresh` keeps every refresh token a grant rotated away,
