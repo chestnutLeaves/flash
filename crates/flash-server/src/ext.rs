@@ -461,7 +461,7 @@ pub trait ServerExtension: AccountHooks + Send + Sync + 'static {
 
     /// The deployment's own words beside the core's (`i18n::CORE`): its
     /// messages in each language it speaks ((folder tag, text) pairs, a
-    /// tag being `en`, `es`, `es-ES` or `es-419`); its public pages with
+    /// tag being `en`, `es`, `es-ES`, `es-419` or `zh-CN`); its public pages with
     /// an address per language Flash ships (`/guide`, `/es/guia`),
     /// served under each language's prefix by its own routes and English
     /// at the bare address (`i18n::context`); and the starts of the ids

@@ -228,7 +228,7 @@ mod languages_tests {
         assert!(languages_from(Some("en-XA".into()), true).is_err());
         assert_eq!(
             languages_from(None, true).unwrap(),
-            vec![UiLocale::EN, tag("en-XA"), tag("ar-XB")]
+            vec![UiLocale::EN, UiLocale::ZH_CN, tag("en-XA"), tag("ar-XB")]
         );
     }
 }

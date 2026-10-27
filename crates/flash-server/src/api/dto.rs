@@ -399,7 +399,7 @@ pub struct Settings {
 #[derive(Debug, Serialize, Default)]
 pub struct LanguageDto {
     /// The chosen language, as Flash files its words ("en", "es-ES",
-    /// "es-419"); null when none is chosen.
+    /// "es-419", "zh-CN"); null when none is chosen.
     pub chosen: Option<&'static str>,
     /// The languages Flash ships, English first, each named in itself.
     pub shipped: Vec<LanguageOption>,

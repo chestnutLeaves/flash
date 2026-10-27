@@ -1,52 +1,29 @@
-# Security
+# 安全
 
-Thank you for looking. Flash holds people's study material and their
-credentials, so reports are welcome and taken seriously.
+感谢你关注安全问题。Flash 保存用户的学习资料和凭据，我们欢迎报告并会认真处理。
 
-## Reporting a vulnerability
+## 报告漏洞
 
-Please report privately through GitHub's **Report a vulnerability** button
-on this repository's Security tab. It opens a private advisory that only
-the maintainers can see, keeps a record of the conversation, and lets us
-credit you when the fix ships if you would like that.
+请通过本仓库 Security 标签页中的 GitHub **Report a vulnerability** 按钮私下报告。该操作会创建只有维护者可见的私密公告，保留完整对话记录；如果你愿意，修复发布时我们也会在公告中致谢。
 
-Please do not open a public issue for a security problem, and do not test
-against the hosted service or against data that is not your own. A local
-build (`docker compose up`, or `cargo run -p flash-server`) gives you a
-server of your own to probe.
+请不要为安全问题公开创建 issue，也不要针对在线托管服务或不属于你的数据进行测试。本地构建（`docker compose up` 或 `cargo run -p flash-server`）会提供一个属于你自己的服务器供测试。
 
-## What to expect
+## 处理流程
 
-- An acknowledgement within a few days.
-- A fix before any public disclosure, with a release note that describes
-  the problem once it is fixed.
-- Credit in the release note if you want it, under whatever name you give.
+- 几天内收到确认回复。
+- 在公开披露前完成修复；修复后会在发布说明中描述问题。
+- 如果你愿意，我们会按照你提供的名称在发布说明中致谢。
 
-## Scope
+## 范围
 
-In scope: everything in this repository, and the behaviour of a server
-built from it. That includes authentication and sessions, the OAuth and
-MCP surfaces, the JSON API, the importers and exporters, media handling,
-and any way one account could reach another's data.
+范围内：本仓库中的全部内容，以及由本仓库构建的服务器行为。这包括身份验证与会话、OAuth 与 MCP 接口、JSON API、导入导出、媒体处理，以及一个账户可能访问另一个账户数据的任何路径。
 
-Out of scope: denial of service by volume alone, reports that require a
-compromised operator machine or a malicious administrator, and findings
-in third-party services a self-hoster may put in front of the server.
+范围外：仅由请求量造成的拒绝服务、必须依赖已被入侵的运维机器或恶意管理员才能成立的报告，以及自托管者可能放在服务器前面的第三方服务中的问题。
 
-## Supported versions
+## 支持的版本
 
-The latest release on `main`. Older releases are not patched separately;
-please upgrade.
+`main` 分支上的最新版本。旧版本不会单独维护补丁，请升级到最新版本。
 
-## What is already in place
+## 已有的安全措施
 
-The design notes in the source describe the guarantees the test suite
-enforces on every push: a user id that cannot be forged, every per-user
-query bound to that id, every route probed as a stranger and as a
-cross-site post, every mutation probed past its rate budget, every
-request field bound to a named size, every heavy operation behind a
-permit, rich HTML stored only as the sanitizer's own type, no lock in
-the process that a panic can poison, parsers that cap what they build
-before they build it, destructive MCP tools that take two calls, and
-error messages that never carry a library's words to a client. If you
-find a way around one of those, that is exactly the report we want.
+源码中的设计说明记录了测试套件在每次推送时强制执行的保证：用户 ID 不可伪造；每条按用户查询都绑定到该 ID；每个路由都会以陌生用户和跨站请求进行探测；每个变更都会探测超出速率预算的情况；每个请求字段都绑定到明确的大小限制；所有高开销操作都必须取得许可；富 HTML 只以清理器自己的类型存储；不会使用可能被 panic 污染进程的锁；解析器会在构建前限制构建规模；破坏性 MCP 工具必须分两次调用；错误消息不会把库的内部措辞传给客户端。如果你能绕过其中任何一项，这正是我们希望收到的报告。

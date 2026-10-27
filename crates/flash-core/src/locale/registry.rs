@@ -446,6 +446,12 @@ const ENGLISH_PLURALS: &[PluralRule] = &[
     },
 ];
 
+/// Chinese has one cardinal form: every number uses `other`.
+const CHINESE_PLURALS: &[PluralRule] = &[PluralRule {
+    category: "other",
+    rule: " @integer 0~15, 100, 1000, 10000, 100000, 1000000, … @decimal 0.0~1.5, 10.0, 100.0, 1000.0, 10000.0, 100000.0, 1000000.0, …",
+}];
+
 /// Spanish's cardinal forms, CLDR 48: "many" for an exact million and
 /// its multiples ("1.000.000 de tarjetas").
 const SPANISH_PLURALS: &[PluralRule] = &[
@@ -747,6 +753,27 @@ pub const LANGUAGES: &[UiLanguage] = &[
         plurals: FRENCH_PLURALS,
         pseudo: None,
     },
+    UiLanguage {
+        tag: "zh-CN",
+        chain: &["zh-CN"],
+        native_name: "简体中文",
+        english_name: "Chinese (Simplified)",
+        dir: Dir::Ltr,
+        script: Script::Hans,
+        prefix: "/zh-cn",
+        hreflang: "zh-CN",
+        og: "zh_CN",
+        answers: Answers {
+            lang: "zh",
+            scripts: &["Hans"],
+            regions: Regions::Only(&["CN"]),
+            regionless: Regionless::Yes,
+            stands_in_for: &[],
+        },
+        numbers: Numbers::Cldr,
+        plurals: CHINESE_PLURALS,
+        pseudo: None,
+    },
     // The pseudo-languages: English's messages, turned (`Pseudo`). They
     // answer only their own made-up regions (XA, XB), so no reader is
     // given one by their browser or phone.
@@ -798,6 +825,8 @@ impl UiLocale {
     /// English: the root every language falls back to, and what a reader
     /// whose languages Flash does not speak reads.
     pub const EN: UiLocale = UiLocale(0);
+    /// Simplified Chinese, shipped with the core catalog.
+    pub const ZH_CN: UiLocale = UiLocale(7);
 
     /// Every language in the table, English first.
     pub fn all() -> impl Iterator<Item = UiLocale> {

@@ -6,7 +6,8 @@
 //! Spanish is one base (`es`) both Spanish variants share, with the few
 //! messages Spain and Latin America word differently in `es-ES` and
 //! `es-419`; each variant falls back to the base, and anything still
-//! missing falls back to English. A message missing in English is a bug
+//! missing falls back to English. Simplified Chinese is shipped in `zh-CN`.
+//! A message missing in English is a bug
 //! the tests catch (`missing`).
 //!
 //! Pages read their reader's `Tr` from the request (`context` sets it);
@@ -66,7 +67,7 @@ pub use words::Words;
 /// The languages a reader may be given. A language Flash has messages
 /// for but has not shipped yet answers in English until every surface
 /// speaks it.
-pub const SHIPPED: &[UiLocale] = &[UiLocale::EN];
+pub const SHIPPED: &[UiLocale] = &[UiLocale::EN, UiLocale::ZH_CN];
 
 /// One file of messages: the tag of the folder it lives in (`en`, `es`,
 /// `es-ES`, `es-419`) and its text.
@@ -88,7 +89,7 @@ type Bundle = FluentBundle<Arc<FluentResource>>;
 /// of every message, English included, in marks; `Tr::args` isolates a
 /// variable only where its direction can pull the sentence (`bidi`).
 pub struct Catalog {
-    /// Each folder's parsed files (`en`, `es`, `es-ES`, `es-419`).
+    /// Each folder's parsed files (`en`, `es`, `es-ES`, `es-419`, `zh-CN`).
     layers: Vec<(&'static str, Arc<FluentResource>)>,
     en: Arc<Bundle>,
     /// One bundle per (language, region tag) a reader has come with.

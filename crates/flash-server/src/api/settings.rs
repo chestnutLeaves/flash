@@ -92,7 +92,7 @@ pub(super) fn chosen_language(
 
 #[derive(Deserialize)]
 struct LanguageBody {
-    /// One of the languages Flash ships ("es-ES"), or null for automatic.
+    /// One of the languages Flash ships ("es-ES" or "zh-CN"), or null for automatic.
     #[serde(default, deserialize_with = "crate::bounds::opt_keyword")]
     language: Option<String>,
 }

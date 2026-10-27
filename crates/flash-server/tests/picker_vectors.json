@@ -9,6 +9,7 @@
         "pt-PT",
         "fr-FR",
         "fr-CA",
+        "zh-CN",
         "en-XA",
         "ar-XB"
       ],
@@ -82,7 +83,8 @@
         "fr-CA",
         "fr-FR",
         "pt-BR",
-        "pt-PT"
+        "pt-PT",
+        "zh-CN"
       ],
       "shipped": [
         "en",
@@ -92,6 +94,7 @@
         "pt-PT",
         "fr-FR",
         "fr-CA",
+        "zh-CN",
         "en-XA",
         "ar-XB"
       ],
@@ -108,7 +111,8 @@
         "fr-CA",
         "fr-FR",
         "pt-BR",
-        "pt-PT"
+        "pt-PT",
+        "zh-CN"
       ],
       "shipped": [
         "en",
@@ -118,6 +122,7 @@
         "pt-PT",
         "fr-FR",
         "fr-CA",
+        "zh-CN",
         "en-XA",
         "ar-XB"
       ],
@@ -136,7 +141,8 @@
         "fr-CA",
         "fr-FR",
         "pt-BR",
-        "pt-PT"
+        "pt-PT",
+        "zh-CN"
       ],
       "shipped": [
         "en",
@@ -146,6 +152,7 @@
         "pt-PT",
         "fr-FR",
         "fr-CA",
+        "zh-CN",
         "en-XA",
         "ar-XB"
       ],
@@ -165,7 +172,8 @@
         "es-419",
         "fr-CA",
         "pt-BR",
-        "pt-PT"
+        "pt-PT",
+        "zh-CN"
       ],
       "shipped": [
         "en",
@@ -175,6 +183,7 @@
         "pt-PT",
         "fr-FR",
         "fr-CA",
+        "zh-CN",
         "en-XA",
         "ar-XB"
       ],
@@ -193,7 +202,8 @@
         "fr-CA",
         "fr-FR",
         "pt-BR",
-        "pt-PT"
+        "pt-PT",
+        "zh-CN"
       ],
       "shipped": [
         "en",
@@ -203,6 +213,7 @@
         "pt-PT",
         "fr-FR",
         "fr-CA",
+        "zh-CN",
         "en-XA",
         "ar-XB"
       ],
@@ -221,7 +232,8 @@
         "fr-CA",
         "fr-FR",
         "pt-BR",
-        "pt-PT"
+        "pt-PT",
+        "zh-CN"
       ],
       "shipped": [
         "en",
@@ -231,6 +243,7 @@
         "pt-PT",
         "fr-FR",
         "fr-CA",
+        "zh-CN",
         "en-XA",
         "ar-XB"
       ],
@@ -249,7 +262,8 @@
         "fr-CA",
         "fr-FR",
         "pt-BR",
-        "pt-PT"
+        "pt-PT",
+        "zh-CN"
       ],
       "shipped": [
         "en",
@@ -259,6 +273,7 @@
         "pt-PT",
         "fr-FR",
         "fr-CA",
+        "zh-CN",
         "en-XA",
         "ar-XB"
       ],
@@ -277,7 +292,8 @@
         "fr-CA",
         "fr-FR",
         "pt-BR",
-        "pt-PT"
+        "pt-PT",
+        "zh-CN"
       ],
       "shipped": [
         "en",
@@ -287,6 +303,7 @@
         "pt-PT",
         "fr-FR",
         "fr-CA",
+        "zh-CN",
         "en-XA",
         "ar-XB"
       ],
@@ -307,7 +324,8 @@
         "fr-CA",
         "fr-FR",
         "pt-BR",
-        "pt-PT"
+        "pt-PT",
+        "zh-CN"
       ],
       "shipped": [
         "en",
@@ -317,6 +335,7 @@
         "pt-PT",
         "fr-FR",
         "fr-CA",
+        "zh-CN",
         "en-XA",
         "ar-XB"
       ],
@@ -335,7 +354,8 @@
         "fr-CA",
         "fr-FR",
         "pt-BR",
-        "pt-PT"
+        "pt-PT",
+        "zh-CN"
       ],
       "shipped": [
         "en",
@@ -344,7 +364,8 @@
         "pt-BR",
         "pt-PT",
         "fr-FR",
-        "fr-CA"
+        "fr-CA",
+        "zh-CN"
       ],
       "wanted": [],
       "zone": null
@@ -357,7 +378,8 @@
         "fr-CA",
         "fr-FR",
         "pt-BR",
-        "pt-PT"
+        "pt-PT",
+        "zh-CN"
       ],
       "shipped": [
         "en",
@@ -366,7 +388,8 @@
         "pt-BR",
         "pt-PT",
         "fr-FR",
-        "fr-CA"
+        "fr-CA",
+        "zh-CN"
       ],
       "wanted": [
         "en-US"
@@ -381,7 +404,8 @@
         "fr-CA",
         "fr-FR",
         "pt-BR",
-        "pt-PT"
+        "pt-PT",
+        "zh-CN"
       ],
       "shipped": [
         "en",
@@ -390,7 +414,8 @@
         "pt-BR",
         "pt-PT",
         "fr-FR",
-        "fr-CA"
+        "fr-CA",
+        "zh-CN"
       ],
       "wanted": [
         "es-MX",
@@ -406,7 +431,8 @@
         "es-419",
         "fr-CA",
         "pt-BR",
-        "pt-PT"
+        "pt-PT",
+        "zh-CN"
       ],
       "shipped": [
         "en",
@@ -415,7 +441,8 @@
         "pt-BR",
         "pt-PT",
         "fr-FR",
-        "fr-CA"
+        "fr-CA",
+        "zh-CN"
       ],
       "wanted": [
         "fr-FR"
@@ -430,7 +457,8 @@
         "fr-CA",
         "fr-FR",
         "pt-BR",
-        "pt-PT"
+        "pt-PT",
+        "zh-CN"
       ],
       "shipped": [
         "en",
@@ -439,7 +467,8 @@
         "pt-BR",
         "pt-PT",
         "fr-FR",
-        "fr-CA"
+        "fr-CA",
+        "zh-CN"
       ],
       "wanted": [
         "ca"
@@ -454,7 +483,8 @@
         "fr-CA",
         "fr-FR",
         "pt-BR",
-        "pt-PT"
+        "pt-PT",
+        "zh-CN"
       ],
       "shipped": [
         "en",
@@ -463,7 +493,8 @@
         "pt-BR",
         "pt-PT",
         "fr-FR",
-        "fr-CA"
+        "fr-CA",
+        "zh-CN"
       ],
       "wanted": [
         "es"
@@ -478,7 +509,8 @@
         "fr-CA",
         "fr-FR",
         "pt-BR",
-        "pt-PT"
+        "pt-PT",
+        "zh-CN"
       ],
       "shipped": [
         "en",
@@ -487,7 +519,8 @@
         "pt-BR",
         "pt-PT",
         "fr-FR",
-        "fr-CA"
+        "fr-CA",
+        "zh-CN"
       ],
       "wanted": [
         "es"
@@ -502,7 +535,8 @@
         "fr-CA",
         "fr-FR",
         "pt-BR",
-        "pt-PT"
+        "pt-PT",
+        "zh-CN"
       ],
       "shipped": [
         "en",
@@ -511,7 +545,8 @@
         "pt-BR",
         "pt-PT",
         "fr-FR",
-        "fr-CA"
+        "fr-CA",
+        "zh-CN"
       ],
       "wanted": [
         "en-GB",
@@ -528,7 +563,8 @@
         "fr-CA",
         "fr-FR",
         "pt-BR",
-        "pt-PT"
+        "pt-PT",
+        "zh-CN"
       ],
       "shipped": [
         "en",
@@ -537,7 +573,8 @@
         "pt-BR",
         "pt-PT",
         "fr-FR",
-        "fr-CA"
+        "fr-CA",
+        "zh-CN"
       ],
       "wanted": [
         "de-DE",
