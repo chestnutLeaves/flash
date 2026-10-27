@@ -327,7 +327,7 @@ fn sanitize_inner(html: &str, allow_media: bool, allow_external_images: bool) ->
 
 /// Returns external image URLs in document order, deduplicated.
 pub fn external_image_urls(html: &str) -> Vec<String> {
-    let mut out = Vec::new();
+    let mut out: Vec<String> = Vec::new();
     let mut rest = html;
     while let Some(lt) = rest.find("<img") {
         let tag = &rest[lt + 1..];

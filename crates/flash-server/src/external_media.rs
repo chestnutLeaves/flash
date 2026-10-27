@@ -133,9 +133,13 @@ fn allowed_url(url: &str) -> bool {
 fn filename_for(url: &str, content_type: Option<&str>) -> String {
     let path_name = url::Url::parse(url)
         .ok()
-        .and_then(|u| u.path_segments().and_then(|mut p| p.next_back()))
+        .and_then(|u| {
+            u.path_segments()
+                .and_then(|mut p| p.next_back())
+                .map(str::to_owned)
+        })
         .filter(|s| !s.is_empty())
-        .unwrap_or("external-image");
+        .unwrap_or_else(|| "external-image".to_owned());
     if path_name.contains('.') {
         path_name.to_string()
     } else {
