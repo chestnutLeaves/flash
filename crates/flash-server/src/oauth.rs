@@ -881,6 +881,8 @@ async fn consent(
             return (StatusCode::INTERNAL_SERVER_ERROR, "internal error").into_response();
         }
     };
+    // 授权码检查任务已提交，避免等待下一轮轮询。
+    crate::jobs::wake(&state);
     let detail = if first { "approve" } else { "repeat" };
     crate::web::account_event(&state, user, "consent", Some(detail), None);
     let mut to = format!(

@@ -156,6 +156,8 @@ impl FlashMcp {
             Ok((out, panel))
         })
         .await?;
+        // MCP 创建卡片会同时入队外部媒体任务，提交成功后立即唤醒后台 worker。
+        crate::jobs::wake(&self.state);
         self.account_event(&ctx, user, "cards_created", Some(result.created as i64));
         let mut result = result;
         let site = on_the_site(&self.base_url);

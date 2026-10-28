@@ -322,8 +322,6 @@ impl AppState {
             i18n: i18n.clone(),
         });
         let jobs_wake = Arc::new(tokio::sync::Notify::new());
-        let wake_jobs = jobs_wake.clone();
-        services.store().on_commit(move || wake_jobs.notify_one());
         Ok(Self {
             services,
             config: Arc::new(config),
