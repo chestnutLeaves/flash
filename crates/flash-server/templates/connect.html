@@ -48,8 +48,35 @@
 
     <div class="fl-card fl-card-pad cn-card">
       <div>
+        <div class="cn-card-title">{{ "connect-copy-config"|t }}</div>
+        <div class="cn-card-body">{{ "connect-copy-config-body"|t }}</div>
+      </div>
+      <pre translate="no" class="token-box cn-token cn-config" id="mcp-config">{
+  &quot;mcpServers&quot;: {
+    &quot;flash&quot;: {
+      &quot;url&quot;: &quot;{{ site.mcp_url() }}&quot;
+    }
+  }
+}</pre>
+      <div><button type="button" class="fl-btn fl-btn-sm fl-btn-primary" data-copy-target="mcp-config">{{ "connect-copy-config-button"|t }}</button></div>
+    </div>
+
+    <div class="fl-card fl-card-pad cn-card">
+      <div>
         <div class="cn-card-title">{{ "connect-step-add"|t }}</div>
         <div class="cn-card-body">{{ "connect-step-add-body"|t }}</div>
+      </div>
+      <div class="cn-app">
+        <div class="cn-app-name">{{ "connect-workbuddy"|t }}</div>
+        <div class="cn-card-body">{{ "connect-workbuddy-body"|t }}</div>
+        <ol class="cn-steps">
+          <li>{{ "connect-workbuddy-1-html"|t|safe }}</li>
+          <li>{{ "connect-workbuddy-2-html"|t|safe }}</li>
+          <li>{{ "connect-workbuddy-3-html"|t|safe }}</li>
+          <li>{{ "connect-workbuddy-4-html"|t|safe }}</li>
+          <li>{{ "connect-workbuddy-5-html"|t|safe }}</li>
+        </ol>
+        <div class="cn-note">{{ "connect-workbuddy-note"|t }}</div>
       </div>
       <div class="cn-app">
         <div class="cn-app-name">Claude</div>

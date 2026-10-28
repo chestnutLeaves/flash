@@ -27,6 +27,12 @@ connect-step-copy = 1. Copy your Flash address
 connect-step-copy-body = Most assistants below ask you to paste this.
 # Button that copies the address.
 connect-copy-url = Copy URL
+# Title of the copyable MCP connector configuration.
+connect-copy-config = Copy your MCP connector config
+# Under the MCP connector configuration.
+connect-copy-config-body = Paste this JSON into WorkBuddy or another MCP client. The address is generated from this Flash deployment; use the value shown here.
+# Button that copies the MCP connector configuration.
+connect-copy-config-button = Copy config
 # Title of the second step.
 connect-step-add = 2. Add Flash in your AI's settings
 # Under it.
@@ -35,6 +41,25 @@ connect-step-add-body = Pick the one you use.
 connect-sign-in = Sign in to Flash when it asks.
 # Footer: the server's address. $host is the address.
 connect-footer = { $host }
+
+## WorkBuddy
+
+# Title of the WorkBuddy instructions.
+connect-workbuddy = Add Flash to WorkBuddy
+# Under the WorkBuddy title.
+connect-workbuddy-body = Add Flash as a custom MCP connector using the JSON configuration above.
+# Step 1 for WorkBuddy.
+connect-workbuddy-1-html = Open <strong>Expert · Skills · Connectors</strong> in WorkBuddy.
+# Step 2 for WorkBuddy.
+connect-workbuddy-2-html = Click <strong>Custom connector</strong> in the upper-right corner.
+# Step 3 for WorkBuddy.
+connect-workbuddy-3-html = In the <strong>MCP Service Management</strong> window, click <strong>+ Add MCP</strong>.
+# Step 4 for WorkBuddy.
+connect-workbuddy-4-html = Paste the JSON copied above into the editor, then click <strong>Save</strong>.
+# Step 5 for WorkBuddy.
+connect-workbuddy-5-html = Return to the connector list and choose Flash when you use it. Sign in to Flash if prompted.
+# Note under WorkBuddy's steps.
+connect-workbuddy-note = Use the address and JSON shown on this page. Do not replace the generated address with a fixed localhost address.
 
 ## Claude
 

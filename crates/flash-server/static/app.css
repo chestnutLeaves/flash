@@ -653,6 +653,7 @@ kbd{font:var(--w-medium) var(--text-xs)/1 var(--font-mono);color:var(--text-mute
 .cn-steps li:last-child{margin-bottom:0}
 .cn-mono{font-family:var(--font-mono);font-size:var(--text-sm);color:var(--text-body)}
 .cn-token{user-select:all}
+.cn-config{white-space:pre-wrap;overflow-wrap:anywhere}
 
 /* ---- AI connect chips (sidebar + dashboard) ---- */
 .ai-stack{display:inline-flex;align-items:center;flex:none}

@@ -27,6 +27,12 @@ connect-step-copy = 1. 复制你的 Flash 地址
 connect-step-copy-body = 下面的大多数助手都会要求您粘贴此内容。
 # Button that copies the address.
 connect-copy-url = 复制网址
+# Title of the copyable MCP connector configuration.
+connect-copy-config = 复制 MCP 连接器配置
+# Under the MCP connector configuration.
+connect-copy-config-body = 将这段 JSON 粘贴到 WorkBuddy 或其他 MCP 客户端中。地址会根据当前 Flash 部署动态生成，请使用此处显示的值。
+# Button that copies the MCP connector configuration.
+connect-copy-config-button = 复制配置
 # Title of the second step.
 connect-step-add = 2. 在 AI 设置中添加 Flash
 # Under it.
@@ -35,6 +41,25 @@ connect-step-add-body = 选择你正在使用的助手。
 connect-sign-in = 当 Flash 询问时，登录 Flash。
 # Footer: the server's address. $host is the address.
 connect-footer = { $host }
+
+## WorkBuddy
+
+# Title of the WorkBuddy instructions.
+connect-workbuddy = 在 WorkBuddy 中添加 Flash 连接器
+# Under the WorkBuddy title.
+connect-workbuddy-body = 使用上方的 JSON 配置，将 Flash 添加为自定义 MCP 连接器。
+# Step 1 for WorkBuddy.
+connect-workbuddy-1-html = 打开 WorkBuddy，点击左侧的<strong>专家 · 技能 · 连接器</strong>。
+# Step 2 for WorkBuddy.
+connect-workbuddy-2-html = 点击右上角的<strong>自定义连接器</strong>。
+# Step 3 for WorkBuddy.
+connect-workbuddy-3-html = 在<strong>MCP 服务管理</strong>窗口中，点击<strong>＋ 添加 MCP</strong>。
+# Step 4 for WorkBuddy.
+connect-workbuddy-4-html = 将上方复制的 JSON 配置粘贴到编辑器中，然后点击<strong>保存</strong>。
+# Step 5 for WorkBuddy.
+connect-workbuddy-5-html = 返回连接器列表，使用时选择 Flash；如果出现登录提示，请按提示登录 Flash。
+# Note under WorkBuddy's steps.
+connect-workbuddy-note = 请使用本页面上方动态生成的地址和 JSON 配置，不要将地址替换为固定的 localhost 地址。
 
 ## Claude
 
