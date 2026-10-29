@@ -2,7 +2,13 @@
 {% block title %}{{ "study-title"|t }}{% endblock %}
 {% block content %}
 <div class="row study-head">
-  <h1>{{ "study-heading"|t }}</h1>
+  <div>
+    <div class="study-tabs">
+      <a class="active" href="/study">{{ "study-heading"|t }}</a>
+      <a href="/study/custom">{{ "custom-study-title"|t }}</a>
+    </div>
+    <h1>{{ "study-heading"|t }}</h1>
+  </div>
   <div class="row study-head-actions">
     {# Opens the tag picker below, and reads the filter back so it stays
        visible while it applies. #}

@@ -74,7 +74,7 @@
   {% else %}
   <td class="num">{{ deck.due_count }}</td>
   <td class="num">{{ deck.new_count }}</td>
-  <td style="text-align:end;white-space:nowrap"><span class="deck-acts"><a class="small muted" href="/study?deck={{ deck.id }}">{{ "decks-study"|t }}</a>
+  <td style="text-align:end;white-space:nowrap"><span class="deck-acts"><a class="small muted" href="/study/custom/deck/{{ deck.id }}">{{ "custom-study-title"|t }}</a> <a class="small muted" href="/study?deck={{ deck.id }}">{{ "decks-study"|t }}</a>
     <details class="study-more deck-more">
       <summary class="study-more-btn" aria-label="{{ "decks-more-label"|ta("name", deck.leaf) }}" title="{{ "decks-more-title"|t }}">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg>

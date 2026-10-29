@@ -63,7 +63,7 @@ pub use repo::oauth::{
     revoke_all_tokens_for_user_tx, revoke_tokens_for_user_tx, ApiTokenInfo, CodeConsume, CodeGrant,
     GrantRow, NextPair, OAuthClient, RefreshGrant, RefreshOutcome, TokenRow, REFRESH_GRACE_MS,
 };
-pub use repo::reviews::{ImportedReview, SessionStats};
+pub use repo::reviews::{CustomStudySummary, ImportedReview, SessionStats};
 pub use repo::speech::parse_speech_hints;
 pub use repo::tags::TagCount;
 pub use repo::users::{

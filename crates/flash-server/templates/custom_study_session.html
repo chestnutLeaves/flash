@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}{{ "custom-study-title"|t }}{% endblock %}
+{% block content %}
+<div class="study-col custom-study-wrap">
+  <div class="row study-head"><h1>{% if mode == "review" %}{{ "custom-study-review"|t }}{% else %}{{ "custom-study-practice"|t }}{% endif %}</h1><a class="small muted" href="/study/custom">{{ "custom-study-exit"|t }}</a></div>
+  <p class="fl-hint">{% if mode == "review" %}{{ "custom-study-review-hint"|t }}{% else %}{{ "custom-study-practice-hint"|t }}{% endif %}</p>
+  {% if let Some(card) = card %}
+  <div class="fl-progress"><div style="width:{{ position * 100 / total }}%"></div></div>
+  <div class="fl-card study-card"><div class="front" dir="auto">{% if let Some(html) = card.front_html %}<div class="card-rich">{{ html|safe }}</div>{% else %}{{ card.front }}{% endif %}</div>
+    {% if revealed %}{% if let Some(diff) = card.typed_diff %}<div class="type-diff mono">{% for s in diff %}<span class="{% if s.ok %}type-ok{% else %}type-bad{% endif %}">{{ s.text }}</span>{% endfor %}</div>{% endif %}<div class="study-back" dir="auto">{% if let Some(html) = card.back_html %}<div class="card-rich">{{ html|safe }}</div>{% else %}{{ card.back }}{% endif %}</div>{% endif %}
+  </div>
+  {% if !revealed %}
+  <form class="row custom-study-answer" method="post" action="/study/custom/{{ session }}/reveal">{% if card.wants_typing %}<input class="fl-input" name="typed" maxlength="4096" placeholder="{{ "study-type-answer"|t }}" autocomplete="off">{% endif %}<button class="fl-btn fl-btn-primary" type="submit">{{ "study-show-answer"|t }}</button></form>
+  {% else %}
+  <form class="row grade-row custom-study-grade" method="post" action="/study/custom/{{ session }}"><input type="hidden" name="card" value="{{ card.id }}">{% if mode == "review" %}<button class="fl-btn fl-btn-danger" name="rating" value="1">{{ "study-grade-again"|t }}</button><button class="fl-btn fl-btn-secondary" name="rating" value="2">{{ "study-grade-hard"|t }}</button><button class="fl-btn fl-btn-secondary" name="rating" value="3">{{ "study-grade-good"|t }}</button><button class="fl-btn fl-btn-secondary" name="rating" value="4">{{ "study-grade-easy"|t }}</button>{% else %}<button class="fl-btn fl-btn-primary" type="submit">{{ "custom-study-next"|t }}</button>{% endif %}</form>
+  {% endif %}
+  <p class="small muted">{{ position + 1 }} / {{ total }}</p>
+  {% else %}<div class="fl-card study-done"><h2>{% if total == 0 %}{{ "custom-study-empty"|t }}{% else %}{{ "custom-study-finished"|t }}{% endif %}</h2><p class="muted">{% if mode == "practice" %}{{ "custom-study-practice-hint"|t }}{% endif %}</p><a class="fl-btn fl-btn-secondary" href="/study/custom">{{ "custom-study-back"|t }}</a></div>{% endif %}
+</div>
+{% endblock %}

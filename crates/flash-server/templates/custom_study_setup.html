@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}{{ "custom-study-title"|t }}{% endblock %}
+{% block content %}
+<div class="custom-study-wrap">
+  <div class="row study-head">
+    <div>
+      <div class="study-tabs"><a href="/study">{{ "study-heading"|t }}</a><a class="active" href="/study/custom">{{ "custom-study-title"|t }}</a></div>
+      <h1>{{ "custom-study-title"|t }}</h1>
+    </div>
+    <a class="fl-btn fl-btn-primary" href="#custom-study-form" role="button" aria-haspopup="dialog" aria-controls="custom-study-form" data-custom-study-open>{{ "custom-study-new"|t }}</a>
+  </div>
+  <div class="study-tabs custom-study-status"><a{% if tab != "completed" %} class="active"{% endif %} href="/study/custom">{{ "custom-study-active"|t }} ({{ active.len() }})</a><a{% if tab == "completed" %} class="active"{% endif %} href="/study/custom?tab=completed">{{ "custom-study-completed"|t }} ({{ completed.len() }})</a></div>
+  {% if tab == "completed" %}
+    {% if completed.is_empty() %}<div class="custom-study-empty muted">{{ "custom-study-completed-empty"|t }}</div>{% endif %}
+    {% for item in completed %}<div class="custom-study-summary"><div><b>{% if item.mode == "review" %}{{ "custom-study-review"|t }}{% else %}{{ "custom-study-practice"|t }}{% endif %}</b><small class="muted">{% if let Some(deck) = item.deck %}{{ deck }}{% else %}{{ "custom-study-all-decks"|t }}{% endif %} · {% if item.card_order == "random" %}{{ "custom-study-random"|t }}{% else %}{{ "custom-study-ordered"|t }}{% endif %}{% if !item.tags.is_empty() %} · {{ item.tags }}{% endif %}</small></div><span class="custom-study-progress">{{ item.position }} / {{ item.total }}</span><a class="fl-btn fl-btn-secondary" href="/study/custom/{{ item.id }}">{{ "custom-study-view"|t }}</a></div>{% endfor %}
+  {% else %}
+    {% if active.is_empty() %}<div class="custom-study-empty muted">{{ "custom-study-active-empty"|t }}</div>{% endif %}
+    {% for item in active %}<div class="custom-study-summary"><div><b>{% if item.mode == "review" %}{{ "custom-study-review"|t }}{% else %}{{ "custom-study-practice"|t }}{% endif %}</b><small class="muted">{% if let Some(deck) = item.deck %}{{ deck }}{% else %}{{ "custom-study-all-decks"|t }}{% endif %} · {% if item.card_order == "random" %}{{ "custom-study-random"|t }}{% else %}{{ "custom-study-ordered"|t }}{% endif %}{% if !item.tags.is_empty() %} · {{ item.tags }}{% endif %}</small></div><span class="custom-study-progress">{{ item.position }} / {{ item.total }}</span><a class="fl-btn fl-btn-primary" href="/study/custom/{{ item.id }}">{{ "custom-study-continue"|t }}</a></div>{% endfor %}
+  {% endif %}
+</div>
+<dialog id="custom-study-form" class="fl-dialog custom-study-dialog" aria-labelledby="custom-study-dialog-title" data-custom-study-dialog>
+  <div class="study-dialog-head custom-study-dialog-head">
+    <div>
+      <h2 id="custom-study-dialog-title">{{ "custom-study-new"|t }}</h2>
+      <p class="fl-hint">{{ "custom-study-scope-hint"|t }}</p>
+    </div>
+    <button type="button" class="fl-btn fl-btn-sm fl-iconbtn fl-btn-ghost" aria-label="{{ "close"|t }}" data-custom-study-close><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+  </div>
+  <form method="post" action="/study/custom" class="custom-study-form" data-custom-study-form>
+    <div class="custom-study-dialog-body">
+      <fieldset class="custom-study-modes"><legend>{{ "custom-study-mode"|t }}</legend>
+        <label><input type="radio" name="mode" value="review" checked><span><b>{{ "custom-study-review"|t }}</b><small>{{ "custom-study-review-hint"|t }}</small></span></label>
+        <label><input type="radio" name="mode" value="practice"><span><b>{{ "custom-study-practice"|t }}</b><small>{{ "custom-study-practice-hint"|t }}</small></span></label>
+      </fieldset>
+      <label>{{ "custom-study-deck"|t }}<select class="fl-input fl-select" name="deck" data-custom-study-deck><option value="">{{ "custom-study-all-decks"|t }}</option>{% for deck in decks %}<option value="{{ deck.id }}"{% if deck.selected %} selected{% endif %}>{{ deck.path }}</option>{% endfor %}</select></label>
+      <fieldset class="custom-study-tags"><legend>{{ "custom-study-tags"|t }}</legend><input type="hidden" name="tags" value="" data-custom-study-tags>{% if tags.is_empty() %}<span class="muted">{{ "custom-study-tags-hint"|t }}</span>{% endif %}<div class="custom-study-tag-list">{% for tag in tags %}<label><input type="checkbox" value="{{ tag }}" data-custom-study-tag><span>{{ tag }}</span></label>{% endfor %}</div></fieldset>
+      <div class="custom-study-fields">
+        <label>{{ "custom-study-count"|t }}<input class="fl-input" type="number" name="limit" min="0" value="{{ available }}" aria-describedby="custom-count-hint" data-custom-study-count><small id="custom-count-hint" class="muted" data-custom-study-count-hint data-prefix="{{ "custom-study-default-count"|t }}">{{ "custom-study-default-count"|t }}：{{ available }}</small></label>
+        <label>{{ "custom-study-order"|t }}<select class="fl-input fl-select" name="order"><option value="random">{{ "custom-study-random"|t }}</option><option value="ordered">{{ "custom-study-ordered"|t }}</option></select></label>
+      </div>
+    </div>
+    <div class="row custom-study-actions"><button class="fl-btn fl-btn-secondary" type="button" data-custom-study-close>{{ "custom-study-cancel"|t }}</button><button class="fl-btn fl-btn-primary" type="submit">{{ "custom-study-start"|t }}</button></div>
+  </form>
+</dialog>
+{% endblock %}

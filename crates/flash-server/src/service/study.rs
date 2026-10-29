@@ -7,7 +7,102 @@ use crate::service::{
     SessionInfo, SessionSurface, StudyCard, SubmitResult,
 };
 
+/// 自选学习的服务端进度与当前卡片。
+pub struct CustomStudyHead {
+    pub mode: String,
+    pub current: Option<CardId>,
+    pub position: usize,
+    pub total: usize,
+}
+
 impl Services {
+    /// 按指定范围建立一次不受到期时间限制的学习会话。
+    pub fn start_custom_study(
+        &self,
+        user: UserId,
+        scope: StudyScope,
+        mode: &str,
+        random: bool,
+        limit: u32,
+        now: i64,
+    ) -> Result<SessionId> {
+        super::check_scope(&scope)?;
+        if !matches!(mode, "review" | "practice") || limit == 0 {
+            return Err(ServiceError::Malformed(
+                "invalid custom study options".into(),
+            ));
+        }
+        if let Some(deck) = scope.deck {
+            self.store.get_deck_limits(user, deck)?;
+        }
+        let cards = self.store.custom_study_cards(user, &scope, random, limit)?;
+        Ok(self
+            .store
+            .start_custom_study(
+                user,
+                &scope,
+                mode,
+                if random { "random" } else { "ordered" },
+                &cards,
+                now,
+            )?)
+    }
+
+    /// 查询自选学习进度，题目顺序由会话保存。
+    pub fn custom_study_head(&self, user: UserId, session: SessionId) -> Result<CustomStudyHead> {
+        let (mode, cards, position) =
+            self.store
+                .custom_study_session(user, session, crate::service::now_ms())?;
+        Ok(CustomStudyHead {
+            mode,
+            current: cards.get(position).copied(),
+            position,
+            total: cards.len(),
+        })
+    }
+
+    /// 仅主动复习评分；自由练习推进进度但不写入 FSRS 状态。
+    pub fn advance_custom_study(
+        &self,
+        user: UserId,
+        session: SessionId,
+        card: CardId,
+        rating: Option<Rating>,
+        now: i64,
+    ) -> Result<()> {
+        let head = self.custom_study_head(user, session)?;
+        if head.current != Some(card) {
+            return Err(ServiceError::Malformed("card is not current".into()));
+        }
+        if head.mode == "review" {
+            let rating =
+                rating.ok_or_else(|| ServiceError::Malformed("rating is required".into()))?;
+            let settings = self.store.get_settings(user)?;
+            let state = self.store.get_card_state(user, card)?;
+            let goal = self.card_goal_window(user, &settings, card, now)?;
+            let outcome = self
+                .scheduler_for(&settings)?
+                .review_toward(&state, rating, now, card.0, goal.as_ref())
+                .map_err(|e| ServiceError::Scheduler(e.to_string()))?;
+            self.store.advance_custom_study(
+                user,
+                session,
+                card,
+                Some(&outcome),
+                state.last_review_ms,
+                now,
+            )?;
+        } else {
+            if rating.is_some() {
+                return Err(ServiceError::Malformed(
+                    "practice does not accept a rating".into(),
+                ));
+            }
+            self.store
+                .advance_custom_study(user, session, card, None, None, now)?;
+        }
+        Ok(())
+    }
     pub fn start_session(
         &self,
         user: UserId,
@@ -78,6 +173,11 @@ impl Services {
         origin: ReviewOrigin<'_>,
         now_ms: i64,
     ) -> Result<SubmitResult> {
+        if self.store.is_custom_study(user, session)? {
+            return Err(ServiceError::Malformed(
+                "custom study requires its own submission".into(),
+            ));
+        }
         let scope = self.store.get_session_scope(user, session)?;
         let settings = self.store.get_settings(user)?;
         let state = self.store.get_card_state(user, card)?;

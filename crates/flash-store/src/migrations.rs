@@ -285,6 +285,21 @@ const CORE: &[Migration] = &[
         name: "v050_external_media",
         sql: V050_EXTERNAL_MEDIA,
     },
+    Migration {
+        name: "v051_custom_study",
+        sql: "CREATE TABLE custom_study_sessions (
+            session_id INTEGER PRIMARY KEY REFERENCES study_sessions(id) ON DELETE CASCADE,
+            mode TEXT NOT NULL CHECK (mode IN ('review', 'practice')),
+            card_ids TEXT NOT NULL,
+            position INTEGER NOT NULL DEFAULT 0
+        ) STRICT;",
+    },
+    Migration {
+        name: "v052_custom_study_order",
+        sql: "ALTER TABLE custom_study_sessions
+              ADD COLUMN card_order TEXT NOT NULL DEFAULT 'ordered'
+              CHECK (card_order IN ('random', 'ordered'));",
+    },
 ];
 
 /// A durable reference to an external image which is being localized by the

@@ -600,4 +600,67 @@
       }
     });
   }
+
+  // 新建刷题使用独立弹窗，避免创建参数与刷题记录混在同一信息层级。
+  onReady(() => {
+    const dialog = document.querySelector("[data-custom-study-dialog]");
+    const form = document.querySelector("[data-custom-study-form]");
+    if (!(dialog instanceof HTMLDialogElement) || !(form instanceof HTMLFormElement)) return;
+    const deck = one(form, "[data-custom-study-deck]", HTMLSelectElement);
+    const tags = all(form, "[data-custom-study-tag]", HTMLInputElement);
+    const packed = one(form, "[data-custom-study-tags]", HTMLInputElement);
+    const count = one(form, "[data-custom-study-count]", HTMLInputElement);
+    const hint = one(form, "[data-custom-study-count-hint]", HTMLElement);
+    let automatic = count.value;
+
+    const open = () => {
+      if (!dialog.open) dialog.showModal();
+      const selectedDeck = deck.value !== "";
+      const target = selectedDeck ? deck : form.querySelector('input[name="mode"]:checked');
+      if (target instanceof HTMLElement) target.focus();
+    };
+    const close = () => {
+      dialog.close();
+    };
+    dialog.addEventListener("close", () => {
+      if (window.location.hash === "#custom-study-form") {
+        window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+      }
+    });
+
+    document.addEventListener("click", (event) => {
+      if (closestTo(event.target, "[data-custom-study-open]") !== null) {
+        event.preventDefault();
+        open();
+        return;
+      }
+      if (closestTo(event.target, "[data-custom-study-close]") !== null || event.target === dialog) {
+        close();
+      }
+    });
+    if (window.location.hash === "#custom-study-form") open();
+
+    // 多选标签写入受边界约束的单个字段；用户手改数量后只更新可选数量提示。
+    const refresh = async () => {
+      packed.value = tags.filter((tag) => tag.checked).map((tag) => tag.value).join(",");
+      const params = new URLSearchParams();
+      if (deck.value !== "") params.set("deck", deck.value);
+      if (packed.value !== "") params.set("tags", packed.value);
+      try {
+        const response = await fetch(`/study/custom/count?${params.toString()}`, {
+          credentials: "same-origin",
+          headers: { Accept: "text/plain" },
+        });
+        if (!response.ok) return;
+        const available = (await response.text()).trim();
+        if (count.value === automatic || count.value === "") count.value = available;
+        automatic = available;
+        hint.textContent = `${hint.getAttribute("data-prefix") ?? ""}: ${available}`;
+      } catch {
+        // The form remains usable with its last known count while offline.
+      }
+    };
+    deck.addEventListener("change", refresh);
+    for (const tag of tags) tag.addEventListener("change", refresh);
+  });
 })();

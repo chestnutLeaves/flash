@@ -21,6 +21,7 @@ mod admin;
 mod assets;
 mod auth_pages;
 mod cards;
+mod custom_study;
 mod dashboard;
 mod deck;
 mod decks;
@@ -124,6 +125,17 @@ pub fn router() -> Router<AppState> {
         .route("/cards/{id}/archive", post(cards::archive_card))
         .route("/cards/{id}/unarchive", post(cards::unarchive_card))
         .route("/study", get(study::study_page))
+        .route(
+            "/study/custom",
+            get(custom_study::setup).post(custom_study::start),
+        )
+        .route("/study/custom/count", get(custom_study::count))
+        .route("/study/custom/deck/{id}", get(custom_study::deck_entry))
+        .route(
+            "/study/custom/{id}",
+            get(custom_study::session).post(custom_study::advance),
+        )
+        .route("/study/custom/{id}/reveal", post(custom_study::reveal))
         .route("/study/reveal", post(study::study_reveal))
         .route("/study/card", get(study::study_card_again))
         .route("/study/review", post(study::study_review))

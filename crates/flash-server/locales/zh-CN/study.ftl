@@ -228,3 +228,37 @@ study-next-in-days =
 # A quick edit would delete the card on screen (a cloze blank removed).
 # "Advanced edit" is the full editor.
 study-edit-removes-card = 此编辑会删除你正在学习的卡片。请保留空白，或使用高级编辑。
+
+custom-study-title = 刷题
+custom-study-new = 新建刷题
+custom-study-active = 进行中
+custom-study-completed = 已结束
+custom-study-active-empty = 暂无进行中的刷题，可以新建一轮。
+custom-study-completed-empty = 还没有已结束的刷题记录。
+custom-study-continue = 继续
+custom-study-view = 查看
+custom-study-default-count = 默认使用当前范围的全部可选卡片
+custom-study-mode = 学习方式
+custom-study-review = 主动复习
+custom-study-review-hint = 根据评分更新复习记录和下次复习时间。
+custom-study-practice = 自由练习
+custom-study-practice-hint = 不改变 FSRS 状态、正式复习记录或到期时间。
+custom-study-deck = 牌组
+custom-study-all-decks = 全部牌组
+custom-study-tags = 标签
+custom-study-tags-hint = 多个标签用逗号分隔，留空表示全部
+custom-study-count = 卡片数量
+custom-study-all = 全部
+custom-study-order = 出题顺序
+custom-study-random = 随机
+custom-study-ordered = 按创建顺序
+custom-study-scope-hint = 包含未到期卡片及子牌组，排除已归档和暂停学习的卡片。
+custom-study-cancel = 取消
+custom-study-start = 开始刷题
+custom-study-next = 下一题
+custom-study-exit = 退出
+custom-study-back = 返回刷题
+custom-study-empty = 所选范围没有可学习的卡片
+custom-study-finished = 本轮学习已完成
+custom-study-resume = 继续上一次自选学习
+custom-study-count-hint = 输入 0 表示全部卡片

@@ -17,6 +17,19 @@ pub struct SessionStats {
     pub easy: u32,
 }
 
+/// 自选刷题会话列表所需的持久化摘要。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CustomStudySummary {
+    pub session: SessionId,
+    pub mode: String,
+    pub card_order: String,
+    pub scope: String,
+    pub position: u32,
+    pub total: u32,
+    pub started_at: i64,
+    pub ended_at: Option<i64>,
+}
+
 /// One replayed Anki review, ready for the log.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImportedReview {
@@ -115,6 +128,197 @@ pub fn write_card_state(
 }
 
 impl Store {
+    /// 区分自选会话和普通到期会话，避免自由练习误走正式评分入口。
+    pub fn is_custom_study(&self, user: UserId, session: SessionId) -> Result<bool> {
+        Ok(self.conn().query_row("SELECT EXISTS(SELECT 1 FROM custom_study_sessions c JOIN study_sessions s ON s.id = c.session_id WHERE s.id = ?1 AND s.user_id = ?2)", params![session.0, user.raw()], |r| r.get(0))?)
+    }
+
+    /// 返回最近一个未完成的自选会话，供用户继续。
+    pub fn latest_custom_study(&self, user: UserId) -> Result<Option<SessionId>> {
+        Ok(self.conn().query_row("SELECT s.id FROM study_sessions s JOIN custom_study_sessions c ON c.session_id = s.id WHERE s.user_id = ?1 AND s.ended_at IS NULL ORDER BY s.id DESC LIMIT 1", [user.raw()], |r| Ok(SessionId(r.get(0)?))).optional()?)
+    }
+
+    /// 返回用户的全部刷题会话，列表页按结束状态分组。
+    pub fn custom_study_summaries(&self, user: UserId) -> Result<Vec<CustomStudySummary>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT s.id, c.mode, c.card_order, s.scope, c.position,
+                    json_array_length(c.card_ids), s.started_at, s.ended_at
+             FROM study_sessions s
+             JOIN custom_study_sessions c ON c.session_id = s.id
+             WHERE s.user_id = ?1
+             ORDER BY COALESCE(s.ended_at, 9223372036854775807) DESC, s.id DESC",
+        )?;
+        let rows = stmt.query_map([user.raw()], |r| {
+            Ok(CustomStudySummary {
+                session: SessionId(r.get(0)?),
+                mode: r.get(1)?,
+                card_order: r.get(2)?,
+                scope: r.get(3)?,
+                position: r.get::<_, i64>(4)?.max(0) as u32,
+                total: r.get::<_, i64>(5)?.max(0) as u32,
+                started_at: r.get(6)?,
+                ended_at: r.get(7)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+    /// 按学习范围选出可用卡片，自选学习不受到期时间和每日额度限制。
+    pub fn custom_study_cards(
+        &self,
+        user: UserId,
+        scope: &StudyScope,
+        random: bool,
+        limit: u32,
+    ) -> Result<Vec<CardId>> {
+        let conn = self.conn();
+        let (deck_filter, tag_filter, tag_count) = scope_filters(&conn, user, scope)?;
+        let order = if random { "RANDOM()" } else { "c.id" };
+        let sql = format!("SELECT c.id FROM cards c JOIN decks d ON d.id = c.deck_id WHERE c.user_id = ?1 AND {NAMED_BY_SCOPE} {STUDYABLE} ORDER BY {order} LIMIT ?5");
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(
+            params![
+                user.raw(),
+                deck_filter,
+                tag_filter,
+                tag_count,
+                i64::from(limit)
+            ],
+            |r| Ok(CardId(r.get(0)?)),
+        )?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// 保存固定的出题顺序，刷新后仍能继续当前自选学习。
+    pub fn start_custom_study(
+        &self,
+        user: UserId,
+        scope: &StudyScope,
+        mode: &str,
+        card_order: &str,
+        cards: &[CardId],
+        now_ms: i64,
+    ) -> Result<SessionId> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        tx.execute("INSERT INTO study_sessions (user_id, started_at, scope, surface) VALUES (?1, ?2, ?3, 'web')", params![user.raw(), now_ms, scope.as_string()])?;
+        let id = tx.last_insert_rowid();
+        let ids: Vec<i64> = cards.iter().map(|card| card.0).collect();
+        let json = serde_json::json!(ids).to_string();
+        tx.execute(
+            "INSERT INTO custom_study_sessions (session_id, mode, card_ids, card_order)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![id, mode, json, card_order],
+        )?;
+        if cards.is_empty() {
+            tx.execute(
+                "UPDATE study_sessions SET ended_at = ?1 WHERE id = ?2",
+                params![now_ms, id],
+            )?;
+        }
+        tx.commit()?;
+        Ok(SessionId(id))
+    }
+
+    /// 返回自选会话的模式、固定顺序和当前位置。
+    pub fn custom_study_session(
+        &self,
+        user: UserId,
+        session: SessionId,
+        now_ms: i64,
+    ) -> Result<(String, Vec<CardId>, usize)> {
+        let conn = self.conn();
+        let row: Option<(String, String, i64)> = conn.query_row("SELECT c.mode, c.card_ids, c.position FROM custom_study_sessions c JOIN study_sessions s ON s.id = c.session_id WHERE s.id = ?1 AND s.user_id = ?2", params![session.0, user.raw()], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).optional()?;
+        let (mode, json, pos) = row.ok_or(StoreError::NotFound("study_session"))?;
+        let ids: Vec<i64> = serde_json::from_str(&json)
+            .map_err(|_| StoreError::Invalid("invalid custom study session".into()))?;
+        let mut position = pos.max(0) as usize;
+        // 会话期间卡片可能被删除或归档，跳过不再可学习的卡片。
+        while let Some(id) = ids.get(position) {
+            let active: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM cards c JOIN decks d ON d.id = c.deck_id WHERE c.id = ?1 AND c.user_id = ?2 AND c.deleted_at IS NULL AND c.suspended = 0 AND d.archived_at IS NULL)", params![id, user.raw()], |r| r.get(0))?;
+            if active {
+                break;
+            }
+            position += 1;
+        }
+        if position != pos.max(0) as usize {
+            let changed = conn.execute("UPDATE custom_study_sessions SET position = ?1 WHERE session_id = ?2 AND position = ?3", params![position as i64, session.0, pos])?;
+            if changed == 0 {
+                drop(conn);
+                return self.custom_study_session(user, session, now_ms);
+            }
+            if position >= ids.len() {
+                conn.execute("UPDATE study_sessions SET ended_at = COALESCE(ended_at, ?1) WHERE id = ?2 AND user_id = ?3", params![now_ms, session.0, user.raw()])?;
+            }
+        }
+        Ok((mode, ids.into_iter().map(CardId).collect(), position))
+    }
+
+    /// 原子写入正式复习结果并推进进度；自由练习仅推进进度。
+    #[allow(clippy::too_many_arguments)]
+    pub fn advance_custom_study(
+        &self,
+        user: UserId,
+        session: SessionId,
+        card: CardId,
+        outcome: Option<&ReviewOutcome>,
+        expected_last: Option<i64>,
+        now_ms: i64,
+    ) -> Result<()> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let row: Option<(String, String, i64)> = tx.query_row("SELECT c.mode, c.card_ids, c.position FROM custom_study_sessions c JOIN study_sessions s ON s.id = c.session_id WHERE s.id = ?1 AND s.user_id = ?2 AND s.ended_at IS NULL", params![session.0, user.raw()], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).optional()?;
+        let (mode, json, pos) = row.ok_or(StoreError::NotFound("study_session"))?;
+        let ids: Vec<i64> = serde_json::from_str(&json)
+            .map_err(|_| StoreError::Invalid("invalid custom study session".into()))?;
+        if ids.get(pos.max(0) as usize) != Some(&card.0) {
+            return Err(StoreError::Invalid(
+                "card is not the current custom study card".into(),
+            ));
+        }
+        let active: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM cards c JOIN decks d ON d.id = c.deck_id WHERE c.id = ?1 AND c.user_id = ?2 AND c.deleted_at IS NULL AND c.suspended = 0 AND d.archived_at IS NULL)", params![card.0, user.raw()], |r| r.get(0))?;
+        if !active {
+            return Err(StoreError::NotFound("card"));
+        }
+        match (mode.as_str(), outcome) {
+            ("review", Some(outcome)) => {
+                let current: Option<i64> = tx.query_row("SELECT s.last_review FROM card_state s JOIN cards c ON c.id = s.card_id WHERE c.id = ?1 AND c.user_id = ?2 AND c.deleted_at IS NULL AND c.suspended = 0", params![card.0, user.raw()], |r| r.get(0))?;
+                if current != expected_last {
+                    return Err(StoreError::Invalid(
+                        "card was reviewed elsewhere; refresh the page".into(),
+                    ));
+                }
+                if !insert_review(
+                    &tx,
+                    user,
+                    card,
+                    outcome,
+                    now_ms,
+                    "web",
+                    None,
+                    Some(session),
+                    None,
+                )? {
+                    return Err(StoreError::NotFound("card"));
+                }
+                write_card_state(&tx, user, card, &outcome.state)?;
+            }
+            ("practice", None) => {}
+            _ => return Err(StoreError::Invalid("invalid custom study mode".into())),
+        }
+        tx.execute(
+            "UPDATE custom_study_sessions SET position = position + 1 WHERE session_id = ?1",
+            [session.0],
+        )?;
+        if pos as usize + 1 >= ids.len() {
+            tx.execute(
+                "UPDATE study_sessions SET ended_at = ?1 WHERE id = ?2 AND user_id = ?3",
+                params![now_ms, session.0, user.raw()],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
     pub fn get_card_state(&self, user: UserId, card: CardId) -> Result<CardState> {
         self.conn()
             .query_row(
@@ -503,6 +707,7 @@ impl Store {
                     "SELECT id FROM study_sessions
                      WHERE user_id = ?1 AND scope = ?2 AND surface = ?3
                        AND ended_at IS NULL AND reviews = 0 AND started_at > ?4
+                        AND NOT EXISTS (SELECT 1 FROM custom_study_sessions c WHERE c.session_id = study_sessions.id)
                      ORDER BY started_at DESC LIMIT 1",
                     params![user.raw(), scope, surface, now_ms - window],
                     |r| r.get(0),

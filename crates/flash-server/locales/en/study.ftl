@@ -240,3 +240,37 @@ study-next-in-days =
 # A quick edit would delete the card on screen (a cloze blank removed).
 # "Advanced edit" is the full editor.
 study-edit-removes-card = This edit would remove the card you're studying. Keep its blank, or use Advanced edit.
+
+custom-study-title = Practice
+custom-study-new = New practice
+custom-study-active = In progress
+custom-study-completed = Completed
+custom-study-active-empty = No practice is in progress. Start a new one below.
+custom-study-completed-empty = No completed practice sessions yet.
+custom-study-continue = Continue
+custom-study-view = View
+custom-study-default-count = Defaults to every available card in the current scope
+custom-study-mode = Study mode
+custom-study-review = Active review
+custom-study-review-hint = Ratings update your review history and next review time.
+custom-study-practice = Free practice
+custom-study-practice-hint = FSRS state, review history and due dates stay unchanged.
+custom-study-deck = Deck
+custom-study-all-decks = All decks
+custom-study-tags = Tags
+custom-study-tags-hint = Separate tags with commas; leave empty for all
+custom-study-count = Number of cards
+custom-study-all = All
+custom-study-order = Card order
+custom-study-random = Random
+custom-study-ordered = Creation order
+custom-study-scope-hint = Includes cards not yet due and subdecks; archived and suspended cards are excluded.
+custom-study-cancel = Cancel
+custom-study-start = Start practice
+custom-study-next = Next card
+custom-study-exit = Exit
+custom-study-back = Back to practice
+custom-study-empty = No cards available in this scope
+custom-study-finished = Session complete
+custom-study-resume = Resume your last custom session
+custom-study-count-hint = Enter 0 for all cards
